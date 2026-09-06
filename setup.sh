@@ -90,7 +90,7 @@ pick_ua() {
   fallback=""
   while IFS= read -r ua; do
     [ -n "$ua" ] || continue
-    curl -sL -o "$tmp" -w '%{http_code}' -m 10 -A "$ua" "$url" >/dev/null 2>&1 || true
+    curl -sL --compressed -o "$tmp" -w '%{http_code}' -m 10 -A "$ua" "$url" >/dev/null 2>&1 || true
     [ -f "$tmp" ] || : > "$tmp"
     kind=$(classify_body "$tmp")
     case "$kind" in
