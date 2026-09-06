@@ -102,6 +102,7 @@ install_files() {
   atomic_install "$SELFDIR/speedtest2.sh" "$DIR/speedtest2.sh" || return 1
   chmod +x "$DIR/speedtest2.sh"
   atomic_install "$SELFDIR/prep.awk" "$DIR/prep.awk" || return 1
+  atomic_install "$SELFDIR/render_stats.awk" "$DIR/render_stats.awk" || return 1
 }
 
 write_env() {
