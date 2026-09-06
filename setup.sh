@@ -142,6 +142,8 @@ build_provider_specs() {
     fi
     if [ "$kind" = "short" ]; then
       echo "setup.sh: WARN для $url подошёл только укороченный clash YAML — сверьте набор нод после установки" >&2
+    else
+      echo "setup.sh: для $url подобран рабочий User-Agent \"$ua\"" >&2
     fi
     printf '%s\t%s\n' "$url" "$ua"
   done < "$1"
