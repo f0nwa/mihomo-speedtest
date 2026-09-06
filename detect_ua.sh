@@ -87,7 +87,7 @@ try_one() {
   ua=$1
   target=$2
   out=$3
-  code=$(curl -s -o "$out" -w '%{http_code}' -m 10 -A "$ua" "$target" 2>/dev/null) || code=000
+  code=$(curl -sL -o "$out" -w '%{http_code}' -m 10 -A "$ua" "$target" 2>/dev/null) || code=000
   # При полном сбое соединения curl иногда не создаёт файл -o вовсе —
   # подстрахуемся, чтобы classify_body()/wc не спотыкались об его отсутствие.
   [ -f "$out" ] || : > "$out"
