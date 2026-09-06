@@ -59,7 +59,7 @@ collect_subscriptions() {
       if [ "$n" -eq 0 ]; then
         printf 'Ссылка на подписку #%d (обязательно): ' "$((n + 1))" >&2
       else
-        printf 'Ссылка на подписку #%d (Enter — закончить): ' "$((n + 1))" >&2
+        printf 'Есть ещё одна ссылка на подписку сверх уже указанных (%d шт.)? Если нет - просто нажмите Enter: ' "$n" >&2
       fi
       read -r url || url=""
       if [ -z "$url" ]; then
@@ -191,11 +191,15 @@ main() {
   rm -f "$specs_file"
   [ -z "$static_file" ] || rm -f "$static_file"
 
-  if ! "$BIN" -t -d "$DIR" -f "$rendered" >/dev/null 2>&1; then
-    echo "setup.sh: новый конфиг не прошёл mihomo -t, $CONFIG не тронут" >&2
-    rm -f "$rendered"
+  mtest_log=$(mktemp "${TMPDIR:-/tmp}/setup_mtest.XXXXXX")
+  if ! "$BIN" -t -d "$DIR" -f "$rendered" >"$mtest_log" 2>&1; then
+    echo "setup.sh: новый конфиг не прошёл mihomo -t, $CONFIG не тронут. Вывод mihomo -t:" >&2
+    cat "$mtest_log" >&2
+    rm -f "$mtest_log"
+    echo "setup.sh: непринятый конфиг оставлен в $rendered для разбора (удалите вручную, когда закончите)" >&2
     return 1
   fi
+  rm -f "$mtest_log"
 
   mkdir -p "$DIR/proxy-providers"
   atomic_install "$rendered" "$CONFIG" || {
