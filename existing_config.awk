@@ -1,21 +1,32 @@
 # existing_config.awk — извлекает из старого config.yaml список URL
-# подписок и (опционально) готовый блок proxies: для переноса в новую
-# установку setup.sh. Не выполняется на роутере как самостоятельный шаг —
-# только как часть setup.sh.
+# подписок (вместе с уже настроенным header: User-Agent:, если он был) и
+# (опционально) готовый блок proxies: для переноса в новую установку
+# setup.sh. Не выполняется на роутере как самостоятельный шаг — только
+# как часть setup.sh.
+#
+# Строки в urls_out - "URL" или "URL<TAB>UA" (второе - если у провайдера
+# уже был свой header: {User-Agent: [...]}; setup.sh переносит такой UA
+# как есть, не гоняя detect_ua заново).
 #
 # Использование:
 #   awk -v urls_out=PATH [-v proxies_out=PATH] -f existing_config.awk config.yaml
 BEGIN {
   in_pp = 0; prov_indent = -1; attr_indent = -1
-  cur_has_url = 0; cur_is_file = 0; cur_url = ""
+  cur_has_url = 0; cur_is_file = 0; cur_url = ""; cur_ua = ""
+  in_header = 0; header_indent = -1; ua_key_indent = -1
   in_proxies = 0; proxies_text = ""; proxies_placeholder = 0
 }
 
 function flush_provider() {
   if (cur_has_url && !cur_is_file && cur_url != "") {
-    print cur_url >> urls_out
+    if (cur_ua != "") {
+      print cur_url "\t" cur_ua >> urls_out
+    } else {
+      print cur_url >> urls_out
+    }
   }
   cur_has_url = 0; cur_is_file = 0; cur_url = ""; attr_indent = -1
+  cur_ua = ""; in_header = 0; header_indent = -1; ua_key_indent = -1
 }
 
 /^proxy-providers:[ \t]*$/ { in_pp = 1; next }
@@ -27,10 +38,10 @@ in_pp && $0 ~ /^[ \t]+[A-Za-z0-9_-]+:[ \t]*$/ {
 }
 in_pp {
   # attr_indent фиксирует отступ СОБСТВЕННЫХ ключей провайдера (url, path,
-  # type, health-check) по первой встреченной такой строке - все, что
-  # глубже (например url: внутри вложенного health-check:), это уже не
-  # атрибут провайдера, а поле другого блока, и не должно перезаписывать
-  # cur_url.
+  # type, header, health-check) по первой встреченной такой строке - все,
+  # что глубже (например url: внутри вложенного health-check:), это уже
+  # не атрибут провайдера, а поле другого блока, и не должно
+  # перезаписывать cur_url.
   match($0, /[^ \t]/); ind = RSTART - 1
   if (ind > prov_indent && attr_indent < 0) attr_indent = ind
   if (ind == attr_indent && match($0, /url:[ \t]*"?[^"\r\n]*/)) {
@@ -40,6 +51,21 @@ in_pp {
     cur_url = v; cur_has_url = 1
   }
   if (ind == attr_indent && $0 ~ /^[ \t]*type:[ \t]*file[ \t]*$/) cur_is_file = 1
+
+  # header: {User-Agent: [...]} - переносим уже настроенный UA как есть,
+  # не запуская для этой подписки detect_ua заново (см. AGENTS.md/TODO).
+  if (ind == attr_indent && $0 ~ /^[ \t]*header:[ \t]*$/) {
+    in_header = 1; header_indent = ind
+  } else if (in_header && ind <= header_indent) {
+    in_header = 0
+  } else if (in_header && ua_key_indent < 0 && $0 ~ /^[ \t]*User-Agent:[ \t]*$/) {
+    ua_key_indent = ind
+  } else if (in_header && ua_key_indent >= 0 && ind > ua_key_indent && cur_ua == "" && match($0, /^[ \t]*-[ \t]*"?[^"\r\n]*/)) {
+    v = $0
+    sub(/^[ \t]*-[ \t]*/, "", v)
+    gsub(/^"|"[ \t]*$/, "", v)
+    cur_ua = v
+  }
 }
 
 /^proxies:[ \t]*$/ { in_proxies = 1; next }

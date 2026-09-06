@@ -11,6 +11,10 @@ API_MAIN=${API_MAIN:-127.0.0.1:9090}
 SELFDIR=${SELFDIR:-.}
 CONFIG=${CONFIG:-$DIR/config.yaml}
 TEMPLATE=${TEMPLATE:-$SELFDIR/config.example.yaml}
+# Разделитель URL<TAB>UA в строках между collect_subscriptions() и
+# build_provider_specs() - существующий provider с уже настроенным
+# header: {User-Agent: [...]} переносится как есть, без detect_ua.
+TAB=$(printf '\t')
 
 . "$SELFDIR/version_check.sh"
 DETECT_UA_LIB_ONLY=1
@@ -31,7 +35,10 @@ collect_subscriptions() {
       i=0
       while IFS= read -r u; do
         i=$((i + 1))
-        echo "  $i) $u" >&2
+        case "$u" in
+          *"$TAB"*) echo "  $i) ${u%%"$TAB"*} (свой UA: ${u#*"$TAB"})" >&2 ;;
+          *) echo "  $i) $u" >&2 ;;
+        esac
       done < "$imported"
       printf 'Введите номера через пробел, чтобы убрать лишние (Enter — оставить все): ' >&2
       read -r drop || drop=""
@@ -95,6 +102,7 @@ pick_ua() {
     kind=$(classify_body "$tmp")
     case "$kind" in
       "clash YAML, полный"*) found=$ua; break ;;
+      "v2ray-подписка"*) found=$ua; break ;;
       "clash YAML, укороченный"*) [ -z "$fallback" ] && fallback=$ua ;;
     esac
   done <<UALIST
@@ -109,10 +117,22 @@ UALIST
 }
 
 build_provider_specs() {
-  # $1 = файл со списком URL (по одному на строку). Печатает "url<TAB>ua"
-  # для тех, где UA подобран; для остальных — WARN в stderr.
-  while IFS= read -r url; do
-    [ -n "$url" ] || continue
+  # $1 = файл со списком строк "url" или "url<TAB>ua" (второе - уже
+  # известный рабочий UA, например перенесённый из старого конфига).
+  # Печатает "url<TAB>ua" для тех, где UA подобран или уже был известен;
+  # для остальных — WARN в stderr.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      *"$TAB"*)
+        url=${line%%"$TAB"*}
+        ua=${line#*"$TAB"}
+        echo "setup.sh: для $url используется сохранённый UA \"$ua\" (перенесён из старого конфига, заново не проверялся)" >&2
+        printf '%s\t%s\n' "$url" "$ua"
+        continue
+        ;;
+    esac
+    url=$line
     result=$(pick_ua "$url")
     ua=$(printf '%s\n' "$result" | sed -n 1p)
     kind=$(printf '%s\n' "$result" | sed -n 2p)

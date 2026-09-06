@@ -71,8 +71,12 @@ classify_body() {
   fi
 
   # Похоже на base64: во всём файле нет символов вне base64-алфавита.
+  # mihomo/Clash.Meta понимает такой контент как v2ray-подписку (список
+  # ссылок vless/vmess/trojan/ss и т.п. одной base64-строкой) напрямую в
+  # proxy-providers type: http, без конвертации в clash YAML - см.
+  # https://wiki.metacubex.one/en/config/proxy-providers/content/
   if ! grep -q '[^A-Za-z0-9+/=_[:space:]-]' "$file" 2>/dev/null; then
-    echo "base64-список нод (нужен provider type: file/raw, не clash YAML)"
+    echo "v2ray-подписка, base64-список ссылок (подходит для mihomo proxy-providers напрямую)"
     return
   fi
 
