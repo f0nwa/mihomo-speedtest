@@ -29,7 +29,7 @@ function flush_provider() {
   cur_ua = ""; in_header = 0; header_indent = -1; ua_key_indent = -1
 }
 
-/^proxy-providers:[ \t]*$/ { in_pp = 1; next }
+/^proxy-providers:[ \t]*$/ { in_proxies = 0; in_pp = 1; next }
 in_pp && /^[^ \t#]/ { flush_provider(); in_pp = 0 }
 in_pp && $0 ~ /^[ \t]+[A-Za-z0-9_-]+:[ \t]*$/ {
   match($0, /[^ \t]/); ind = RSTART - 1
@@ -68,7 +68,7 @@ in_pp {
   }
 }
 
-/^proxies:[ \t]*$/ { in_proxies = 1; next }
+/^proxies:[ \t]*$/ { flush_provider(); in_pp = 0; in_proxies = 1; next }
 in_proxies && /^[^ \t#]/ { in_proxies = 0 }
 in_proxies {
   proxies_text = proxies_text $0 "\n"
