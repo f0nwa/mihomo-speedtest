@@ -1,0 +1,420 @@
+log-level: silent
+allow-lan: true
+redir-port: 5000
+tproxy-port: 5001
+find-process-mode: off
+unified-delay: true
+external-controller: 0.0.0.0:9090
+external-ui: ./zash
+external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
+profile: { store-selected: true }
+sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] } }, skip-dst-address: ['rule-set:telegram@ipcidr'] }
+routing-mark: 255
+
+anchors:
+  a1: &domain { type: http, format: mrs, behavior: domain, interval: 86400 }
+  a2: &ipcidr { type: http, format: mrs, behavior: ipcidr, interval: 86400 }
+  a3: &classical { type: http, format: text, behavior: classical, interval: 86400 }
+  a4: &inline { type: inline, behavior: classical }
+  http-provider: &http-provider { type: http, interval: 3600, exclude-filter: &geofilter '(?i)Russia|RU|whitelist|Москва|Россия|SPB|MSK|🇷🇺|🇲🇽|🇨🇴|🇦🇷|🇵🇪|🇧🇷|🇮🇳|🇲🇾|🇰🇷|🇯🇵|🇮🇱|🇿🇦|🇦🇺|🇰🇿|🇳🇬|🇨🇱|🇹🇷|🇺🇦|RU-|RU_|Moscow|СПб|Обход' }
+  gstatic-health-check: &gstatic-health-check { enable: true, url: "http://www.gstatic.com/generate_204", interval: 300 }
+  sub-names: &sub-names [provider-a, provider-b, provider-c]
+  select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'] }
+
+proxies:
+  # --- STATIC_PROXIES:BEGIN --- (необязательно: свои Hysteria2/AmneziaWG-ноды)
+  - name: '🇩🇪 Hysteria2'
+    type: hysteria2
+    server: proxy-node-1.example.com
+    port: 443
+    password: "CHANGE_ME"
+    obfs: salamander
+    obfs-password: "CHANGE_ME"
+    sni: proxy-node-1.example.com
+    alpn: [h2, http/1.1, h3]
+    client-fingerprint: chrome
+    udp: true
+
+  - name: '🇳🇱 Hysteria2'
+    type: hysteria2
+    server: proxy-node-2.example.com
+    port: 443
+    password: "CHANGE_ME"
+    obfs: salamander
+    obfs-password: "CHANGE_ME"
+    sni: proxy-node-2.example.com
+    alpn: [h2, http/1.1, h3]
+    client-fingerprint: chrome
+    udp: true
+  # --- STATIC_PROXIES:END ---
+
+# --- Провайдеры прокси ---
+proxy-providers:
+  # --- SUBSCRIPTIONS:BEGIN --- (генерируется setup.sh, не редактировать руками)
+  provider-a:
+    <<: *http-provider
+    url: "https://subscription-1.example.com/CHANGE_ME"
+    path: ./proxy-providers/provider-a.yaml
+    header:
+      User-Agent:
+        - "v2rayNG/1.8.0"
+    health-check: *gstatic-health-check
+  provider-b:
+    <<: *http-provider
+    url: "https://subscription-2.example.com/CHANGE_ME"
+    path: ./proxy-providers/provider-b.yaml
+    health-check:
+      enable: true
+      url: "http://www.msftncsi.com/ncsi.txt"
+      interval: 300
+  provider-c:
+    <<: *http-provider
+    url: "https://subscription-3.example.com/CHANGE_ME"
+    path: ./proxy-providers/provider-c.yaml
+    header:
+      User-Agent:
+        - "v2rayNG/1.8.0"
+    health-check: *gstatic-health-check
+  # --- SUBSCRIPTIONS:END ---
+
+  fast:
+    type: file
+    path: ./fast.yaml
+    exclude-type: trojan|ss
+    health-check:
+      enable: true
+      url: "https://www.gstatic.com/generate_204"
+      interval: 60
+
+
+# --- Группы прокси ---
+proxy-groups:
+  # --- Базовые режимы выбора ---
+  # Ноды, прошедшие замер реальной скорости в speedtest2.sh.
+  # Внутри отобранного пула выбирается нода с минимальной задержкой.
+  - name: '⚡ Самые быстрые'
+    type: url-test
+    use: [fast]
+    url: "https://www.gstatic.com/generate_204"
+    interval: 60
+    tolerance: 50
+    lazy: false
+
+  # Автоматический выбор самого быстрого узла.
+  # Берет все прокси из subscription и subscription_provider-b,
+  # проверяет http://www.gstatic.com/generate_204 каждые 600 секунд
+  # и выбирает узел с минимальной задержкой.
+  # tolerance: 50 снижает частые переключения: если текущий узел
+  # медленнее лучшего менее чем на 50 мс, он может остаться выбранным.
+  # lazy: false запускает проверки заранее, а не только при первом запросе.
+  - name: '🚀 Авто по пингу'
+    type: url-test
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 60
+    tolerance: 50
+    lazy: false
+
+  # Стабильный резервный выбор.
+  # Берет все прокси из subscription и subscription_provider-b,
+  # использует первый рабочий узел из списка и держится за него.
+  # Если текущий узел перестает проходить проверку доступности,
+  # переключается на следующий рабочий.
+  # interval: 300 означает проверку доступности каждые 300 секунд.
+  - name: '🛡️Fallback-Stable'
+    type: fallback
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 60
+
+  # Ручной выбор узла.
+  # В UI можно самостоятельно выбрать конкретный прокси из обоих провайдеров.
+  # DIRECT добавляет вариант пустить трафик напрямую, без прокси.
+  # Эта группа ничего не выбирает автоматически: используется выбранный вручную пункт.
+  - name: '⚙️Manual'
+    type: select
+    use: *sub-names
+    proxies: [DIRECT, '🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+
+  # Единый режим для всех сервисных групп.
+  - name: 'Заблок. сервисы'
+    type: select
+    proxies: ['⚡ Самые быстрые', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
+
+  # --- Видео и медиа ---
+  - name: YouTube
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+
+  - name: Twitch
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png
+
+  - name: TMDB
+    <<: *select-default
+
+  - name: Spotify
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png
+
+  - name: KinoPub
+    <<: *select-default
+    icon: https://d5l07j6ktywkt.cloudfront.net/sdpreview/0/3af9d99e/1440378196-55da6d54e3d54/preview.png
+
+  - name: '18+'
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/530357/peach.svg
+
+  - name: Torrents
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/443524/brand-utorrent.svg
+
+  # --- Соцсети и мессенджеры ---
+  - name: Discord
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+
+  - name: Telegram
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+
+  - name: Reddit
+    <<: *select-default
+    icon: https://www.redditstatic.com/shreddit/assets/favicon/192x192.png
+
+  - name: Twitter
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png
+
+  - name: Meta
+    <<: *select-default
+    icon: https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
+    proxies: ['Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS, DIRECT]
+
+  # --- Платформы и сервисы ---
+  - name: AI
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+
+  - name: Apple
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/494227/apple-rounded-border.svg
+
+  - name: Google
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png
+
+  - name: Microsoft
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/452062/microsoft.svg
+
+  - name: Steam
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png
+
+  - name: Zoom
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/452140/zoom.svg
+
+  # --- Игры и устройства ---
+  - name: PlayStation
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/452087/playstation.svg
+
+  - name: BambuLab
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/487246/cube.svg
+
+  - name: Dell
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/303445/dell-2-logo.svg
+
+  - name: intel
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/349412/intel.svg
+
+  # --- Инфраструктура и диагностика ---
+  - name: CDN
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/396567/globe-with-meridians.svg
+    proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]
+
+  - name: Speedtest
+    <<: *select-default
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png
+    include-all: true
+
+  - name: 'IP Detect'
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/502437/educate.svg
+
+  # --- Прочее ---
+  - name: other
+    <<: *select-default
+    icon: https://www.svgrepo.com/show/12922/growth.svg
+
+# --- НАСТРОЙКИ GEO-ДАННЫХ ---
+geox-url:
+  geosite: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+  geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
+
+# --- Провайдеры правил ---
+rule-providers:
+  adlist@domain: { <<: *domain, url: "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs" }
+  akamai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs" }
+  akamai@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs" }
+  amazon@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs" }
+  amazon@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs" }
+  apple@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs" }
+  category-ai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
+  cdn77@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs" }
+  category-ru@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs" }
+  cloudflare@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs" }
+  cloudflare@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs" }
+  dell@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/dell.mrs" }
+  digitalocean@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs" }
+  digitalocean@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs" }
+  discord@classical: { <<: *classical, url: "https://github.com/zxc-rv/assets/raw/main/rules/discord.list" }
+  fastly@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs" }
+  fastly@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs" }
+  gcore@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs" }
+  google@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs" }
+  google@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs" }
+  hetzner@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs" }
+  hetzner@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs" }
+  intel@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs" }
+  meta@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs" }
+  meta@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs" }
+  microsoft@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs" }
+  oracle@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs" }
+  oracle@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs" }
+  ovh@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs" }
+  playstation@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs" }
+  reddit@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs" }
+  refilter@domain: { <<: *domain, url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs" }
+  scaleway@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs" }
+  spotify@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs" }
+  steam@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs" }
+  speedtest@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs" }
+  telegram@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs" }
+  telegram@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs" }
+  tmdb@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tmdb.mrs" }
+  twitch@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs" }
+  twitter@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs" }
+  vodafone@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs" }
+  vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
+  youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
+  quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
+  user@classical:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,2ip.io
+# --- Правила ---
+rules:
+  - RULE-SET,adlist@domain,REJECT # Блокировка рекламы
+  - RULE-SET,quic@inline,REJECT # Блокировка QUIC
+
+  # --- KinoPub ---
+  - GEOSITE,kinopub,KinoPub
+  - DOMAIN-SUFFIX,firebase-settings.crashlytics.com,KinoPub
+  - DOMAIN-SUFFIX,firebaseinstallations.googleapis.com,KinoPub
+  - DOMAIN-SUFFIX,firebaseremoteconfigrealtime.googleapis.com,KinoPub
+  - DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,KinoPub
+  - DOMAIN-SUFFIX,pkr.ovh,KinoPub
+
+  # --- 18+ ---
+  - GEOSITE,category-porn,18+
+
+  # --- Apple ---
+  - IP-ASN,714,Apple
+  - RULE-SET,apple@domain,Apple
+
+  # --- Zoom ---
+  - GEOSITE,zoom,Zoom
+  - DOMAIN-SUFFIX,zoom.us,Zoom
+  - DOMAIN-SUFFIX,zoom.com,Zoom
+  - DOMAIN-SUFFIX,zoomgov.com,Zoom
+  - DOMAIN-SUFFIX,zoomcdn.com,Zoom
+
+  # --- IP Detect ---
+  - GEOSITE,category-ip-geo-detect,IP Detect
+  - DOMAIN-SUFFIX,browserleaks.com,IP Detect
+  - DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
+  - DOMAIN-SUFFIX,ip138.com,IP Detect
+  - DOMAIN-SUFFIX,whatismyip.host,IP Detect
+  - DOMAIN-SUFFIX,ipwho.is,IP Detect
+  - DOMAIN-SUFFIX,ipx.ac,IP Detect
+  - DOMAIN-SUFFIX,trackip.net,IP Detect
+  - DOMAIN-SUFFIX,wimi5.com,IP Detect
+  - DOMAIN-SUFFIX,test-ipv6.com,IP Detect
+
+  # --- Microsoft ---
+  - RULE-SET,microsoft@domain,Microsoft
+
+  # --- Необходимые сервисы с выбором ---
+  - DOMAIN-SUFFIX,onlyfans.com,other
+  - DOMAIN-SUFFIX,fansly.com,other
+  - DOMAIN-SUFFIX,patreon.com,other
+  - DOMAIN-SUFFIX,provider-c.pro,other
+  - DOMAIN-SUFFIX,provider-c.info,other
+
+  # --- Torrents ---
+  - GEOSITE,rutracker,Torrents
+  - DOMAIN-SUFFIX,rutor.info,Torrents
+  - DOMAIN-SUFFIX,lostfilm.tv,Torrents
+  - DOMAIN-SUFFIX,nnmclub.to,Torrents
+  - DOMAIN-SUFFIX,kinozal.tv,Torrents
+  - DOMAIN-SUFFIX,fast-torrent.ru,Torrents
+  - DOMAIN-SUFFIX,tapochek.net,Torrents
+  - DOMAIN-SUFFIX,rgfootball.net,Torrents
+  - DOMAIN-SUFFIX,thepiratebay.org,Torrents
+  - DOMAIN-SUFFIX,rarbg.to,Torrents
+
+  # --- PlayStation ---
+  - RULE-SET,playstation@domain,PlayStation
+
+  # --- Dell ---
+  - RULE-SET,dell@domain,Dell
+
+  # --- BambuLab ---
+  - DOMAIN-SUFFIX,bambulab.com,BambuLab
+
+  # --- intel ---
+  - RULE-SET,intel@domain,intel
+
+  - OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # Разблокировка высокого качества на Twitch.tv
+  - DOMAIN-SUFFIX,opencode.ai,AI # OpenCode Zen передаёт upstream-провайдерам геозаголовки клиента
+  - RULE-SET,category-ai@domain,AI
+  - RULE-SET,steam@domain,Steam
+  - RULE-SET,spotify@domain,Spotify
+  - RULE-SET,reddit@domain,Reddit
+  - RULE-SET,youtube@domain,YouTube
+  - RULE-SET,twitch@domain,Twitch
+  - RULE-SET,tmdb@domain,TMDB
+  - RULE-SET,twitter@domain,Twitter
+  - RULE-SET,discord@classical,Discord
+  - RULE-SET,speedtest@domain,Speedtest
+  - OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
+  - OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram
+  - OR,((RULE-SET,refilter@domain),(RULE-SET,user@classical)),⚙️Manual
+  - OR,((RULE-SET,google@domain),(RULE-SET,google@ipcidr)),Google
+  - RULE-SET,category-ru@domain,DIRECT
+  - OR,((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr)),CDN
+  - OR,((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr)),CDN
+  - OR,((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr)),CDN
+  - OR,((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr)),CDN
+  - OR,((RULE-SET,fastly@domain),(RULE-SET,fastly@ipcidr)),CDN
+  - OR,((RULE-SET,oracle@domain),(RULE-SET,oracle@ipcidr)),CDN
+  - OR,((RULE-SET,hetzner@domain),(RULE-SET,hetzner@ipcidr)),CDN
+  - RULE-SET,scaleway@ipcidr,CDN
+  - RULE-SET,ovh@ipcidr,CDN
+  - RULE-SET,vultr@ipcidr,CDN
+  - RULE-SET,vodafone@ipcidr,CDN
+  - RULE-SET,gcore@ipcidr,CDN
+  - RULE-SET,cdn77@ipcidr,CDN
+  - MATCH,DIRECT
