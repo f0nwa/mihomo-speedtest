@@ -49,11 +49,11 @@ check_mihomo_process() {
 }
 
 xkeen_version() {
-  xkeen -v 2>/dev/null | awk '/Версия XKeen/ { print $3; exit }'
+  xkeen -v 2>/dev/null | awk '{ gsub(/\033\[[0-9;]*m/, "") } /Версия XKeen/ { print $3; exit }'
 }
 
 mihomo_version() {
-  xkeen -v 2>/dev/null | awk '/Mihomo версии/ { print $NF; exit }'
+  xkeen -v 2>/dev/null | awk '{ gsub(/\033\[[0-9;]*m/, "") } /Mihomo версии/ { print $NF; exit }'
 }
 
 keeneticos_version() {
