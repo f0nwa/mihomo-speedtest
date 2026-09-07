@@ -47,8 +47,21 @@ HISTORY_RUNS=${HISTORY_RUNS:-$DIR/speedtest_runs.tsv}       # сводка по 
 HISTORY_NODES=${HISTORY_NODES:-$DIR/speedtest_history.tsv}  # история нод-победителей по прогонам
 HISTORY_KEEP_RUNS=${HISTORY_KEEP_RUNS:-200}   # хранить не больше стольких последних прогонов (0 = не ограничивать)
 HISTORY_KEEP_DAYS=${HISTORY_KEEP_DAYS:-30}    # и не старше стольких дней (0 = не ограничивать)
-STATS_HTML=${STATS_HTML:-$DIR/zash/stats.html}   # страница статистики в каталоге external-ui (:9090/ui/stats.html)
+STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # страница статистики (раздаётся отдельным веб-сервисом, см. STATS_HTTP_* ниже)
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
+STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
+STATS_HTTP_BIND=${STATS_HTTP_BIND:-0.0.0.0}        # адрес привязки (0.0.0.0 = вся локальная сеть, как и 9090)
+STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-сервиса статистики; должен быть свободен (не 5000/5001/9090)
+STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # каталог, который раздаётся; создаётся сам, с zashboard не связан
+STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
+STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
+STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # команда сервера; -f -p BIND:PORT -h DIR добавляются автоматически
+STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод показывать на графике по нодам, 1..8 (см. render_stats.awk)
+STATS_AUTH_USER=${STATS_AUTH_USER:-}                # логин для формы настройки /cgi-bin/config; пусто = без пароля
+STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для формы настройки; сама статистика (stats.html) паролем не защищается
+STATS_HTTP_CONF=${STATS_HTTP_CONF:-$DIR/stats_httpd.conf}          # конфиг busybox httpd (Basic Auth только на /cgi-bin), пишется сам
+STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
+STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
@@ -217,17 +230,140 @@ trim_nodes_since() {
   awk -F'\t' -v c="$cutoff" '$1 + 0 >= c + 0' "$src" > "$dst"
 }
 
+stop_stats_httpd() {
+  # Останавливает веб-сервис статистики, если он поднят (используется, когда
+  # STATS_HTTP_ENABLE=0, и внутри ensure_stats_httpd() перед перезапуском на
+  # новый адрес/порт). Отсутствие pid-файла или мёртвый pid - не ошибка.
+  pid=$(cat "$STATS_HTTP_PIDFILE" 2>/dev/null) || true
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null || true
+    say "веб-сервис статистики остановлен (pid $pid)"
+  fi
+  rm -f "$STATS_HTTP_PIDFILE" "$STATS_HTTP_PIDFILE.addr"
+}
+
+write_stats_httpd_conf() {
+  # Пишет конфиг busybox httpd для веб-сервиса статистики: если заданы
+  # STATS_AUTH_USER/STATS_AUTH_PASS, Basic Auth защищает только каталог
+  # /cgi-bin (форму настройки) - саму статистику (stats.html) можно
+  # смотреть без пароля. Пустой файл конфига = вообще без ограничений.
+  # свой tmp+mv рядом с конфигом (а не в $WORK), т.к. ensure_stats_httpd()
+  # может вызываться и без $WORK - например, из CGI-скрипта формы настройки.
+  conf_dir=${STATS_HTTP_CONF%/*}
+  if [ ! -d "$conf_dir" ]; then
+    say "WARN: каталог $conf_dir не найден, конфиг Basic Auth не обновлён"
+    return 0
+  fi
+  conf_tmp=$STATS_HTTP_CONF.$$.tmp
+  if [ -n "$STATS_AUTH_USER" ]; then
+    printf '/cgi-bin:%s:%s\n' "$STATS_AUTH_USER" "$STATS_AUTH_PASS" > "$conf_tmp"
+  else
+    : > "$conf_tmp"
+  fi
+  if ! publish_file "$conf_tmp" "$STATS_HTTP_CONF"; then
+    say "WARN: не удалось записать $STATS_HTTP_CONF, конфиг Basic Auth не обновлён"
+  fi
+  rm -f "$conf_tmp"
+}
+
+write_stats_cgi() {
+  # Копирует CGI-скрипт формы настройки статистики ($STATS_CGI_SOURCE,
+  # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
+  # ($STATS_CGI_SCRIPT), откуда его запускает busybox httpd. Сам скрипт
+  # подключает speedtest2.sh через экспортированные DIR/ENV (см.
+  # ensure_stats_httpd() ниже и комментарий в начале stats_cgi.sh) - здесь
+  # только физическое размещение файла внутри cgi-bin, логика не меняется.
+  # Каталог $STATS_CGI_SCRIPT уже создан вызывающим ensure_stats_httpd()
+  # (mkdir -p "$STATS_HTTP_DIR/cgi-bin"), отдельная проверка не нужна.
+  if [ ! -f "$STATS_CGI_SOURCE" ]; then
+    say "WARN: $STATS_CGI_SOURCE не найден, форма настройки статистики недоступна (переустановите install.sh)"
+    return 0
+  fi
+  if ! publish_file "$STATS_CGI_SOURCE" "$STATS_CGI_SCRIPT"; then
+    say "WARN: не удалось записать $STATS_CGI_SCRIPT, форма настройки не обновлена"
+    return 0
+  fi
+  chmod +x "$STATS_CGI_SCRIPT" 2>/dev/null || true
+}
+
+ensure_stats_httpd() {
+  # Поднимает (или перезапускает при смене адреса/порта) отдельный веб-сервис
+  # для stats.html - раньше страница раздавалась только вместе с zashboard
+  # через external-ui mihomo (порт 9090), теперь у неё свой процесс и порт,
+  # не зависящий от того, установлен ли zashboard. Самовосстанавливается: при
+  # каждом прогоне (раз в HISTORY-интервал через cron) проверяет, жив ли
+  # процесс, и поднимает заново, если умер, - отдельного demon/init.d-скрипта
+  # для автозапуска после перезагрузки роутера пока нет, см. TODO.md.
+  # DIR и ENV экспортируются, чтобы дочерний httpd и порождаемые им CGI-запросы
+  # (stats_cgi.sh) видели те же настройки, что и текущий прогон - см.
+  # комментарий в начале stats_cgi.sh.
+  export DIR ENV
+
+  if [ "$STATS_HTTP_ENABLE" != 1 ]; then
+    stop_stats_httpd
+    return 0
+  fi
+
+  if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
+    say "WARN: не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
+    return 0
+  fi
+
+  write_stats_httpd_conf
+  write_stats_cgi
+
+  # отпечаток адреса и защиты - смена любого из них требует перезапуска
+  # httpd (логин/пароль читает только при старте из -c конфига); md5sum -
+  # не для безопасности, а просто чтобы не хранить пароль вторым открытым
+  # текстом в .addr-файле (он и так есть в speedtest2.env).
+  authsig=$(printf '%s:%s' "$STATS_AUTH_USER" "$STATS_AUTH_PASS" | md5sum 2>/dev/null) || authsig="$STATS_AUTH_USER:$STATS_AUTH_PASS"
+  want="$STATS_HTTP_BIND:$STATS_HTTP_PORT:$authsig"
+  pid=$(cat "$STATS_HTTP_PIDFILE" 2>/dev/null) || true
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    have=$(cat "$STATS_HTTP_PIDFILE.addr" 2>/dev/null) || true
+    if [ "$have" = "$want" ]; then
+      return 0
+    fi
+    say "веб-сервис статистики: адрес или защита изменились, перезапускаю"
+    stop_stats_httpd
+  fi
+
+  httpd_bin=${STATS_HTTPD_CMD%% *}
+  if ! command -v "$httpd_bin" >/dev/null 2>&1; then
+    say "WARN: $httpd_bin не найден, веб-сервис статистики не поднят (переопределите STATS_HTTPD_CMD в speedtest2.env)"
+    return 0
+  fi
+
+  $STATS_HTTPD_CMD -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" -c "$STATS_HTTP_CONF" \
+    > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
+  newpid=$!
+  sleep 1
+  if ! kill -0 "$newpid" 2>/dev/null; then
+    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT (порт занят? см. $STATS_HTTP_LOG)"
+    return 0
+  fi
+  if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
+    echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
+    say "OK: веб-сервис статистики на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR"
+  else
+    say "WARN: не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
+  fi
+}
+
 render_stats() {
+  ensure_stats_httpd
   statsdir=${STATS_HTML%/*}
   if [ ! -d "$statsdir" ]; then
-    say "WARN: каталог $statsdir не найден (zashboard/external-ui ещё не установлен?), stats.html не записан"
+    say "WARN: каталог $statsdir не найден, stats.html не записан"
     return 0
   fi
   if [ ! -f "$RENDER_STATS" ]; then
     say "WARN: $RENDER_STATS не найден, stats.html не обновлён"
     return 0
   fi
-  if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
+  if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
+       -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
        -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.html" 2> "$WORK/stats.err"; then
     say "WARN: render_stats.awk завершился с ошибкой, stats.html не обновлён"
     [ -s "$WORK/stats.err" ] && sed -n '1,3p' "$WORK/stats.err" >> "$RUN_LOG"

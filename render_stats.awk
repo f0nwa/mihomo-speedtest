@@ -7,8 +7,10 @@
 # запускается.
 #
 # Использование:
-#   awk -v last=PATH -v nodes=PATH -v generated="строка даты" \
+#   awk -v last=PATH -v nodes=PATH -v generated="строка даты" -v cap=N \
 #       -f render_stats.awk RUNS_TSV
+# cap: сколько нод показывать на графике по нодам, 1..8 (см. NODE_CAP ниже);
+#   необязателен, вне диапазона/не число - используется 8.
 #
 # RUNS_TSV (позиционный аргумент, может быть пустым файлом):
 #   epoch<TAB>iso<TAB>channel_bytes<TAB>threshold_bytes<TAB>total<TAB>alive<TAB>tested<TAB>good<TAB>winners
@@ -121,10 +123,10 @@ function render_node_history(path, run_n,
 
   left = 40; top = 10; w = 710; h = 170
   print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
-  printf "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e2e2e2\"/>\n", left, top, left, top + h
-  printf "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e2e2e2\"/>\n", left, top + h, left + w, top + h
-  printf "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
-  printf "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">0</text>\n", left - 6, top + h + 4
+  printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top, left, top + h
+  printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top + h, left + w, top + h
+  printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
+  printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">0</text>\n", left - 6, top + h + 4
 
   for (k = 1; k <= topk; k++) {
     nm = uniq[k]
@@ -167,7 +169,9 @@ function render_node_history(path, run_n,
 BEGIN {
   FS = "\t"
   n = 0
-  NODE_CAP = 8
+  # cap приходит снаружи (-v cap=...) из STATS_NODE_CAP в speedtest2.env;
+  # некорректное/пустое/вне диапазона значение -> дефолт 8 (столько цветов в PAL).
+  NODE_CAP = (cap + 0 >= 1 && cap + 0 <= 8) ? cap + 0 : 8
   PAL[1] = "#2a78d6"; PAL[2] = "#eb6834"; PAL[3] = "#1baf7a"; PAL[4] = "#eda100"
   PAL[5] = "#e87ba4"; PAL[6] = "#008300"; PAL[7] = "#4a3aa7"; PAL[8] = "#e34948"
 }
@@ -193,43 +197,67 @@ END {
   }
 
   print "<!doctype html><meta charset=\"utf-8\">"
-  print "<title>speedtest2 — статистика</title>"
+  print "<title>speedtest2 - статистика</title>"
   print "<style>"
-  print "body{font:14px/1.4 system-ui,sans-serif;margin:16px;color:#1b1f24;background:#fff}"
-  print "h1{font-size:18px;margin:0 0 4px}"
-  print "h2{font-size:15px;margin:20px 0 6px}"
-  print ".meta{color:#666;margin-bottom:16px}"
-  print "svg{max-width:100%;height:auto;border:1px solid #e2e2e2;border-radius:6px;margin-bottom:8px;display:block}"
-  print "table{border-collapse:collapse;font-variant-numeric:tabular-nums}"
-  print "td,th{padding:2px 10px;text-align:right;border-bottom:1px solid #eee}"
+  print ":root{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2}"
+  print "@media (prefers-color-scheme: dark){:root{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}}"
+  print ":root[data-theme=\"light\"]{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2}"
+  print ":root[data-theme=\"dark\"]{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}"
+  print "*{box-sizing:border-box}"
+  print "body{font:14px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}"
+  print ".wrap{max-width:820px;margin:0 auto;padding:20px 16px 40px}"
+  print "header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}"
+  print "h1{font-size:19px;margin:0}"
+  print ".meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}"
+  print ".theme-btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;flex:0 0 auto}"
+  print ".card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px}"
+  print "h2{font-size:14.5px;margin:0 0 8px}"
+  print "svg{max-width:100%;height:auto;display:block;margin-bottom:8px}"
+  print ".axis-line{stroke:var(--border)}"
+  print ".axis-text{fill:var(--muted)}"
+  print "table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}"
+  print "td,th{padding:4px 10px;text-align:right;border-bottom:1px solid var(--border)}"
+  print "th{color:var(--muted);font-weight:600}"
   print "th:last-child,td:last-child{text-align:left}"
-  print ".legend{font-size:12px;color:#555;margin:0 0 4px}"
+  print ".legend{font-size:12px;color:var(--muted);margin:0 0 8px}"
   print ".sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}"
   print "</style>"
-  print "<h1>Статистика speedtest2</h1>"
-  print "<p class=\"meta\">Сгенерировано: " esc(generated) " · прогонов в истории: " n "</p>"
+  print "<div class=\"wrap\">"
+  print "<header>"
+  print "<div><h1>Статистика speedtest2</h1><p class=\"meta\">Сгенерировано: " esc(generated) " · прогонов в истории: " n "</p></div>"
+  print "<div style=\"display:flex;gap:8px;flex:0 0 auto\">"
+  print "<a class=\"theme-btn\" href=\"cgi-bin/config\">Настройки</a>"
+  print "<button class=\"theme-btn\" id=\"themeBtn\" type=\"button\">Тема</button>"
+  print "</div>"
+  print "</header>"
 
   if (n == 0) {
-    print "<p>Пока нет ни одного прогона в истории.</p>"
+    print "<div class=\"card\"><p>Пока нет ни одного прогона в истории.</p></div>"
   } else {
+    print "<div class=\"card\">"
     print "<h2>Ноды</h2>"
     print "<p class=\"legend\"><span class=\"sw\" style=\"background:#16a34a\"></span>нод выше порога" \
           "&nbsp; <span class=\"sw\" style=\"background:#f59e0b\"></span>победителей (в fast.yaml)</p>"
     print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
-    printf "<line x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\" stroke=\"#e2e2e2\"/>\n"
-    printf "<line x1=\"40\" y1=\"180\" x2=\"750\" y2=\"180\" stroke=\"#e2e2e2\"/>\n"
-    printf "<text x=\"34\" y=\"14\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">%d</text>\n", max2
-    printf "<text x=\"34\" y=\"184\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">0</text>\n"
+    printf "<line class=\"axis-line\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\"/>\n"
+    printf "<line class=\"axis-line\" x1=\"40\" y1=\"180\" x2=\"750\" y2=\"180\"/>\n"
+    printf "<text class=\"axis-text\" x=\"34\" y=\"14\" font-size=\"10\" text-anchor=\"end\">%d</text>\n", max2
+    printf "<text class=\"axis-text\" x=\"34\" y=\"184\" font-size=\"10\" text-anchor=\"end\">0</text>\n"
     printf "<polyline fill=\"none\" stroke=\"#16a34a\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
     printf "<polyline fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
     print "</svg>"
-
-    render_node_history(nodes, n)
-
     printf "<p>Последний прогон (%s): канал %s МБ/с, порог %s МБ/с, живых %d из %d, отобрано %d.</p>\n", \
       esc(iso[n]), fmt_mb(channel[n]), fmt_mb(threshold[n]), alive[n], total[n], winners[n]
+    print "</div>"
+
+    if (nodes != "") {
+      print "<div class=\"card\">"
+      render_node_history(nodes, n)
+      print "</div>"
+    }
   }
 
+  print "<div class=\"card\">"
   print "<h2>Последний замер</h2>"
   have_last = 0
   if (last != "") {
@@ -246,4 +274,24 @@ END {
   }
   if (have_last) print "</table>"
   else print "<p>Нет данных последнего замера.</p>"
+  print "</div>"
+  print "</div>"
+  print "<script>"
+  print "(function(){"
+  print "var KEY='speedtest2-theme';"
+  print "var root=document.documentElement;"
+  print "var btn=document.getElementById('themeBtn');"
+  print "function label(){var cur=root.getAttribute('data-theme');btn.textContent=cur==='dark'?'Светлая тема':cur==='light'?'Тёмная тема':'Тема: авто';}"
+  print "function apply(t){if(t){root.setAttribute('data-theme',t);}else{root.removeAttribute('data-theme');}label();}"
+  print "var saved=null;"
+  print "try{saved=localStorage.getItem(KEY);}catch(e){}"
+  print "apply(saved);"
+  print "btn.addEventListener('click',function(){"
+  print "var cur=root.getAttribute('data-theme');"
+  print "var next=cur==='dark'?'light':cur==='light'?null:'dark';"
+  print "apply(next);"
+  print "try{if(next){localStorage.setItem(KEY,next);}else{localStorage.removeItem(KEY);}}catch(e){}"
+  print "});"
+  print "})();"
+  print "</script>"
 }

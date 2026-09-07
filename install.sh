@@ -103,6 +103,8 @@ install_files() {
   chmod +x "$DIR/speedtest2.sh"
   atomic_install "$SELFDIR/prep.awk" "$DIR/prep.awk" || return 1
   atomic_install "$SELFDIR/render_stats.awk" "$DIR/render_stats.awk" || return 1
+  atomic_install "$SELFDIR/stats_cgi.sh" "$DIR/stats_cgi.sh" || return 1
+  chmod +x "$DIR/stats_cgi.sh"
 }
 
 write_env() {
@@ -190,7 +192,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
