@@ -36,7 +36,23 @@ collect_subscriptions() {
       while IFS= read -r u; do
         i=$((i + 1))
         case "$u" in
-          *"$TAB"*) echo "  $i) ${u%%"$TAB"*} (свой UA: ${u#*"$TAB"})" >&2 ;;
+          *"$TAB"*)
+            uu=${u%%"$TAB"*}
+            rest=${u#*"$TAB"}
+            case "$rest" in
+              *"$TAB"*) ua=${rest%%"$TAB"*}; nm=${rest#*"$TAB"} ;;
+              *) ua=""; nm="" ;;
+            esac
+            if [ -n "$ua" ] && [ -n "$nm" ]; then
+              echo "  $i) $uu (свой UA: $ua, имя: $nm)" >&2
+            elif [ -n "$ua" ]; then
+              echo "  $i) $uu (свой UA: $ua)" >&2
+            elif [ -n "$nm" ]; then
+              echo "  $i) $uu (имя: $nm)" >&2
+            else
+              echo "  $i) $uu" >&2
+            fi
+            ;;
           *) echo "  $i) $u" >&2 ;;
         esac
       done < "$imported"
@@ -117,22 +133,34 @@ UALIST
 }
 
 build_provider_specs() {
-  # $1 = файл со списком строк "url" или "url<TAB>ua" (второе - уже
-  # известный рабочий UA, например перенесённый из старого конфига).
-  # Печатает "url<TAB>ua" для тех, где UA подобран или уже был известен;
-  # для остальных — WARN в stderr.
+  # $1 = файл со списком строк "url" (новая подписка без известных UA и
+  # имени) или "url<TAB>ua<TAB>name" (из collect_subscriptions -
+  # ua и/или name уже могут быть известны из старого конфига, любое из
+  # них может быть пустым). Печатает "url<TAB>ua<TAB>name" - ua подобран
+  # автодетектом или уже был известен, name передан насквозь без
+  # изменений (её присвоит assign_provider_names() следующим шагом; сама
+  # build_provider_specs имена не проверяет и не трогает). Для подписок
+  # без рабочего UA - WARN в stderr, строка отбрасывается целиком.
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case "$line" in
       *"$TAB"*)
         url=${line%%"$TAB"*}
-        ua=${line#*"$TAB"}
-        echo "setup.sh: для $url используется сохранённый UA \"$ua\" (перенесён из старого конфига, заново не проверялся)" >&2
-        printf '%s\t%s\n' "$url" "$ua"
-        continue
+        rest=${line#*"$TAB"}
+        case "$rest" in
+          *"$TAB"*) ua=${rest%%"$TAB"*}; name=${rest#*"$TAB"} ;;
+          *) ua=$rest; name="" ;;
+        esac
+        ;;
+      *)
+        url=$line; ua=""; name=""
         ;;
     esac
-    url=$line
+    if [ -n "$ua" ]; then
+      echo "setup.sh: для $url используется сохранённый UA \"$ua\" (перенесён из старого конфига, заново не проверялся)" >&2
+      printf '%s\t%s\t%s\n' "$url" "$ua" "$name"
+      continue
+    fi
     result=$(pick_ua "$url")
     ua=$(printf '%s\n' "$result" | sed -n 1p)
     kind=$(printf '%s\n' "$result" | sed -n 2p)
@@ -145,8 +173,90 @@ build_provider_specs() {
     else
       echo "setup.sh: для $url подобран рабочий User-Agent \"$ua\"" >&2
     fi
-    printf '%s\t%s\n' "$url" "$ua"
+    printf '%s\t%s\t%s\n' "$url" "$ua" "$name"
   done < "$1"
+}
+
+domain_label() {
+  # $1 = URL. Печатает эвристическое "имя" для провайдера - предпоследнюю
+  # точечную метку хоста (vpnshop.example.com -> example, example.com ->
+  # example), в нижнем регистре. При хосте из одной метки (localhost и
+  # т.п.) - весь хост как есть. Простая эвристика: составные TLD вида
+  # co.uk/com.ru не распознаются (осознанное решение, см. дизайн-документ
+  # docs/plans/2026-09-07-provider-naming-design.md).
+  url=$1
+  host=${url#*://}
+  host=${host%%/*}
+  host=${host%%\?*}
+  host=${host%%#*}
+  host=${host##*@}
+  host=${host%%:*}
+  label=$host
+  oldifs=$IFS
+  IFS=.
+  set -- $host
+  IFS=$oldifs
+  n=$#
+  if [ "$n" -ge 2 ]; then
+    shift $((n - 2))
+    label=$1
+  fi
+  printf '%s\n' "$label" | tr 'A-Z' 'a-z'
+}
+
+assign_provider_names() {
+  # $1 = файл строк "url<TAB>ua<TAB>name" (name может быть пуст - новая
+  # подписка без переносимого имени). Печатает на stdout те же строки, но
+  # с гарантированно непустым и уникальным в рамках этого вызова третьим
+  # полем: имя подтверждается/правится пользователем, как и UA в
+  # build_provider_specs() выше. Кандидат - перенесённое имя (если оно
+  # было) либо domain_label(url) для новой подписки.
+  # Строки читаем через отдельный дескриптор (3), а не через stdin цикла
+  # - иначе вложенный интерактивный `read -r final` ниже читал бы не
+  # ответ пользователя, а следующую строку того же файла.
+  names_file=$(mktemp "${TMPDIR:-/tmp}/setup_names.XXXXXX")
+  : > "$names_file"
+  exec 3< "$1"
+  while IFS= read -r line <&3; do
+    [ -n "$line" ] || continue
+    url=${line%%"$TAB"*}
+    rest=${line#*"$TAB"}
+    case "$rest" in
+      *"$TAB"*) ua=${rest%%"$TAB"*}; name=${rest#*"$TAB"} ;;
+      *) ua=""; name="" ;;
+    esac
+    if [ -n "$name" ]; then
+      candidate=$name
+    else
+      candidate=$(domain_label "$url")
+    fi
+    final=""
+    while :; do
+      if grep -qxF "$candidate" "$names_file" 2>/dev/null; then
+        echo "setup.sh: имя \"$candidate\" для $url уже занято другой подпиской в этом запуске" >&2
+        printf 'Введите другое имя провайдера для %s: ' "$url" >&2
+        read -r final || final=""
+      else
+        printf 'Имя провайдера для %s [%s]: ' "$url" "$candidate" >&2
+        read -r final || final=""
+        [ -n "$final" ] || final=$candidate
+      fi
+      case "$final" in
+        '') echo "setup.sh: имя не может быть пустым" >&2; continue ;;
+        *[!A-Za-z0-9_-]*) echo "setup.sh: имя может содержать только латинские буквы, цифры, \"_\" и \"-\"" >&2; continue ;;
+      esac
+      if grep -qxF "$final" "$names_file" 2>/dev/null; then
+        echo "setup.sh: имя \"$final\" уже занято другой подпиской в этом запуске" >&2
+        candidate=$final
+        continue
+      fi
+      break
+    done
+    echo "$final" >> "$names_file"
+    printf '%s\t%s\t%s\n' "$url" "$ua" "$final"
+  done
+  exec 3<&-
+  rm -f "$names_file"
 }
 
 atomic_install() {
@@ -180,10 +290,18 @@ main() {
     return 1
   fi
 
+  named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
+  assign_provider_names "$specs_file" > "$named_file"
+  rm -f "$specs_file"
+  specs_file=$named_file
+
   static_file=""
+  dns_file=""
   if [ -f "$CONFIG" ]; then
     candidate=$(mktemp "${TMPDIR:-/tmp}/setup_static.XXXXXX")
-    awk -v urls_out=/dev/null -v proxies_out="$candidate" -f "$SELFDIR/existing_config.awk" "$CONFIG" 2>/dev/null || true
+    dns_candidate=$(mktemp "${TMPDIR:-/tmp}/setup_dns.XXXXXX")
+    awk -v urls_out=/dev/null -v proxies_out="$candidate" -v dns_out="$dns_candidate" \
+        -f "$SELFDIR/existing_config.awk" "$CONFIG" 2>/dev/null || true
     if [ -s "$candidate" ]; then
       count=$(grep -c '^  - name:' "$candidate" 2>/dev/null || echo 0)
       printf 'Найден блок proxies (%s нод) в текущем %s.\nПеренести как есть в новый config.yaml? [Y/n] ' "$count" "$CONFIG" >&2
@@ -194,6 +312,11 @@ main() {
       esac
     fi
     [ "$static_file" = "$candidate" ] || rm -f "$candidate"
+    if [ -s "$dns_candidate" ]; then
+      echo "setup.sh: найден блок dns в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
+      dns_file=$dns_candidate
+    fi
+    [ "$dns_file" = "$dns_candidate" ] || rm -f "$dns_candidate"
   fi
 
   if [ -f "$CONFIG" ]; then
@@ -202,16 +325,18 @@ main() {
       echo "setup.sh: не удалось сохранить бэкап $backup" >&2
       rm -f "$specs_file"
       [ -z "$static_file" ] || rm -f "$static_file"
+      [ -z "$dns_file" ] || rm -f "$dns_file"
       return 1
     }
     echo "setup.sh: старый конфиг сохранён в $backup" >&2
   fi
 
   rendered=$(mktemp "${TMPDIR:-/tmp}/setup_config.XXXXXX")
-  awk -v providers_file="$specs_file" -v static_file="$static_file" \
+  awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" \
       -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered"
   rm -f "$specs_file"
   [ -z "$static_file" ] || rm -f "$static_file"
+  [ -z "$dns_file" ] || rm -f "$dns_file"
 
   mtest_log=$(mktemp "${TMPDIR:-/tmp}/setup_mtest.XXXXXX")
   if ! "$BIN" -t -d "$DIR" -f "$rendered" >"$mtest_log" 2>&1; then

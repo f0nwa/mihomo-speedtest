@@ -1,9 +1,10 @@
 # render_stats.awk — собирает самодостаточную HTML-страницу со статистикой
-# замеров speedtest2.sh: график канала/порога, график числа нод по прогонам,
-# график скорости нод-победителей по прогонам (из speedtest_history.tsv)
-# плюс таблица последнего замера (из speedtest_last.txt). Без внешних
-# CSS/JS-зависимостей — чистый inline SVG. Вызывается из speedtest2.sh
-# (render_stats()), на роутере напрямую не запускается.
+# замеров speedtest2.sh: график числа нод по прогонам (с подписанными
+# значениями по оси Y) и график скорости нод-победителей по прогонам (из
+# speedtest_history.tsv) плюс таблица последнего замера (из
+# speedtest_last.txt). Без внешних CSS/JS-зависимостей — чистый inline SVG.
+# Вызывается из speedtest2.sh (render_stats()), на роутере напрямую не
+# запускается.
 #
 # Использование:
 #   awk -v last=PATH -v nodes=PATH -v generated="строка даты" \
@@ -185,11 +186,8 @@ BEGIN {
 }
 
 END {
-  max1 = 1
   max2 = 1
   for (i = 1; i <= n; i++) {
-    if (channel[i] > max1) max1 = channel[i]
-    if (threshold[i] > max1) max1 = threshold[i]
     if (good[i] > max2) max2 = good[i]
     if (winners[i] > max2) max2 = winners[i]
   }
@@ -214,18 +212,14 @@ END {
   if (n == 0) {
     print "<p>Пока нет ни одного прогона в истории.</p>"
   } else {
-    print "<h2>Канал и порог отбора</h2>"
-    print "<p class=\"legend\"><span class=\"sw\" style=\"background:#2563eb\"></span>канал" \
-          "&nbsp; <span class=\"sw\" style=\"background:#94a3b8\"></span>порог отбора</p>"
-    print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
-    printf "<polyline fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2\" points=\"%s\"/>\n", poly(channel, n, max1)
-    printf "<polyline fill=\"none\" stroke=\"#94a3b8\" stroke-width=\"2\" points=\"%s\"/>\n", poly(threshold, n, max1)
-    print "</svg>"
-
     print "<h2>Ноды</h2>"
     print "<p class=\"legend\"><span class=\"sw\" style=\"background:#16a34a\"></span>нод выше порога" \
           "&nbsp; <span class=\"sw\" style=\"background:#f59e0b\"></span>победителей (в fast.yaml)</p>"
     print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+    printf "<line x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\" stroke=\"#e2e2e2\"/>\n"
+    printf "<line x1=\"40\" y1=\"180\" x2=\"750\" y2=\"180\" stroke=\"#e2e2e2\"/>\n"
+    printf "<text x=\"34\" y=\"14\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">%d</text>\n", max2
+    printf "<text x=\"34\" y=\"184\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">0</text>\n"
     printf "<polyline fill=\"none\" stroke=\"#16a34a\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
     printf "<polyline fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
     print "</svg>"

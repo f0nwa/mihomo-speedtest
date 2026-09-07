@@ -10,6 +10,8 @@ external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/downloa
 profile: { store-selected: true }
 sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] } }, skip-dst-address: ['rule-set:telegram@ipcidr'] }
 routing-mark: 255
+# --- STATIC_DNS:BEGIN --- (при обновлении/переустановке сюда переносится блок dns: из старого config.yaml, если он был; по умолчанию пусто - используется поведение mihomo без своего dns:)
+# --- STATIC_DNS:END ---
 
 anchors:
   a1: &domain { type: http, format: mrs, behavior: domain, interval: 86400 }
