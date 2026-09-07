@@ -1,17 +1,27 @@
 # render_stats.awk — собирает самодостаточную HTML-страницу со статистикой
-# замеров speedtest2.sh: график канала/порога и график числа нод по прогонам
-# (из speedtest_runs.tsv) плюс таблица последнего замера (из
-# speedtest_last.txt). Без внешних CSS/JS-зависимостей — чистый inline SVG.
-# Вызывается из speedtest2.sh (render_stats()), на роутере напрямую не
-# запускается.
+# замеров speedtest2.sh: график канала/порога, график числа нод по прогонам,
+# график скорости нод-победителей по прогонам (из speedtest_history.tsv)
+# плюс таблица последнего замера (из speedtest_last.txt). Без внешних
+# CSS/JS-зависимостей — чистый inline SVG. Вызывается из speedtest2.sh
+# (render_stats()), на роутере напрямую не запускается.
 #
 # Использование:
-#   awk -v last=PATH -v generated="строка даты" -f render_stats.awk RUNS_TSV
+#   awk -v last=PATH -v nodes=PATH -v generated="строка даты" \
+#       -f render_stats.awk RUNS_TSV
 #
 # RUNS_TSV (позиционный аргумент, может быть пустым файлом):
 #   epoch<TAB>iso<TAB>channel_bytes<TAB>threshold_bytes<TAB>total<TAB>alive<TAB>tested<TAB>good<TAB>winners
 # last: путь к speedtest_last.txt (строки "speed_MB<TAB>unit<TAB>name"),
 #   необязателен — если не задан или не существует, таблица не выводится.
+# nodes: путь к speedtest_history.tsv (строки "epoch<TAB>speed_bytes<TAB>имя"
+#   по каждой ноде-победителю каждого прогона), необязателен — если не
+#   задан, не существует или пуст, график по нодам не выводится. Показываются
+#   не более NODE_CAP нод, отобранных по частоте побед (при равенстве — по
+#   свежести последнего появления), остальные в график не попадают — иначе
+#   при большом разнообразии побеждающих нод график станет нечитаемым.
+#   Цвета линий — фиксированный порядок из 8 категориальных оттенков (массив
+#   PAL ниже), подобранный так, чтобы соседние и произвольные пары из этого
+#   набора оставались различимы при дальтонизме.
 
 function esc(s) {
   gsub(/&/, "\\&amp;", s)
@@ -39,9 +49,126 @@ function poly(vals, cnt, maxv,   i, x, y, out, w, h, left, top) {
   return out
 }
 
+# render_node_history(path, run_n) — читает speedtest_history.tsv (path,
+# может быть пустым/несуществующим) и печатает секцию с графиком скорости
+# по нодам-победителям: не более NODE_CAP линий, отобранных по частоте
+# побед (при равенстве — по свежести), с легендой, точками-подсказками
+# (title при наведении) и разрывами линии там, где нода пропустила
+# прогон(ы). Использует глобальные epoch[1..run_n]/iso[1..run_n] (уже
+# заполнены основным телом скрипта) и глобальную палитру PAL[1..8].
+function render_node_history(path, run_n,
+    hline, hf, hn, i, j, k, nm,
+    freq, last_seen, uniq, un, best, nb, nj, tmp, rank, topk,
+    idx_of, hmax, left, top, w, h,
+    p_idx, p_speed, pn, ix, x, y, seg, segn, prev_idx, col) {
+  hn = 0
+  if (path != "") {
+    while ((getline hline < path) > 0) {
+      split(hline, hf, "\t")
+      if (hf[1] == "" || hf[3] == "") continue
+      hn++
+      h_epoch[hn] = hf[1] + 0
+      h_speed[hn] = hf[2] + 0
+      h_name[hn] = hf[3]
+    }
+    close(path)
+  }
+
+  if (hn == 0) {
+    if (path != "") {
+      print "<h2>Скорость нод-победителей по прогонам</h2>"
+      print "<p>Нет истории по нодам.</p>"
+    }
+    return
+  }
+
+  for (i = 1; i <= run_n; i++) idx_of[epoch[i]] = i
+
+  un = 0
+  for (i = 1; i <= hn; i++) {
+    nm = h_name[i]
+    if (!(nm in freq)) { un++; uniq[un] = nm }
+    freq[nm]++
+    if (h_epoch[i] > last_seen[nm]) last_seen[nm] = h_epoch[i]
+  }
+
+  # сортировка выбором (набор невелик — не нужен встроенный sort awk)
+  for (i = 1; i <= un; i++) {
+    best = i
+    for (j = i + 1; j <= un; j++) {
+      nb = uniq[best]; nj = uniq[j]
+      if (freq[nj] > freq[nb] || (freq[nj] == freq[nb] && last_seen[nj] > last_seen[nb])) best = j
+    }
+    if (best != i) { tmp = uniq[i]; uniq[i] = uniq[best]; uniq[best] = tmp }
+  }
+
+  topk = (un < NODE_CAP) ? un : NODE_CAP
+  for (k = 1; k <= topk; k++) rank[uniq[k]] = k
+
+  hmax = 1
+  for (i = 1; i <= hn; i++) {
+    nm = h_name[i]
+    if ((nm in rank) && h_speed[i] > hmax) hmax = h_speed[i]
+  }
+
+  print "<h2>Скорость нод-победителей по прогонам</h2>"
+  printf "<p class=\"legend\">показаны %d из %d нод (по частоте побед в fast.yaml):", topk, un
+  for (k = 1; k <= topk; k++) {
+    printf " <span class=\"sw\" style=\"background:%s\"></span>%s", PAL[k], esc(uniq[k])
+  }
+  print "</p>"
+
+  left = 40; top = 10; w = 710; h = 170
+  print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+  printf "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e2e2e2\"/>\n", left, top, left, top + h
+  printf "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e2e2e2\"/>\n", left, top + h, left + w, top + h
+  printf "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
+  printf "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#666\" text-anchor=\"end\">0</text>\n", left - 6, top + h + 4
+
+  for (k = 1; k <= topk; k++) {
+    nm = uniq[k]
+    col = PAL[k]
+    pn = 0
+    for (i = 1; i <= hn; i++) {
+      if (h_name[i] != nm) continue
+      if (!(h_epoch[i] in idx_of)) continue
+      pn++
+      p_idx[pn] = idx_of[h_epoch[i]]
+      p_speed[pn] = h_speed[i]
+    }
+
+    seg = ""; segn = 0
+    prev_idx = -1
+    for (i = 1; i <= pn; i++) {
+      ix = p_idx[i]
+      if (prev_idx >= 0 && ix != prev_idx + 1 && segn > 0) {
+        if (segn >= 2) printf "<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"2\" points=\"%s\"/>\n", col, seg
+        seg = ""; segn = 0
+      }
+      x = (run_n > 1) ? left + int((ix - 1) * w / (run_n - 1)) : left + int(w / 2)
+      y = top + h - int(p_speed[i] * h / hmax)
+      seg = seg x "," y " "; segn++
+      prev_idx = ix
+    }
+    if (segn >= 2) printf "<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"2\" points=\"%s\"/>\n", col, seg
+
+    for (i = 1; i <= pn; i++) {
+      ix = p_idx[i]
+      x = (run_n > 1) ? left + int((ix - 1) * w / (run_n - 1)) : left + int(w / 2)
+      y = top + h - int(p_speed[i] * h / hmax)
+      printf "<circle cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"%s\" stroke=\"#fff\" stroke-width=\"1\"><title>%s · %s МБ/с · %s</title></circle>\n", \
+        x, y, col, esc(iso[ix]), fmt_mb(p_speed[i]), esc(nm)
+    }
+  }
+  print "</svg>"
+}
+
 BEGIN {
   FS = "\t"
   n = 0
+  NODE_CAP = 8
+  PAL[1] = "#2a78d6"; PAL[2] = "#eb6834"; PAL[3] = "#1baf7a"; PAL[4] = "#eda100"
+  PAL[5] = "#e87ba4"; PAL[6] = "#008300"; PAL[7] = "#4a3aa7"; PAL[8] = "#e34948"
 }
 
 {
@@ -102,6 +229,8 @@ END {
     printf "<polyline fill=\"none\" stroke=\"#16a34a\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
     printf "<polyline fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
     print "</svg>"
+
+    render_node_history(nodes, n)
 
     printf "<p>Последний прогон (%s): канал %s МБ/с, порог %s МБ/с, живых %d из %d, отобрано %d.</p>\n", \
       esc(iso[n]), fmt_mb(channel[n]), fmt_mb(threshold[n]), alive[n], total[n], winners[n]

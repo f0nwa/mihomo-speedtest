@@ -227,7 +227,7 @@ render_stats() {
     say "WARN: $RENDER_STATS не найден, stats.html не обновлён"
     return 0
   fi
-  if ! awk -v last="$LAST" -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
+  if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
        -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.html" 2> "$WORK/stats.err"; then
     say "WARN: render_stats.awk завершился с ошибкой, stats.html не обновлён"
     [ -s "$WORK/stats.err" ] && sed -n '1,3p' "$WORK/stats.err" >> "$RUN_LOG"
@@ -467,7 +467,11 @@ select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" 
 WIN=$(wc -l < "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
   say "WARN: порог $((EFFECTIVE_MIN/1048576)) МБ/с не прошёл никто, оставляю прежний fast.yaml"
-  say "лучший результат: $(sort -rn "$WORK/res.txt" | head -1)"
+  best_line=$(sort -rn "$WORK/res.txt" | head -1)
+  best_sp=${best_line%% *}
+  best_idx=${best_line#* }
+  best_nm=$(awk -v k="$best_idx" -F'\t' '$1 == k {print $2}' "$WORK/map.txt")
+  say "лучший результат: $((best_sp/1048576)).$(( (best_sp%1048576)*10/1048576 )) МБ/с  $best_nm"
   exit 0
 fi
 
