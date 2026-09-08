@@ -40,6 +40,7 @@ MIN_RATIO=0.25         # динамический порог = доля от п�
 MIN_FLOOR=524288       # абсолютный минимум порога, байт/с (0.5 МиБ/с)
 TOPN=20               # сколько нод класть в fast.yaml
 ENOUGH=25             # набрали столько выше порога - дальше не меряем
+MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
 SPEED_URL="https://speed.cloudflare.com/__down?bytes=$SIZE"
 # гео-стоп-лист: ноды с такими кусками в имени не тестируются вовсе
@@ -200,25 +201,53 @@ remember_name() {
 }
 
 select_winners() {
+  # $6 (min_winners) - если нод, прошедших порог $4 (minimum), набралось
+  # меньше, добираем из остальных РАБОЧИХ (speed > 0, т.е. реально
+  # ответивших - нерабочие с speed=0 в добор никогда не идут) по убыванию
+  # скорости, пока не наберём min_winners или top. Смысл: пустая/куцая
+  # "самая быстрая" группа хуже, чем нода медленнее порога, но живая -
+  # см. CHANGELOG.
   results=$1
   mapfile=$2
   output=$3
   minimum=$4
   top=$5
+  min_winners=$6
 
-  sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" '
+  sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" -v min_winners="$min_winners" '
     BEGIN {
+      bn = 0
       while ((getline line < mapfile) > 0) {
         tab = index(line, "\t")
         if (tab > 0) names[substr(line, 1, tab - 1)] = substr(line, tab + 1)
       }
       close(mapfile)
     }
-    $1 >= minimum {
+    {
       name = names[$2]
-      if (name == "" || seen[name]++) next
-      print $1, $2
-      if (++count >= top) exit
+      if (name == "" || seen[name]) next
+      if ($1 >= minimum && count < top) {
+        print $1, $2
+        seen[name] = 1
+        count++
+      } else if ($1 > 0) {
+        # кандидат на добор ниже порога - вход уже отсортирован по
+        # убыванию скорости (sort -rn), поэтому backlog тоже в порядке
+        # убывания - на случай, если прошедших порог не хватит на
+        # min_winners
+        backlog_sp[bn] = $1
+        backlog_idx[bn] = $2
+        backlog_name[bn] = name
+        bn++
+      }
+    }
+    END {
+      for (i = 0; i < bn && count < min_winners && count < top; i++) {
+        if (seen[backlog_name[i]]) continue
+        print backlog_sp[i], backlog_idx[i]
+        seen[backlog_name[i]] = 1
+        count++
+      }
     }
   ' > "$output"
 }
@@ -667,8 +696,9 @@ while read -r D IDX; do
 done < "$WORK/alive.txt"
 
 # 6. отбор победителей и сборка fast.yaml
-select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN"
+select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS"
 WIN=$(wc -l < "$WORK/win.txt")
+BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
   say "WARN: порог $((EFFECTIVE_MIN/1048576)) МБ/с не прошёл никто, оставляю прежний fast.yaml"
   best_line=$(sort -rn "$WORK/res.txt" | head -1)
@@ -707,8 +737,10 @@ sort -rn -k1 "$WORK/full.txt" > "$WORK/last.new" 2>/dev/null
 if ! publish_file "$WORK/last.new" "$LAST"; then
   say "WARN: speedtest_last.txt не записан, прежний файл сохранён"
 fi
+below_note=""
+[ "$BELOW_MIN" -gt 0 ] && below_note=" (из них $BELOW_MIN ниже порога скорости - набрано до минимума $MIN_WINNERS)"
 if reload_provider; then
-  say "OK: $WIN нод -> fast.yaml (проверено $(wc -l < "$WORK/res.txt") из $ALIVE живых, провайдер перечитан)"
+  say "OK: $WIN нод -> fast.yaml (проверено $(wc -l < "$WORK/res.txt") из $ALIVE живых, провайдер перечитан)$below_note"
 elif [ "$FAST_CHANGED" = 1 ]; then
   say "WARN: fast.yaml обновлён, провайдер не перечитан"
 else
