@@ -61,6 +61,7 @@ STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
 STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # основной сервер; -f -p BIND:PORT -h DIR -c CONF добавляются автоматически
 STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # запасной сервер на python3 (см. README) - если STATS_HTTPD_CMD не смог стартовать
 STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для запасного сервера
+STATS_HTTPD_IP_CMD=${STATS_HTTPD_IP_CMD:-ip}            # чем определять LAN-адрес роутера для адреса в консоли, см. stats_httpd_advertise_host()
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод показывать на графике по нодам, 1..8 (см. render_stats.awk)
 STATS_AUTH_USER=${STATS_AUTH_USER:-}                # логин для формы настройки /cgi-bin/config; пусто = без пароля
 STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для формы настройки; сама статистика (stats.html) паролем не защищается
@@ -364,7 +365,9 @@ ensure_stats_httpd() {
   fi
   if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
     echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
-    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR"
+    url_host=$(stats_httpd_advertise_host "$STATS_HTTP_BIND")
+    [ -n "$url_host" ] || url_host=$STATS_HTTP_BIND
+    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats.html"
   else
     say "WARN: не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
   fi
@@ -392,6 +395,28 @@ start_stats_httpd_backend() {
     return 1
   fi
   echo "$newpid"
+}
+
+stats_httpd_advertise_host() {
+  # $1 = STATS_HTTP_BIND. Печатает адрес для строки "OK: веб-сервис
+  # статистики ..." в консоли/логе - "0.0.0.0" (слушать все интерфейсы,
+  # значение по умолчанию) в браузер не подставишь, оператору нужен
+  # реальный IP роутера. Если bind - конкретный адрес, он и есть ответ.
+  # Если это "все интерфейсы" - пробуем определить LAN-адрес через
+  # STATS_HTTPD_IP_CMD (по умолчанию "ip", есть из коробки в Entware и
+  # KeeneticOS): берём первый глобальный IPv4 из "ip -4 -o addr show
+  # scope global" (формат: "N: iface    inet A.B.C.D/N ..." - $4 после
+  # awk, обрезаем маску через cut). Если определить не удалось - молча
+  # печатаем пусто, вызывающий код (ensure_stats_httpd) сам подставит
+  # обратно "$STATS_HTTP_BIND" как раньше, чтобы строка не осталась
+  # пустой.
+  case "$1" in
+    0.0.0.0|"") ;;
+    *) printf '%s' "$1"; return 0 ;;
+  esac
+  command -v "$STATS_HTTPD_IP_CMD" >/dev/null 2>&1 || return 0
+  "$STATS_HTTPD_IP_CMD" -4 -o addr show scope global 2>/dev/null \
+    | awk '{print $4}' | cut -d/ -f1 | head -1
 }
 
 render_stats() {
