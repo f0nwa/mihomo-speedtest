@@ -58,7 +58,9 @@ STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-серви�
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # каталог, который раздаётся; создаётся сам, с zashboard не связан
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
-STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # команда сервера; -f -p BIND:PORT -h DIR добавляются автоматически
+STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # основной сервер; -f -p BIND:PORT -h DIR -c CONF добавляются автоматически
+STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # запасной сервер на python3 (см. README) - если STATS_HTTPD_CMD не смог стартовать
+STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для запасного сервера
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод показывать на графике по нодам, 1..8 (см. render_stats.awk)
 STATS_AUTH_USER=${STATS_AUTH_USER:-}                # логин для формы настройки /cgi-bin/config; пусто = без пароля
 STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для формы настройки; сама статистика (stats.html) паролем не защищается
@@ -350,26 +352,46 @@ ensure_stats_httpd() {
     stop_stats_httpd
   fi
 
-  httpd_bin=${STATS_HTTPD_CMD%% *}
-  if ! command -v "$httpd_bin" >/dev/null 2>&1; then
-    say "WARN: $httpd_bin не найден, веб-сервис статистики не поднят (переопределите STATS_HTTPD_CMD в speedtest2.env)"
-    return 0
+  backend=""
+  newpid=$(start_stats_httpd_backend "$STATS_HTTPD_CMD") && backend=$STATS_HTTPD_CMD
+  if [ -z "$backend" ] && [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
+    say "веб-сервис статистики: $STATS_HTTPD_CMD недоступен, пробую запасной сервер ($STATS_HTTPD_PY_CMD $STATS_HTTPD_PY)"
+    newpid=$(start_stats_httpd_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY") && backend="$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY"
   fi
-
-  $STATS_HTTPD_CMD -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" -c "$STATS_HTTP_CONF" \
-    > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
-  newpid=$!
-  sleep 1
-  if ! kill -0 "$newpid" 2>/dev/null; then
-    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT (порт занят? см. $STATS_HTTP_LOG)"
+  if [ -z "$backend" ]; then
+    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT ни основным сервером, ни запасным - подробности в $STATS_HTTP_LOG"
     return 0
   fi
   if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
     echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
-    say "OK: веб-сервис статистики на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR"
+    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR"
   else
     say "WARN: не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
   fi
+}
+
+start_stats_httpd_backend() {
+  # $1 = команда сервера ("busybox httpd" или "$STATS_HTTPD_PY_CMD
+  # $STATS_HTTPD_PY") - оба принимают один и тот же набор флагов
+  # (-f -p BIND:PORT -h DIR -c CONF), см. шапку stats_httpd.py. При успехе
+  # печатает pid в stdout и возвращает 0; при неудаче - WARN в лог через
+  # say() и возврат 1. Не трогает $STATS_HTTP_PIDFILE - это решает вызывающий
+  # код (ensure_stats_httpd), он же выбирает, пробовать ли запасной вариант.
+  cmd=$1
+  bin=${cmd%% *}
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    say "WARN: $bin не найден"
+    return 1
+  fi
+  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" -c "$STATS_HTTP_CONF" \
+    > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
+  newpid=$!
+  sleep 1
+  if ! kill -0 "$newpid" 2>/dev/null; then
+    say "WARN: $cmd запустился и сразу завершился (порт занят? см. $STATS_HTTP_LOG)"
+    return 1
+  fi
+  echo "$newpid"
 }
 
 render_stats() {
