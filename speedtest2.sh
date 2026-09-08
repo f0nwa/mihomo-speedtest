@@ -19,6 +19,7 @@ LOCK_HELD=0
 FORCE=${FORCE:-0}             # 1 -- ручной внеочередной запуск: живой вывод в терминал,
                               # ожидание/захват чужой блокировки вместо немедленного выхода
 FORCE_WAIT=${FORCE_WAIT:-180} # force: сколько ждать (сек) чужую блокировку, прежде чем сдаться
+CHECK_UPDATE=${CHECK_UPDATE:-0} # 1 -- только --check-update: сверить версии и выйти, main() не запускать
 MPID=
 PUBLISH_TMP=
 RUN_LOG=${RUN_LOG:-$WORK/speedtest.log}
@@ -62,6 +63,19 @@ STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для фор
 STATS_HTTP_CONF=${STATS_HTTP_CONF:-$DIR/stats_httpd.conf}          # конфиг busybox httpd (Basic Auth только на /cgi-bin), пишется сам
 STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
+
+# Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
+# после правок") - только по команде --check-update, без автозапуска по
+# cron. CORE_VERSION/STATS_VERSION - версии этого файла и связанных с ним
+# частей; меняются вручную при подготовке релиза и сверяются с файлом
+# VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
+# им быть не следует).
+CORE_VERSION=${CORE_VERSION:-1}    # speedtest2.sh, install.sh, prep.awk, providers.awk
+STATS_VERSION=${STATS_VERSION:-1}  # render_stats.awk, stats_cgi.sh
+UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
+UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
+UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
+UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
@@ -650,15 +664,104 @@ fi
 record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" "$WIN"
 }
 
+update_http_get() {
+  # $1 = URL. Печатает тело ответа в stdout при успехе, ничего и код !=0
+  # при ошибке (сеть, таймаут, HTTP-ошибка). UPDATE_HTTP_CMD переопределяет
+  # инструмент загрузки целиком - для тестов и нестандартных прошивок, где
+  # не годится ни curl, ни busybox wget.
+  url=$1
+  if [ -n "$UPDATE_HTTP_CMD" ]; then
+    $UPDATE_HTTP_CMD "$url"
+    return $?
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" "$url"
+    return $?
+  fi
+  if command -v busybox >/dev/null 2>&1; then
+    busybox wget -q -T "$UPDATE_HTTP_TIMEOUT" -O - "$url"
+    return $?
+  fi
+  return 127
+}
+
+fetch_versions_manifest() {
+  # Основной источник, при неудаче - зеркало (UPDATE_SOURCE_BASE/
+  # UPDATE_MIRROR_BASE). Печатает содержимое VERSIONS в stdout при успехе,
+  # иначе ничего и возврат 1 - обе попытки не удались.
+  body=$(update_http_get "$UPDATE_SOURCE_BASE/VERSIONS" 2>/dev/null) || body=""
+  if [ -n "$body" ]; then
+    printf '%s\n' "$body"
+    return 0
+  fi
+  body=$(update_http_get "$UPDATE_MIRROR_BASE/VERSIONS" 2>/dev/null) || body=""
+  if [ -n "$body" ]; then
+    printf '%s\n' "$body"
+    return 0
+  fi
+  return 1
+}
+
+parse_manifest_version() {
+  # $1=содержимое VERSIONS, $2=имя (CORE_VERSION|STATS_VERSION). Строгий
+  # разбор одной строки "ИМЯ=число" через sed - никогда не через eval/
+  # source, т.к. VERSIONS приходит с внешнего сервера и не должен
+  # исполняться как код.
+  content=$1; name=$2
+  val=$(printf '%s\n' "$content" | sed -n "s/^$name=\\([0-9][0-9]*\\)\$/\\1/p" | head -n 1)
+  [ -n "$val" ] || return 1
+  printf '%s' "$val"
+}
+
+report_update_component() {
+  # $1=имя компонента (для сообщения), $2=текущая версия, $3=версия с
+  # сервера (пусто, если строка не найдена/битая в VERSIONS).
+  label=$1; cur=$2; remote=$3
+  if [ -z "$remote" ]; then
+    say "WARN: $label - версия на сервере не распознана в VERSIONS, сравнение пропущено"
+    return 0
+  fi
+  if [ "$remote" -gt "$cur" ] 2>/dev/null; then
+    say "$label: установлена версия $cur, доступна $remote"
+  else
+    say "$label: установлена версия $cur, это актуально (на сервере: $remote)"
+  fi
+}
+
+check_update() {
+  # Точка входа для --check-update: ничего не меняет на диске, только
+  # печатает/логирует, что core/stats устарели относительно VERSIONS из
+  # репозитория. По расписанию (cron) не вызывается - только руками.
+  manifest=$(fetch_versions_manifest) || manifest=""
+  if [ -z "$manifest" ]; then
+    say "WARN: не удалось получить VERSIONS ни с $UPDATE_SOURCE_BASE, ни с зеркала $UPDATE_MIRROR_BASE - проверьте сеть роутера"
+    return 1
+  fi
+  remote_core=$(parse_manifest_version "$manifest" CORE_VERSION) || remote_core=""
+  remote_stats=$(parse_manifest_version "$manifest" STATS_VERSION) || remote_stats=""
+  if [ -z "$remote_core" ] && [ -z "$remote_stats" ]; then
+    say "WARN: файл VERSIONS получен, но не содержит распознаваемых строк CORE_VERSION=/STATS_VERSION="
+    return 1
+  fi
+  report_update_component core "$CORE_VERSION" "$remote_core"
+  report_update_component stats "$STATS_VERSION" "$remote_stats"
+}
+
 parse_args() {
   for _arg in "$@"; do
     case $_arg in
       --force) FORCE=1 ;;
+      --check-update) CHECK_UPDATE=1 ;;
     esac
   done
 }
 
 if [ "${MST_LIB_ONLY:-0}" != 1 ]; then
   parse_args "$@"
-  main "$@"
+  if [ "$CHECK_UPDATE" = 1 ]; then
+    FORCE=1
+    check_update
+  else
+    main "$@"
+  fi
 fi
