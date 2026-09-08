@@ -20,6 +20,8 @@ FORCE=${FORCE:-0}             # 1 -- ручной внеочередной за�
                               # ожидание/захват чужой блокировки вместо немедленного выхода
 FORCE_WAIT=${FORCE_WAIT:-180} # force: сколько ждать (сек) чужую блокировку, прежде чем сдаться
 CHECK_UPDATE=${CHECK_UPDATE:-0} # 1 -- только --check-update: сверить версии и выйти, main() не запускать
+UPDATE_CORE=${UPDATE_CORE:-0}   # 1 -- только --update-core: скачать и применить core, main() не запускать
+UPDATE_STATS=${UPDATE_STATS:-0} # 1 -- только --update-stats: скачать и применить stats, main() не запускать
 MPID=
 PUBLISH_TMP=
 RUN_LOG=${RUN_LOG:-$WORK/speedtest.log}
@@ -76,6 +78,11 @@ UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
+# Локальные пути для --update-core; render_stats.awk/stats_cgi.sh для
+# --update-stats используют уже существующие RENDER_STATS/STATS_CGI_SOURCE.
+UPDATE_SELF_SCRIPT=${UPDATE_SELF_SCRIPT:-$DIR/speedtest2.sh}
+UPDATE_INSTALL_SH=${UPDATE_INSTALL_SH:-$DIR/install.sh}
+UPDATE_PROVIDERS_AWK=${UPDATE_PROVIDERS_AWK:-$DIR/providers.awk}
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
@@ -685,21 +692,27 @@ update_http_get() {
   return 127
 }
 
-fetch_versions_manifest() {
-  # Основной источник, при неудаче - зеркало (UPDATE_SOURCE_BASE/
-  # UPDATE_MIRROR_BASE). Печатает содержимое VERSIONS в stdout при успехе,
-  # иначе ничего и возврат 1 - обе попытки не удались.
-  body=$(update_http_get "$UPDATE_SOURCE_BASE/VERSIONS" 2>/dev/null) || body=""
+fetch_from_source_or_mirror() {
+  # $1=путь относительно UPDATE_SOURCE_BASE/UPDATE_MIRROR_BASE (например,
+  # "VERSIONS" или "speedtest2.sh"). Основной источник, при неудаче -
+  # зеркало. Печатает содержимое в stdout при успехе, иначе ничего и
+  # возврат 1 - обе попытки не удались.
+  relpath=$1
+  body=$(update_http_get "$UPDATE_SOURCE_BASE/$relpath" 2>/dev/null) || body=""
   if [ -n "$body" ]; then
     printf '%s\n' "$body"
     return 0
   fi
-  body=$(update_http_get "$UPDATE_MIRROR_BASE/VERSIONS" 2>/dev/null) || body=""
+  body=$(update_http_get "$UPDATE_MIRROR_BASE/$relpath" 2>/dev/null) || body=""
   if [ -n "$body" ]; then
     printf '%s\n' "$body"
     return 0
   fi
   return 1
+}
+
+fetch_versions_manifest() {
+  fetch_from_source_or_mirror VERSIONS
 }
 
 parse_manifest_version() {
@@ -747,20 +760,141 @@ check_update() {
   report_update_component stats "$STATS_VERSION" "$remote_stats"
 }
 
+update_component_files() {
+  # $1=метка компонента (для сообщений в лог), далее пары вида
+  # "относительный_путь_на_сервере:локальный_путь_назначения". Всё-или-
+  # ничего: сначала скачивает и проверяет КАЖДЫЙ файл во временный
+  # каталог, и только если все прошли - переносит их на место (с бэкапом
+  # прежних версий рядом, "*.bak-ГГГГММДДЧЧММСС"). Любая неудача на этапе
+  # скачивания/проверки прерывает всё обновление до единой записи на диск.
+  # Проверка синтаксиса - не проверка подлинности (подписи нет, см.
+  # TODO.md): просто защита от случайно битого/усечённого файла.
+  label=$1; shift
+  update_tmp=$(mktemp -d "${TMPROOT:-/tmp}/mst-update.XXXXXX" 2>/dev/null) || {
+    say "WARN: $label - не удалось создать временный каталог, обновление не выполнено"
+    return 1
+  }
+  ok=1
+  for pair in "$@"; do
+    remote=${pair%%:*}
+    if ! body=$(fetch_from_source_or_mirror "$remote"); then
+      say "WARN: $label - не удалось скачать $remote ни с $UPDATE_SOURCE_BASE, ни с зеркала $UPDATE_MIRROR_BASE - обновление не выполнено"
+      ok=0
+      break
+    fi
+    if ! printf '%s\n' "$body" > "$update_tmp/$remote" 2>/dev/null; then
+      say "WARN: $label - не удалось записать $remote во временный каталог - обновление не выполнено"
+      ok=0
+      break
+    fi
+    case $remote in
+      *.sh)
+        if ! sh -n "$update_tmp/$remote" 2>/dev/null; then
+          say "WARN: $label - $remote не прошёл проверку синтаксиса (sh -n) - обновление не выполнено"
+          ok=0
+          break
+        fi
+        ;;
+      *.awk)
+        if ! awk -f "$update_tmp/$remote" /dev/null >/dev/null 2>&1; then
+          say "WARN: $label - $remote не прошёл проверку синтаксиса (awk) - обновление не выполнено"
+          ok=0
+          break
+        fi
+        ;;
+    esac
+  done
+  if [ "$ok" != 1 ]; then
+    rm -rf "$update_tmp"
+    return 1
+  fi
+  stamp=$(date '+%Y%m%d%H%M%S')
+  for pair in "$@"; do
+    remote=${pair%%:*}
+    dest=${pair#*:}
+    if [ -f "$dest" ]; then
+      cp "$dest" "$dest.bak-$stamp" 2>/dev/null \
+        || say "WARN: $label - не удалось сохранить резервную копию $dest (обновление продолжается)"
+    fi
+    if mv "$update_tmp/$remote" "$dest"; then
+      case $dest in
+        *.sh) chmod +x "$dest" 2>/dev/null || true ;;
+      esac
+    else
+      say "WARN: $label - не удалось заменить $dest - часть файлов уже могла обновиться, проверьте вручную"
+      ok=0
+    fi
+  done
+  rm -rf "$update_tmp"
+  if [ "$ok" = 1 ]; then
+    say "OK: $label обновлён (резервные копии - рядом с исходными файлами, *.bak-$stamp)"
+    return 0
+  fi
+  return 1
+}
+
+update_core() {
+  # Точка входа для --update-core. Обновляет весь набор целиком (см.
+  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk.
+  # Изменения вступают в силу со следующего запуска - текущий процесс
+  # (если что-то его всё же вызвало) доработает со старым кодом.
+  update_component_files core \
+    "speedtest2.sh:$UPDATE_SELF_SCRIPT" \
+    "install.sh:$UPDATE_INSTALL_SH" \
+    "prep.awk:$PREP" \
+    "providers.awk:$UPDATE_PROVIDERS_AWK"
+  rc=$?
+  if [ "$rc" = 0 ]; then
+    say "core: изменения вступят в силу со следующего запуска (cron или speedtest2.sh --force)"
+  fi
+  return $rc
+}
+
+apply_stats_update() {
+  # После успешного обновления stats-файлов - перегенерировать stats.html
+  # и переподнять веб-сервис немедленно, не дожидаясь cron. Тот же приём,
+  # что stats_cgi.sh использует после сохранения формы настройки.
+  WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-apply.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-apply.$$
+  mkdir -p "$WORK" 2>/dev/null
+  render_stats
+  ensure_stats_httpd
+  rm -rf "$WORK"
+}
+
+update_stats() {
+  # Точка входа для --update-stats. render_stats.awk и stats_cgi.sh
+  # обновляются вместе, т.к. используют общий формат HTML/CSS (см. TODO.md
+  # про дублирование стилей между ними).
+  if ! update_component_files stats \
+      "render_stats.awk:$RENDER_STATS" \
+      "stats_cgi.sh:$STATS_CGI_SOURCE"; then
+    return 1
+  fi
+  apply_stats_update
+}
+
 parse_args() {
   for _arg in "$@"; do
     case $_arg in
       --force) FORCE=1 ;;
       --check-update) CHECK_UPDATE=1 ;;
+      --update-core) UPDATE_CORE=1 ;;
+      --update-stats) UPDATE_STATS=1 ;;
     esac
   done
 }
 
 if [ "${MST_LIB_ONLY:-0}" != 1 ]; then
   parse_args "$@"
-  if [ "$CHECK_UPDATE" = 1 ]; then
+  if [ "$CHECK_UPDATE" = 1 ] || [ "$UPDATE_CORE" = 1 ] || [ "$UPDATE_STATS" = 1 ]; then
     FORCE=1
+  fi
+  if [ "$CHECK_UPDATE" = 1 ]; then
     check_update
+  elif [ "$UPDATE_CORE" = 1 ]; then
+    update_core
+  elif [ "$UPDATE_STATS" = 1 ]; then
+    update_stats
   else
     main "$@"
   fi
