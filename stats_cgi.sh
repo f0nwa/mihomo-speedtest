@@ -133,33 +133,36 @@ cat <<HTML
 <!doctype html><meta charset="utf-8">
 <title>speedtest2 - настройка статистики</title>
 <style>
-:root{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--accent:#2a78d6}
-@media (prefers-color-scheme: dark){:root{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}}
-:root[data-theme="light"]{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2}
-:root[data-theme="dark"]{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}
+:root{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--accent:#2a78d6}
+@media (prefers-color-scheme: dark){:root{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--accent:#2a78d6}}
+:root[data-theme="light"]{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--accent:#2a78d6}
+:root[data-theme="dark"]{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--accent:#2a78d6}
 *{box-sizing:border-box}
 body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}
 .wrap{max-width:520px;margin:0 auto;padding:20px 16px 40px}
 header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
 h1{font-size:19px;margin:0}
 .meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
-.theme-btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
-.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px}
-h2{font-size:14.5px;margin:0 0 8px}
+.theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
+.card{background:var(--card);border:1px solid var(--card-border);border-radius:14px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
+h2{font-size:14.5px;margin:0 0 8px;font-weight:600}
 label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
 label:first-child{margin-top:0}
-input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px}
+input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 9px;border:1px solid var(--card-border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px}
 .hint{color:var(--muted);font-size:12px;margin:4px 0 0}
 .row-checkbox{display:flex;align-items:center;gap:6px;margin-top:12px}
 .row-checkbox label{margin:0}
-button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;cursor:pointer}
+button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
 .msg-ok{background:#16a34a22;border:1px solid #16a34a;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 .msg-err{background:#dc262622;border:1px solid #dc2626;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 </style>
 <div class="wrap">
 <header>
 <div><h1>Настройка статистики</h1><p class="meta">speedtest2</p></div>
+<div style="display:flex;gap:8px;flex:0 0 auto">
 <a class="theme-btn" href="../stats.html">К статистике</a>
+<button class="theme-btn" id="themeBtn" type="button">Тема</button>
+</div>
 </header>
 HTML
 
@@ -199,4 +202,22 @@ cat <<HTML
 <button class="submit" type="submit">Сохранить</button>
 </form>
 </div>
+<script>
+(function(){
+var KEY='speedtest2-theme';
+var root=document.documentElement;
+var btn=document.getElementById('themeBtn');
+function label(){var cur=root.getAttribute('data-theme');btn.textContent=cur==='dark'?'Светлая тема':cur==='light'?'Тёмная тема':'Тема: авто';}
+function apply(t){if(t){root.setAttribute('data-theme',t);}else{root.removeAttribute('data-theme');}label();}
+var saved=null;
+try{saved=localStorage.getItem(KEY);}catch(e){}
+apply(saved);
+btn.addEventListener('click',function(){
+var cur=root.getAttribute('data-theme');
+var next=cur==='dark'?'light':cur==='light'?null:'dark';
+apply(next);
+try{if(next){localStorage.setItem(KEY,next);}else{localStorage.removeItem(KEY);}}catch(e){}
+});
+})();
+</script>
 HTML
