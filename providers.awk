@@ -1,6 +1,10 @@
 # providers.awk
 # Разбирает секцию proxy-providers: config.yaml mihomo, печатает на stdout
 # shell-присваивания SOURCES/EXTYPE/BLOCK_N, готовые для `eval` в install.sh.
+# Если передан CONFIG (сам config.yaml), он ставится первым источником в
+# SOURCES перед кэшами провайдеров - иначе статические ноды из блока
+# proxies: (например, вручную прописанные Hysteria2/AmneziaWG) никогда не
+# попадали бы в замер скорости, т.к. prep.awk читает только файлы из SOURCES.
 # Якоря и фильтры добавляются следующими задачами плана.
 BEGIN {
   in_pp = 0
@@ -120,8 +124,9 @@ END {
     print "providers.awk: не найдено ни одного проверенного proxy-provider с url" > "/dev/stderr"
     exit 2
   }
-  out = sources[0]
-  for (i = 1; i < nsrc; i++) out = out " " sources[i]
+  out = ""
+  if (CONFIG != "") out = CONFIG
+  for (i = 0; i < nsrc; i++) out = (out == "") ? sources[i] : out " " sources[i]
   printf "SOURCES='%s'\n", out
   if (ntype > 1) {
     printf "providers.awk: у провайдеров найдено %d разных значений exclude-type, используется первое ('%s'), остальные проигнорированы: ", ntype, type_list[0] > "/dev/stderr"
