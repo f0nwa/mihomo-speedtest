@@ -39,6 +39,56 @@ function fmt_mb(bytes,   mb, frac) {
   return mb "." frac
 }
 
+# jsesc(s) — экранирование строки для встраивания в JS-строковый литерал
+# (двойные кавычки уже используются снаружи вызовов). Управляющие символы
+# перевода строки/возврата каретки убираются - в наших данных (iso-метки
+# времени) их не бывает, но на всякий случай не должны ломать <script>.
+function jsesc(s) {
+  gsub(/\\/, "\\\\", s)
+  gsub(/"/, "\\\"", s)
+  gsub(/\r/, "", s)
+  gsub(/\n/, " ", s)
+  return s
+}
+
+# join_num(arr, cnt) — числа arr[1..cnt] через запятую, для JS-массива.
+function join_num(arr, cnt,   i, out) {
+  out = ""
+  for (i = 1; i <= cnt; i++) out = out (i > 1 ? "," : "") (arr[i] + 0)
+  return out
+}
+
+# join_str_js(arr, cnt) — строки arr[1..cnt] через запятую, каждая в
+# кавычках, для JS-массива. Экранируется дважды: сперва esc() (HTML) - эти
+# строки потом вставляются в тултип через innerHTML, затем jsesc() (сам
+# JS-строковый литерал) - без первого esc() спецсимволы имени ноды могли
+# бы быть интерпретированы как HTML-разметка после innerHTML.
+function join_str_js(arr, cnt,   i, out) {
+  out = ""
+  for (i = 1; i <= cnt; i++) out = out (i > 1 ? "," : "") "\"" jsesc(esc(arr[i])) "\""
+  return out
+}
+
+# join_series_values(p_idx, p_speed, pn, run_n) — плотный JS-массив
+# длиной run_n для одной линии графика по нодам: p_idx[1..pn]/p_speed[1..pn]
+# (уже отсортированы по возрастанию run-индекса — так же, как их использует
+# отрисовка разрывов линии) сливаются с индексами 1..run_n; там, где нода
+# прогон пропустила, подставляется JS "null" (проверяется в initChart()).
+function join_series_values(p_idx, p_speed, pn, run_n,   i, j, out) {
+  out = ""
+  j = 1
+  for (i = 1; i <= run_n; i++) {
+    out = out (i > 1 ? "," : "")
+    if (j <= pn && p_idx[j] == i) {
+      out = out (p_speed[j] + 0)
+      j++
+    } else {
+      out = out "null"
+    }
+  }
+  return out
+}
+
 function poly(vals, cnt, maxv,   i, x, y, out, w, h, left, top) {
   left = 40; top = 10; w = 710; h = 170
   out = ""
@@ -52,6 +102,57 @@ function poly(vals, cnt, maxv,   i, x, y, out, w, h, left, top) {
   return out
 }
 
+# sort_num(arr, cnt) — сортировка arr[1..cnt] по возрастанию на месте
+# (вставками — наборы небольшие, встроенной sort в POSIX awk нет).
+function sort_num(arr, cnt,   i, j, key) {
+  for (i = 2; i <= cnt; i++) {
+    key = arr[i]
+    j = i - 1
+    while (j >= 1 && arr[j] > key) {
+      arr[j + 1] = arr[j]
+      j--
+    }
+    arr[j + 1] = key
+  }
+}
+
+# percentile(sorted_arr, cnt, p) — p-й процентиль (0..100) методом
+# "ближайшего ранга" по уже отсортированному по возрастанию массиву.
+function percentile(arr, cnt, p,   idx) {
+  if (cnt <= 0) return 0
+  idx = int((p / 100) * cnt + 0.9999999)
+  if (idx < 1) idx = 1
+  if (idx > cnt) idx = cnt
+  return arr[idx]
+}
+
+# fmt_stat_val(v, mode) — mode="mb": байты в "X.Y МБ/с" через fmt_mb();
+# иначе (mode="int") — целое число как есть (счётчики нод).
+function fmt_stat_val(v, mode) {
+  return (mode == "mb") ? (fmt_mb(v) " МБ/с") : (v + 0)
+}
+
+# stat_row_html(name, sw_cls, mode, vals, cnt) — печатает одну группу
+# статистики (Мин/Р95/Макс/Сейчас) по значениям vals[1..cnt]. sw_cls -
+# класс цветного квадратика легенды (sw-good/sw-winners/...), пустая
+# строка — без квадратика (для агрегата "по всем нодам вместе").
+# "Сейчас" — vals[cnt], последнее по порядку значение (для графика
+# "Ноды" это последний прогон; для агрегата по нодам-победителям —
+# порядок добавления в history.tsv совпадает с хронологическим, как и
+# везде в этом файле, так что тоже самое свежее значение).
+function stat_row_html(name, sw_cls, mode, vals, cnt,   tmp, i, mn, mx, p95, cur, label) {
+  for (i = 1; i <= cnt; i++) tmp[i] = vals[i]
+  sort_num(tmp, cnt)
+  mn = tmp[1]; mx = tmp[cnt]
+  p95 = percentile(tmp, cnt, 95)
+  cur = vals[cnt]
+  label = (sw_cls != "") ? ("<span class=\"sw " sw_cls "\"></span>" esc(name)) : esc(name)
+  printf "<div class=\"stat-group\"><span class=\"stat-label\">%s</span>" \
+    "<span class=\"stat\">Мин <b>%s</b></span><span class=\"stat\">Р95 <b>%s</b></span>" \
+    "<span class=\"stat\">Макс <b>%s</b></span><span class=\"stat\">Сейчас <b>%s</b></span></div>\n", \
+    label, fmt_stat_val(mn, mode), fmt_stat_val(p95, mode), fmt_stat_val(mx, mode), fmt_stat_val(cur, mode)
+}
+
 # render_node_history(path, run_n) — читает speedtest_history.tsv (path,
 # может быть пустым/несуществующим) и печатает секцию с графиком скорости
 # по нодам-победителям: не более NODE_CAP линий, отобранных по частоте
@@ -63,7 +164,8 @@ function render_node_history(path, run_n,
     hline, hf, hn, i, j, k, nm,
     freq, last_seen, uniq, un, best, nb, nj, tmp, rank, topk,
     idx_of, hmax, left, top, w, h,
-    p_idx, p_speed, pn, ix, x, y, seg, segn, prev_idx, col) {
+    p_idx, p_speed, pn, ix, x, y, seg, segn, prev_idx, col, series_json,
+    allspeed, acnt) {
   hn = 0
   if (path != "") {
     while ((getline hline < path) > 0) {
@@ -109,9 +211,16 @@ function render_node_history(path, run_n,
   for (k = 1; k <= topk; k++) rank[uniq[k]] = k
 
   hmax = 1
+  acnt = 0
   for (i = 1; i <= hn; i++) {
     nm = h_name[i]
-    if ((nm in rank) && h_speed[i] > hmax) hmax = h_speed[i]
+    if (!(nm in rank)) continue
+    if (h_speed[i] > hmax) hmax = h_speed[i]
+    # копим скорость всех показанных нод вместе (порядок совпадает с
+    # хронологическим - как и везде в history.tsv) для строки
+    # Мин/Р95/Макс/Сейчас под графиком (агрегат, без привязки к линии).
+    acnt++
+    allspeed[acnt] = h_speed[i]
   }
 
   print "<h2>Скорость нод-победителей по прогонам</h2>"
@@ -122,7 +231,8 @@ function render_node_history(path, run_n,
   print "</p>"
 
   left = 40; top = 10; w = 710; h = 170
-  print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+  print "<div class=\"chart-wrap\">"
+  print "<svg id=\"svg-hist\" viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top, left, top + h
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top + h, left + w, top + h
   printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
@@ -139,6 +249,8 @@ function render_node_history(path, run_n,
       p_idx[pn] = idx_of[h_epoch[i]]
       p_speed[pn] = h_speed[i]
     }
+
+    printf "<g class=\"node-series\" id=\"series-hist-n%d\">\n", k
 
     seg = ""; segn = 0
     prev_idx = -1
@@ -159,11 +271,29 @@ function render_node_history(path, run_n,
       ix = p_idx[i]
       x = (run_n > 1) ? left + int((ix - 1) * w / (run_n - 1)) : left + int(w / 2)
       y = top + h - int(p_speed[i] * h / hmax)
-      printf "<circle cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"%s\" stroke=\"#fff\" stroke-width=\"1\"><title>%s · %s МБ/с · %s</title></circle>\n", \
+      printf "<circle class=\"node-dot\" cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"%s\" stroke-width=\"1\"><title>%s · %s МБ/с · %s</title></circle>\n", \
         x, y, col, esc(iso[ix]), fmt_mb(p_speed[i]), esc(nm)
     }
+    print "</g>"
+
+    series_json[k] = "{id:\"n" k "\",name:\"" jsesc(esc(nm)) "\",color:\"" col "\",values:[" join_series_values(p_idx, p_speed, pn, run_n) "]}"
   }
+
+  print "<line class=\"crosshair-line\" id=\"crosshair-hist\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\" visibility=\"hidden\"/>"
+  for (k = 1; k <= topk; k++) {
+    printf "<circle class=\"crosshair-dot\" id=\"dot-hist-n%d\" r=\"3.5\" fill=\"%s\" visibility=\"hidden\"/>\n", k, PAL[k]
+  }
+  print "<rect class=\"chart-capture\" id=\"capture-hist\" x=\"40\" y=\"10\" width=\"710\" height=\"170\"/>"
   print "</svg>"
+  print "<div class=\"tooltip\" id=\"tooltip-hist\" hidden></div>"
+  print "</div>"
+  printf "<script>window.STATS_CHARTS=window.STATS_CHARTS||{};STATS_CHARTS.hist={left:%d,top:%d,w:%d,h:%d,n:%d,max:%d,highlight:true,labels:[%s],series:[", \
+    left, top, w, h, run_n, hmax, join_str_js(iso, run_n)
+  for (k = 1; k <= topk; k++) printf "%s%s", (k > 1 ? "," : ""), series_json[k]
+  print "]};</script>"
+  print "<div class=\"stats-row\">"
+  stat_row_html("все показанные ноды", "", "mb", allspeed, acnt)
+  print "</div>"
 }
 
 BEGIN {
@@ -199,28 +329,50 @@ END {
   print "<!doctype html><meta charset=\"utf-8\">"
   print "<title>speedtest2 - статистика</title>"
   print "<style>"
-  print ":root{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2}"
-  print "@media (prefers-color-scheme: dark){:root{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}}"
-  print ":root[data-theme=\"light\"]{--bg:#f5f6f8;--card:#ffffff;--text:#1b1f24;--muted:#666666;--border:#e2e2e2}"
-  print ":root[data-theme=\"dark\"]{--bg:#14161a;--card:#1d2025;--text:#e7e9ec;--muted:#9aa0a6;--border:#2c3038}"
+  print ":root{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--line-good:#16a34a;--line-winners:#f59e0b}"
+  print "@media (prefers-color-scheme: dark){:root{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--line-good:#34d399;--line-winners:#fbbf24}}"
+  print ":root[data-theme=\"light\"]{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--line-good:#16a34a;--line-winners:#f59e0b}"
+  print ":root[data-theme=\"dark\"]{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--line-good:#34d399;--line-winners:#fbbf24}"
   print "*{box-sizing:border-box}"
   print "body{font:14px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}"
   print ".wrap{max-width:820px;margin:0 auto;padding:20px 16px 40px}"
   print "header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}"
   print "h1{font-size:19px;margin:0}"
   print ".meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}"
-  print ".theme-btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;flex:0 0 auto}"
-  print ".card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px}"
-  print "h2{font-size:14.5px;margin:0 0 8px}"
+  print ".theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;flex:0 0 auto}"
+  print ".card{background:var(--card);border:1px solid var(--card-border);border-radius:14px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}"
+  print "h2{font-size:14.5px;margin:0 0 8px;font-weight:600}"
   print "svg{max-width:100%;height:auto;display:block;margin-bottom:8px}"
   print ".axis-line{stroke:var(--border)}"
   print ".axis-text{fill:var(--muted)}"
+  print ".line-good{stroke:var(--line-good)}"
+  print ".line-winners{stroke:var(--line-winners)}"
+  print ".node-dot{stroke:var(--card)}"
   print "table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}"
-  print "td,th{padding:4px 10px;text-align:right;border-bottom:1px solid var(--border)}"
+  print "td,th{padding:6px 10px;text-align:right;border-bottom:1px solid var(--border)}"
   print "th{color:var(--muted);font-weight:600}"
   print "th:last-child,td:last-child{text-align:left}"
+  print "tr:hover td{background:var(--bg)}"
   print ".legend{font-size:12px;color:var(--muted);margin:0 0 8px}"
-  print ".sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}"
+  print ".sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}"
+  print ".sw-good{background:var(--line-good)}"
+  print ".sw-winners{background:var(--line-winners)}"
+  print ".chart-wrap{position:relative}"
+  print ".chart-capture{fill:transparent;cursor:crosshair}"
+  print ".crosshair-line{stroke:var(--muted);stroke-width:1;pointer-events:none}"
+  print ".crosshair-dot{stroke:var(--card);stroke-width:1;pointer-events:none}"
+  print ".dot-good{fill:var(--line-good)}"
+  print ".dot-winners{fill:var(--line-winners)}"
+  print ".node-series{opacity:1;transition:opacity .15s ease}"
+  print ".node-series.dim{opacity:.2}"
+  print ".tooltip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--card-border);border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:var(--shadow);max-width:240px;z-index:10}"
+  print ".tooltip[hidden]{display:none}"
+  print ".tooltip .tt-label{font-weight:600;margin-bottom:4px}"
+  print ".tooltip .tt-row{display:flex;align-items:center;gap:6px;line-height:1.4}"
+  print ".stats-row{display:flex;flex-wrap:wrap;gap:14px 22px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}"
+  print ".stat-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}"
+  print ".stat-label{display:flex;align-items:center;gap:4px;font-weight:600;color:var(--text)}"
+  print ".stat b{color:var(--text);font-weight:600}"
   print "</style>"
   print "<div class=\"wrap\">"
   print "<header>"
@@ -236,16 +388,29 @@ END {
   } else {
     print "<div class=\"card\">"
     print "<h2>Ноды</h2>"
-    print "<p class=\"legend\"><span class=\"sw\" style=\"background:#16a34a\"></span>нод выше порога" \
-          "&nbsp; <span class=\"sw\" style=\"background:#f59e0b\"></span>победителей (в fast.yaml)</p>"
-    print "<svg viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+    print "<p class=\"legend\"><span class=\"sw sw-good\"></span>нод выше порога" \
+          "&nbsp; <span class=\"sw sw-winners\"></span>победителей (в fast.yaml)</p>"
+    print "<div class=\"chart-wrap\">"
+    print "<svg id=\"svg-nodes\" viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
     printf "<line class=\"axis-line\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\"/>\n"
     printf "<line class=\"axis-line\" x1=\"40\" y1=\"180\" x2=\"750\" y2=\"180\"/>\n"
     printf "<text class=\"axis-text\" x=\"34\" y=\"14\" font-size=\"10\" text-anchor=\"end\">%d</text>\n", max2
     printf "<text class=\"axis-text\" x=\"34\" y=\"184\" font-size=\"10\" text-anchor=\"end\">0</text>\n"
-    printf "<polyline fill=\"none\" stroke=\"#16a34a\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
-    printf "<polyline fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
+    printf "<polyline class=\"line-good\" fill=\"none\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
+    printf "<polyline class=\"line-winners\" fill=\"none\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
+    print "<line class=\"crosshair-line\" id=\"crosshair-nodes\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\" visibility=\"hidden\"/>"
+    print "<circle class=\"crosshair-dot dot-good\" id=\"dot-nodes-good\" r=\"3.5\" visibility=\"hidden\"/>"
+    print "<circle class=\"crosshair-dot dot-winners\" id=\"dot-nodes-winners\" r=\"3.5\" visibility=\"hidden\"/>"
+    print "<rect class=\"chart-capture\" id=\"capture-nodes\" x=\"40\" y=\"10\" width=\"710\" height=\"170\"/>"
     print "</svg>"
+    print "<div class=\"tooltip\" id=\"tooltip-nodes\" hidden></div>"
+    print "</div>"
+    printf "<script>window.STATS_CHARTS=window.STATS_CHARTS||{};STATS_CHARTS.nodes={left:40,top:10,w:710,h:170,n:%d,max:%d,labels:[%s],series:[{id:\"good\",name:\"нод выше порога\",values:[%s]},{id:\"winners\",name:\"победителей\",values:[%s]}]};</script>\n", \
+      n, max2, join_str_js(iso, n), join_num(good, n), join_num(winners, n)
+    print "<div class=\"stats-row\">"
+    stat_row_html("нод выше порога", "sw-good", "int", good, n)
+    stat_row_html("победителей", "sw-winners", "int", winners, n)
+    print "</div>"
     printf "<p>Последний прогон (%s): канал %s МБ/с, порог %s МБ/с, живых %d из %d, отобрано %d.</p>\n", \
       esc(iso[n]), fmt_mb(channel[n]), fmt_mb(threshold[n]), alive[n], total[n], winners[n]
     print "</div>"
@@ -276,6 +441,76 @@ END {
   else print "<p>Нет данных последнего замера.</p>"
   print "</div>"
   print "</div>"
+  print "<script>"
+  print "(function(){"
+  print "function initChart(id){"
+  print "var cfg=(window.STATS_CHARTS||{})[id];"
+  print "if(!cfg)return;"
+  print "var svg=document.getElementById('svg-'+id);"
+  print "var capture=document.getElementById('capture-'+id);"
+  print "var crosshair=document.getElementById('crosshair-'+id);"
+  print "var tooltip=document.getElementById('tooltip-'+id);"
+  print "var wrap=svg?svg.parentNode:null;"
+  print "if(!svg||!capture||!crosshair||!tooltip||!wrap)return;"
+  print "var dots={};"
+  print "for(var i=0;i<cfg.series.length;i++){dots[cfg.series[i].id]=document.getElementById('dot-'+id+'-'+cfg.series[i].id);}"
+  print "var groups={};"
+  print "if(cfg.highlight){for(var gi=0;gi<cfg.series.length;gi++){groups[cfg.series[gi].id]=document.getElementById('series-'+id+'-'+cfg.series[gi].id);}}"
+  print "function svgPoint(clientX,clientY){"
+  print "var pt=svg.createSVGPoint();pt.x=clientX;pt.y=clientY;"
+  print "return pt.matrixTransform(svg.getScreenCTM().inverse());"
+  print "}"
+  print "function idxAt(svgX){"
+  print "var step=cfg.n>1?cfg.w/(cfg.n-1):0;"
+  print "var idx=step>0?Math.round((svgX-cfg.left)/step):0;"
+  print "if(idx<0)idx=0;if(idx>cfg.n-1)idx=cfg.n-1;"
+  print "return idx;"
+  print "}"
+  print "function xFor(idx){return cfg.n>1?cfg.left+(idx*cfg.w/(cfg.n-1)):cfg.left+cfg.w/2;}"
+  print "function yFor(v){var m=cfg.max||1;return cfg.top+cfg.h-(v*cfg.h/m);}"
+  print "function show(clientX,clientY){"
+  print "if(!cfg.n)return;"
+  print "var loc=svgPoint(clientX,clientY);"
+  print "var idx=idxAt(loc.x);"
+  print "var x=xFor(idx);"
+  print "crosshair.setAttribute('x1',x);crosshair.setAttribute('x2',x);crosshair.setAttribute('visibility','visible');"
+  print "var html='<div class=\"tt-label\">'+(cfg.labels[idx]||'')+'</div>';"
+  print "var nearestId=null,nearestDist=Infinity;"
+  print "for(var i=0;i<cfg.series.length;i++){"
+  print "var s=cfg.series[i];var v=s.values[idx];"
+  print "if(v===null||v===undefined)continue;"
+  print "var dist=Math.abs(loc.y-yFor(v));"
+  print "if(dist<nearestDist){nearestDist=dist;nearestId=s.id;}"
+  print "}"
+  print "for(var j=0;j<cfg.series.length;j++){"
+  print "var s2=cfg.series[j];var v2=s2.values[idx];var dot=dots[s2.id];"
+  print "if(v2===null||v2===undefined){if(dot)dot.setAttribute('visibility','hidden');}"
+  print "else{if(dot){dot.setAttribute('cx',x);dot.setAttribute('cy',yFor(v2));dot.setAttribute('visibility','visible');}"
+  print "html+='<div class=\"tt-row\"><span class=\"sw sw-'+s2.id+'\"></span>'+s2.name+': '+v2+'</div>';}"
+  print "if(cfg.highlight&&groups[s2.id]){groups[s2.id].classList.toggle('dim',s2.id!==nearestId);}"
+  print "}"
+  print "tooltip.innerHTML=html;tooltip.hidden=false;"
+  print "var wrapRect=wrap.getBoundingClientRect();"
+  print "var left=clientX-wrapRect.left+12;var top=clientY-wrapRect.top-12;"
+  print "var maxLeft=wrapRect.width-tooltip.offsetWidth-4;"
+  print "if(left>maxLeft)left=clientX-wrapRect.left-tooltip.offsetWidth-12;"
+  print "if(left<0)left=0;"
+  print "tooltip.style.left=left+'px';tooltip.style.top=top+'px';"
+  print "}"
+  print "function hide(){"
+  print "crosshair.setAttribute('visibility','hidden');"
+  print "for(var k in dots){if(dots[k])dots[k].setAttribute('visibility','hidden');}"
+  print "if(cfg.highlight){for(var gk in groups){if(groups[gk])groups[gk].classList.remove('dim');}}"
+  print "tooltip.hidden=true;"
+  print "}"
+  print "capture.addEventListener('mousemove',function(e){show(e.clientX,e.clientY);});"
+  print "capture.addEventListener('mouseleave',hide);"
+  print "capture.addEventListener('touchmove',function(e){if(e.touches&&e.touches[0])show(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});"
+  print "capture.addEventListener('touchend',hide);"
+  print "}"
+  print "for(var chartId in (window.STATS_CHARTS||{}))initChart(chartId);"
+  print "})();"
+  print "</script>"
   print "<script>"
   print "(function(){"
   print "var KEY='speedtest2-theme';"
