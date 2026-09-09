@@ -19,7 +19,7 @@ anchors:
   a3: &classical { type: http, format: text, behavior: classical, interval: 86400 }
   a4: &inline { type: inline, behavior: classical }
   http-provider: &http-provider { type: http, interval: 3600, exclude-filter: &geofilter '(?i)Russia|RU|whitelist|Москва|Россия|SPB|MSK|🇷🇺|🇲🇽|🇨🇴|🇦🇷|🇵🇪|🇧🇷|🇮🇳|🇲🇾|🇰🇷|🇯🇵|🇮🇱|🇿🇦|🇦🇺|🇰🇿|🇳🇬|🇨🇱|🇹🇷|🇺🇦|RU-|RU_|Moscow|СПб|Обход' }
-  gstatic-health-check: &gstatic-health-check { enable: true, url: "http://www.gstatic.com/generate_204", interval: 300 }
+  gstatic-health-check: &gstatic-health-check { enable: true, url: "http://www.gstatic.com/generate_204", interval: 300, timeout: 5000, lazy: true }
   sub-names: &sub-names [provider-a, provider-b, provider-c]
   select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'] }
 
@@ -65,10 +65,7 @@ proxy-providers:
     <<: *http-provider
     url: "https://subscription-2.example.com/CHANGE_ME"
     path: ./proxy-providers/provider-b.yaml
-    health-check:
-      enable: true
-      url: "http://www.msftncsi.com/ncsi.txt"
-      interval: 300
+    health-check: *gstatic-health-check
   provider-c:
     <<: *http-provider
     url: "https://subscription-3.example.com/CHANGE_ME"
@@ -87,6 +84,8 @@ proxy-providers:
       enable: true
       url: "https://www.gstatic.com/generate_204"
       interval: 60
+      timeout: 5000
+      lazy: true
 
 
 # --- Группы прокси ---
@@ -94,30 +93,46 @@ proxy-groups:
   # --- Базовые режимы выбора ---
   # Ноды, прошедшие замер реальной скорости в speedtest2.sh.
   # Внутри отобранного пула выбирается нода с минимальной задержкой.
-  - name: '⚡ Самые быстрые'
+  - name: '⚡ Быстрый пул'
     type: url-test
+    hidden: true
     use: [fast]
     url: "https://www.gstatic.com/generate_204"
     interval: 60
+    timeout: 5000
     tolerance: 50
-    lazy: false
+    lazy: true
+
+  # Публичное имя группы не меняется. Приоритет 1: быстрый пул выше.
+  # При недоступности быстрого пула используется 🛡️Fallback-Stable.
+  # DIRECT в эту цепочку не входит: если оба выхода не работают,
+  # соединения завершаются ошибкой, а не идут напрямую.
+  - name: '⚡ Самые быстрые'
+    type: fallback
+    proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']
+    url: "https://www.gstatic.com/generate_204"
+    interval: 60
+    timeout: 5000
+    lazy: true
 
   # Автоматический выбор самого быстрого узла.
   # Берет все прокси из subscription и subscription_provider-b,
-  # проверяет http://www.gstatic.com/generate_204 каждые 600 секунд
+  # проверяет http://www.gstatic.com/generate_204 каждые 300 секунд
   # и выбирает узел с минимальной задержкой.
   # tolerance: 50 снижает частые переключения: если текущий узел
   # медленнее лучшего менее чем на 50 мс, он может остаться выбранным.
-  # lazy: false запускает проверки заранее, а не только при первом запросе.
+  # lazy: true не проверяет узлы, пока группа не выбрана активной -
+  # массовая группа не гоняет фоновые проверки, если ей не пользуются.
   - name: '🚀 Авто по пингу'
     type: url-test
     use: *sub-names
     proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
     url: "http://www.gstatic.com/generate_204"
     exclude-filter: *geofilter
-    interval: 60
+    interval: 300
+    timeout: 5000
     tolerance: 50
-    lazy: false
+    lazy: true
 
   # Стабильный резервный выбор.
   # Берет все прокси из subscription и subscription_provider-b,
@@ -131,7 +146,9 @@ proxy-groups:
     proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
     url: "http://www.gstatic.com/generate_204"
     exclude-filter: *geofilter
-    interval: 60
+    interval: 300
+    timeout: 5000
+    lazy: true
 
   # Ручной выбор узла.
   # В UI можно самостоятельно выбрать конкретный прокси из обоих провайдеров.
