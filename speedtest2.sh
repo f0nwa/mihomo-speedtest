@@ -51,6 +51,11 @@ HISTORY_RUNS=${HISTORY_RUNS:-$DIR/speedtest_runs.tsv}       # сводка по 
 HISTORY_NODES=${HISTORY_NODES:-$DIR/speedtest_history.tsv}  # история нод-победителей по прогонам
 HISTORY_KEEP_RUNS=${HISTORY_KEEP_RUNS:-200}   # хранить не больше стольких последних прогонов (0 = не ограничивать)
 HISTORY_KEEP_DAYS=${HISTORY_KEEP_DAYS:-30}    # и не старше стольких дней (0 = не ограничивать)
+HISTORY_STABILITY=${HISTORY_STABILITY:-$DIR/node_stability.tsv}  # агрегат стабильности всех нод пула (доступность delay-check, не скорость)
+NODE_STATS_UPDATE=${NODE_STATS_UPDATE:-$DIR/node_stats_update.awk}
+STABILITY_WINDOW=${STABILITY_WINDOW:-200}          # длина окна "недавних" прогонов на ноду (символы A/D/.), ~месяц при прогоне раз в 3 часа
+STABILITY_DROP_AFTER=${STABILITY_DROP_AFTER:-$HISTORY_KEEP_RUNS}  # прогонов подряд без ноды в пуле -> строка удаляется из node_stability.tsv (0 = не удалять)
+
 STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # страница статистики (раздаётся отдельным веб-сервисом, см. STATS_HTTP_* ниже)
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
 STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
@@ -76,7 +81,7 @@ STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его ж
 # частей; меняются вручную при подготовке релиза и сверяются с файлом
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
 # им быть не следует).
-CORE_VERSION=${CORE_VERSION:-1}    # speedtest2.sh, install.sh, prep.awk, providers.awk
+CORE_VERSION=${CORE_VERSION:-1}    # speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk
 STATS_VERSION=${STATS_VERSION:-1}  # render_stats.awk, stats_cgi.sh
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
@@ -460,6 +465,7 @@ render_stats() {
     return 0
   fi
   if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
+       -v stability="$HISTORY_STABILITY" \
        -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
        -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.html" 2> "$WORK/stats.err"; then
     say "WARN: render_stats.awk завершился с ошибкой, stats.html не обновлён"
@@ -471,6 +477,36 @@ render_stats() {
     return 0
   fi
   publish_file "$WORK/stats.html" "$STATS_HTML" || say "WARN: stats.html не записан"
+}
+
+update_node_stability() {
+  # Обновляет агрегат стабильности всех нод пула (node_stability.tsv) -
+  # источник данных: групповой delay-check шага 4 main() (map.txt - весь
+  # пул, alive.txt - живые + задержка), к замеру скорости отношения не
+  # имеет. Вызывается сразу после вычисления ALIVE, до всего, что связано
+  # с замером скорости и публикацией fast.yaml - статистика стабильности
+  # пишется независимо от исхода остальных шагов прогона. Не критично для
+  # работы замерщика - любая ошибка здесь WARN в лог, старый файл не
+  # трогаем (та же схема, что и у record_history()).
+  if [ ! -f "$NODE_STATS_UPDATE" ]; then
+    say "WARN: $NODE_STATS_UPDATE не найден, node_stability.tsv не обновлён"
+    return 0
+  fi
+  statold=$HISTORY_STABILITY
+  [ -f "$statold" ] || statold=/dev/null
+  if ! awk -v iso="$(date '+%Y-%m-%d %H:%M:%S')" -v window_len="$STABILITY_WINDOW" \
+       -v drop_after="$STABILITY_DROP_AFTER" -v mapfile="$WORK/map.txt" \
+       -v alivefile="$WORK/alive.txt" -f "$NODE_STATS_UPDATE" "$statold" \
+       > "$WORK/stability.new" 2> "$WORK/stability.err"; then
+    say "WARN: node_stats_update.awk завершился с ошибкой, node_stability.tsv не обновлён"
+    [ -s "$WORK/stability.err" ] && sed -n '1,3p' "$WORK/stability.err" >> "$RUN_LOG"
+    return 0
+  fi
+  if [ ! -s "$WORK/stability.new" ]; then
+    say "WARN: node_stats_update.awk вернул пустой файл, node_stability.tsv не обновлён"
+    return 0
+  fi
+  publish_file "$WORK/stability.new" "$HISTORY_STABILITY" || say "WARN: node_stability.tsv не записан"
 }
 
 record_history() {
@@ -662,6 +698,7 @@ fi
 tr ',' '\n' < "$WORK/delay.json" | sed -n 's/.*"\(n[0-9]\{4\}\)":\([0-9]*\).*/\2 \1/p' | sort -n > "$WORK/alive.txt"
 ALIVE=$(wc -l < "$WORK/alive.txt")
 say "нод в пуле: $TOTAL, живых: $ALIVE"
+update_node_stability
 if [ "$ALIVE" -lt 1 ]; then
   say "WARN: живых нод нет, fast.yaml не трогаю"; exit 0
 fi
@@ -914,14 +951,15 @@ update_component_files() {
 
 update_core() {
   # Точка входа для --update-core. Обновляет весь набор целиком (см.
-  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk.
+  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk.
   # Изменения вступают в силу со следующего запуска - текущий процесс
   # (если что-то его всё же вызвало) доработает со старым кодом.
   update_component_files core \
     "speedtest2.sh:$UPDATE_SELF_SCRIPT" \
     "install.sh:$UPDATE_INSTALL_SH" \
     "prep.awk:$PREP" \
-    "providers.awk:$UPDATE_PROVIDERS_AWK"
+    "providers.awk:$UPDATE_PROVIDERS_AWK" \
+    "node_stats_update.awk:$NODE_STATS_UPDATE"
   rc=$?
   if [ "$rc" = 0 ]; then
     say "core: изменения вступят в силу со следующего запуска (cron или speedtest2.sh --force)"
