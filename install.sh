@@ -110,6 +110,9 @@ install_files() {
   # httpd" недоступен на роутере; исполняемый бит не нужен, он вызывается
   # как "python3 stats_httpd.py", а не напрямую.
   atomic_install "$SELFDIR/stats_httpd.py" "$DIR/stats_httpd.py" || return 1
+  # вызывается напрямую через "awk -f", как prep.awk/render_stats.awk -
+  # исполняемый бит не нужен.
+  atomic_install "$SELFDIR/node_stats_update.awk" "$DIR/node_stats_update.awk" || return 1
 }
 
 write_env() {
@@ -197,7 +200,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_httpd.py; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_httpd.py node_stats_update.awk; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
