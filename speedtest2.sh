@@ -12,6 +12,7 @@ LOG=${LOG:-$DIR/speedtest.log}
 LAST=${LAST:-$DIR/speedtest_last.txt}
 BIN=${BIN:-/opt/sbin/mihomo}
 PREP=${PREP:-$DIR/prep.awk}
+SUB_CONVERT=${SUB_CONVERT:-$DIR/sub_convert.awk}
 TMPROOT=${TMPROOT:-/tmp}
 WORK=${WORK:-$TMPROOT/mst.$$}
 LOCK=${LOCK:-$TMPROOT/mst.lock}
@@ -557,10 +558,78 @@ record_history() {
   render_stats
 }
 
+looks_like_clash_yaml() {
+  grep -Eq '^proxies:[[:space:]]*$' "$1" 2>/dev/null
+}
+
+validate_provider() {
+  conv_file=$1
+  {
+    echo "mixed-port: $MIXED_PORT"
+    echo "external-controller: $API"
+    echo "log-level: silent"
+    echo "mode: rule"
+    cat "$conv_file"
+    echo "proxy-groups:"
+    echo "  - name: T"
+    echo "    type: select"
+    echo "    include-all-proxies: true"
+    echo "rules:"
+    echo "  - MATCH,T"
+  } > "$WORK/provcheck.yaml"
+  "$BIN" -t -d "$WORK" -f "$WORK/provcheck.yaml" > "$WORK/provcheck.log" 2>&1
+}
+
+convert_source() {
+  src=$1
+  if looks_like_clash_yaml "$src"; then
+    printf '%s\n' "$src"
+    return 0
+  fi
+  base=$(basename "$src")
+  decoded="$WORK/subdec-$base.txt"
+  if ! base64 -d "$src" > "$decoded" 2>/dev/null || [ ! -s "$decoded" ]; then
+    if ! openssl base64 -d -A -in "$src" > "$decoded" 2>/dev/null || [ ! -s "$decoded" ]; then
+      say "WARN: источник $src не похож ни на clash-yaml, ни на base64-подписку, пропускаю"
+      return 1
+    fi
+  fi
+  first=$(sed -n '1p' "$decoded")
+  case "$first" in
+    vless://*) ;;
+    *) say "WARN: источник $src раскодирован, но не похож на vless-подписку, пропускаю"; return 1 ;;
+  esac
+  conv="$WORK/subconv-$base.yaml"
+  LC_ALL=C awk -f "$SUB_CONVERT" "$decoded" > "$conv" 2> "$WORK/subconv-$base.log"
+  n_converted=$(sed -n 's/.*converted=\([0-9]*\).*/\1/p' "$WORK/subconv-$base.log")
+  if [ -z "${n_converted:-}" ] || [ "$n_converted" -eq 0 ]; then
+    say "WARN: из $src не удалось получить ни одной ноды, пропускаю"
+    return 1
+  fi
+  if ! validate_provider "$conv"; then
+    say "WARN: конфиг из $src не прошёл проверку \$BIN -t, пропускаю весь провайдер"
+    tail -3 "$WORK/provcheck.log" >> "$RUN_LOG"
+    return 1
+  fi
+  printf '%s\n' "$conv"
+  return 0
+}
+
 prepare_nodes() {
+  conv_sources=""
+  for src in $SOURCES; do
+    csrc=$(convert_source "$src") || continue
+    conv_sources="$conv_sources $csrc"
+  done
+  if [ -z "$conv_sources" ]; then
+    say "WARN: ни один источник не прошёл проверку/конвертацию, пул пуст"
+    : > "$WORK/all.yaml"
+    echo 0 > "$WORK/cnt.txt"
+    return 0
+  fi
   awk -v NODEDIR="$WORK/nodes" -v MAPFILE="$WORK/map.txt" \
       -v CNTFILE="$WORK/cnt.txt" -v BLOCK="$BLOCK" -v EXTYPE="$EXTYPE" \
-      -f "$PREP" $SOURCES > "$WORK/all.yaml" 2> "$WORK/prep.err"
+      -f "$PREP" $conv_sources > "$WORK/all.yaml" 2> "$WORK/prep.err"
 }
 
 reload_provider() {
