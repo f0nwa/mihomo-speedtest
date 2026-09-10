@@ -636,8 +636,15 @@ reload_provider() {
   curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/fast" >/dev/null 2>&1
 }
 
+# timeout=20000: при большом пуле (160+ нод, все проверяются одним
+# параллельным запросом) роутер не успевает поднять все TLS-соединения
+# за 5 секунд - mihomo возвращает 504 "all proxies timeout" на весь
+# групповой запрос целиком, а не только для медленных нод. 20 секунд -
+# временный запас, подобранный опытным путём под текущий размер пула;
+# при дальнейшем росте пула стоит разбивать проверку на батчи вместо
+# дальнейшего повышения этого числа.
 fetch_delays() {
-  curl -f -s -m 60 "http://$API/group/T/delay?url=$DELAY_URL&timeout=5000" \
+  curl -f -s -m 60 "http://$API/group/T/delay?url=$DELAY_URL&timeout=20000" \
        -o "$WORK/delay.json" 2>/dev/null
 }
 
