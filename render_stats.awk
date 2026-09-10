@@ -40,6 +40,14 @@ function fmt_mb(bytes,   mb, frac) {
   return mb "." frac
 }
 
+# fmt_mb_signed(bytes) - как fmt_mb(), но с явным знаком (+/-) спереди;
+# нужно для дельты скорости в таблице "Доступность нод пула" (delta
+# бывает и отрицательной - нода сейчас медленнее своего среднего).
+function fmt_mb_signed(bytes,   ab) {
+  ab = (bytes < 0) ? -bytes : bytes
+  return (bytes < 0 ? "-" : "+") fmt_mb(ab)
+}
+
 # jsesc(s) — экранирование строки для встраивания в JS-строковый литерал
 # (двойные кавычки уже используются снаружи вызовов). Управляющие символы
 # перевода строки/возврата каретки убираются - в наших данных (iso-метки
@@ -312,14 +320,18 @@ function sparkline(win,   i, ch, out, cls) {
 # render_node_stability(path) - читает node_stability.tsv (path, может
 # быть пустым/несуществующим) и печатает таблицу доступности ВСЕХ нод
 # пула (не только победителей): статус на последнем прогоне, uptime за
-# окно, спарклайн, среднюю задержку delay-check, дату первого появления.
-# К скорости загрузки отношения не имеет - источник данных group
-# delay-check (шаг 4 main()), не измерение скорости. Строки
-# отсортированы по убыванию uptime за окно; клик-сортировка по любой
-# колонке - в <script> в конце страницы.
+# окно (по delay-check), спарклайн, отклонение последней измеренной
+# скорости от собственного среднего этой ноды (Δ скорости), дату первого
+# появления. Статус/uptime/спарклайн - из group delay-check (шаг 4
+# main(), весь пул каждый прогон); Δ скорости - из speed-теста (шаг 5,
+# проходят не все ноды каждый прогон, см. ENOUGH в speedtest2.sh),
+# поэтому у части нод может стоять «-», даже если они «живы» по задержке.
+# Строки отсортированы по убыванию uptime за окно; клик-сортировка по
+# любой колонке - в <script> в конце страницы.
 function render_node_stability(path,
     line, f, nf, cnt, i, j, k, best, tmp, order,
-    name, win, wlen, ch, cls, label, srt, pctv, avg, alive_n, total_n) {
+    name, win, wlen, ch, cls, label, srt, pctv, avg_speed, delta, delta_cls,
+    dv, dtxt, alive_n, total_n) {
   cnt = 0
   if (path != "") {
     while ((getline line < path) > 0) {
@@ -328,15 +340,16 @@ function render_node_stability(path,
       cnt++
       st_name[cnt] = f[1]
       st_first[cnt] = f[2]
-      st_delay_sum[cnt] = f[7] + 0
-      st_delay_samples[cnt] = f[8] + 0
       st_window[cnt] = f[10]
+      st_last_speed[cnt] = f[11] + 0
+      st_speed_sum[cnt] = f[12] + 0
+      st_speed_samples[cnt] = f[13] + 0
     }
     close(path)
   }
 
   print "<h2>Доступность нод пула</h2>"
-  print "<p class=\"legend\">все ноды пула по проверке задержки (delay-check) каждого прогона - к скорости загрузки отношения не имеет; серый индикатор и статус «нет в пуле» - нода сейчас не в пуле подписки.</p>"
+  print "<p class=\"legend\">статус, uptime и спарклайн - по проверке задержки (delay-check) каждого прогона, весь пул; Δ скорости - отклонение последнего измеренного значения от среднего этой же ноды, только у нод, хоть раз прошедших speed-тест (проходят не все ноды каждый прогон); серый индикатор и статус «нет в пуле» - нода сейчас не в пуле подписки.</p>"
 
   if (cnt == 0) {
     print "<p>Нет данных о стабильности нод.</p>"
@@ -371,7 +384,7 @@ function render_node_stability(path,
         "<th data-sort=\"num\" data-col=\"1\">Сейчас</th>" \
         "<th data-sort=\"num\" data-col=\"2\">Uptime (окно)</th>" \
         "<th data-sort=\"none\" data-col=\"3\">Спарклайн</th>" \
-        "<th data-sort=\"num\" data-col=\"4\">Средняя задержка</th>" \
+        "<th data-sort=\"num\" data-col=\"4\">Δ скорости</th>" \
         "<th data-sort=\"str\" data-col=\"5\">Впервые замечена</th>" \
         "</tr></thead><tbody>"
 
@@ -386,13 +399,22 @@ function render_node_stability(path,
     else { cls = "st-gap"; label = "нет в пуле"; srt = 0 }
 
     pctv = st_pct[k]
-    avg = (st_delay_samples[k] > 0) ? int(st_delay_sum[k] / st_delay_samples[k] + 0.5) : -1
+    if (st_speed_samples[k] > 0) {
+      avg_speed = st_speed_sum[k] / st_speed_samples[k]
+      delta = st_last_speed[k] - avg_speed
+      delta_cls = (delta > 0) ? "delta-pos" : (delta < 0) ? "delta-neg" : ""
+      dv = delta
+      dtxt = "<span class=\"" delta_cls "\">" fmt_mb_signed(delta) " МБ/с</span>"
+    } else {
+      dv = -2000000000
+      dtxt = "-"
+    }
 
     printf "<tr><td data-v=\"%s\">%s</td>", jsesc(esc(name)), esc(name)
     printf "<td data-v=\"%d\"><span class=\"dot %s\"></span>%s</td>", srt, cls, label
     printf "<td data-v=\"%d\">%s</td>", pctv, (pctv >= 0 ? pctv "%" : "-")
     printf "<td data-v=\"0\">%s</td>", sparkline(win)
-    printf "<td data-v=\"%d\">%s</td>", avg, (avg >= 0 ? avg " мс" : "-")
+    printf "<td data-v=\"%d\">%s</td>", dv, dtxt
     printf "<td data-v=\"%s\">%s</td>", jsesc(esc(st_first[k])), esc(st_first[k])
     print "</tr>"
   }
@@ -485,6 +507,8 @@ END {
   print ".st-ok{background:var(--line-good)}"
   print ".st-bad{background:#e34948}"
   print ".st-gap{background:var(--muted)}"
+  print ".delta-pos{color:var(--line-good)}"
+  print ".delta-neg{color:#e34948}"
   print ".hist-ok,.hist-bad,.hist-gap{display:inline-block;width:5px;height:12px;margin-right:1px;border-radius:1px;vertical-align:middle}"
   print ".hist-ok{background:var(--line-good)}"
   print ".hist-bad{background:#e34948}"

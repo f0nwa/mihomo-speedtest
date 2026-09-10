@@ -482,10 +482,11 @@ render_stats() {
 
 update_node_stability() {
   # Обновляет агрегат стабильности всех нод пула (node_stability.tsv) -
-  # источник данных: групповой delay-check шага 4 main() (map.txt - весь
-  # пул, alive.txt - живые + задержка), к замеру скорости отношения не
-  # имеет. Вызывается сразу после вычисления ALIVE, до всего, что связано
-  # с замером скорости и публикацией fast.yaml - статистика стабильности
+  # источники данных: групповой delay-check шага 4 (map.txt - весь пул,
+  # alive.txt - живые + задержка) и speed-тест шага 5 (res.txt - только
+  # ноды, реально прошедшие speed-тест в этом прогоне; тестируются не все
+  # живые ноды каждый прогон - см. ENOUGH). Вызывается после обоих шагов,
+  # до отбора победителей и публикации fast.yaml - статистика стабильности
   # пишется независимо от исхода остальных шагов прогона. Не критично для
   # работы замерщика - любая ошибка здесь WARN в лог, старый файл не
   # трогаем (та же схема, что и у record_history()).
@@ -497,7 +498,8 @@ update_node_stability() {
   [ -f "$statold" ] || statold=/dev/null
   if ! awk -v iso="$(date '+%Y-%m-%d %H:%M:%S')" -v window_len="$STABILITY_WINDOW" \
        -v drop_after="$STABILITY_DROP_AFTER" -v mapfile="$WORK/map.txt" \
-       -v alivefile="$WORK/alive.txt" -f "$NODE_STATS_UPDATE" "$statold" \
+       -v alivefile="$WORK/alive.txt" -v speedfile="$WORK/res.txt" \
+       -f "$NODE_STATS_UPDATE" "$statold" \
        > "$WORK/stability.new" 2> "$WORK/stability.err"; then
     say "WARN: node_stats_update.awk завершился с ошибкой, node_stability.tsv не обновлён"
     [ -s "$WORK/stability.err" ] && sed -n '1,3p' "$WORK/stability.err" >> "$RUN_LOG"
@@ -774,8 +776,9 @@ fi
 tr ',' '\n' < "$WORK/delay.json" | sed -n 's/.*"\(n[0-9]\{4\}\)":\([0-9]*\).*/\2 \1/p' | sort -n > "$WORK/alive.txt"
 ALIVE=$(wc -l < "$WORK/alive.txt")
 say "нод в пуле: $TOTAL, живых: $ALIVE"
-update_node_stability
+: > "$WORK/res.txt"
 if [ "$ALIVE" -lt 1 ]; then
+  update_node_stability
   say "WARN: живых нод нет, fast.yaml не трогаю"; exit 0
 fi
 
@@ -789,7 +792,6 @@ else
   say "WARN: прямой замер канала не удался, порог из настроек: $((EFFECTIVE_MIN/1048576)) МБ/с"
 fi
 GOOD=0
-: > "$WORK/res.txt"
 : > "$WORK/good_names.txt"
 while read -r D IDX; do
   select_proxy "$IDX" || continue
@@ -807,6 +809,7 @@ while read -r D IDX; do
     [ "$GOOD" -ge "$ENOUGH" ] && break
   fi
 done < "$WORK/alive.txt"
+update_node_stability
 
 # 6. отбор победителей и сборка fast.yaml
 select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS"
