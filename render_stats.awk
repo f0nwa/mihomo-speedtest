@@ -30,6 +30,7 @@ function esc(s) {
   gsub(/&/, "\\&amp;", s)
   gsub(/</, "\\&lt;", s)
   gsub(/>/, "\\&gt;", s)
+  gsub(/"/, "\\&quot;", s)
   return s
 }
 
@@ -296,6 +297,109 @@ function render_node_history(path, run_n,
   print "</div>"
 }
 
+# sparkline(win) - печатает строку из <span> на каждый символ window
+# (A/D/.) для компактной визуализации истории ноды без SVG.
+function sparkline(win,   i, ch, out, cls) {
+  out = ""
+  for (i = 1; i <= length(win); i++) {
+    ch = substr(win, i, 1)
+    cls = (ch == "A") ? "hist-ok" : (ch == "D") ? "hist-bad" : "hist-gap"
+    out = out "<span class=\"" cls "\"></span>"
+  }
+  return out
+}
+
+# render_node_stability(path) - читает node_stability.tsv (path, может
+# быть пустым/несуществующим) и печатает таблицу доступности ВСЕХ нод
+# пула (не только победителей): статус на последнем прогоне, uptime за
+# окно, спарклайн, среднюю задержку delay-check, дату первого появления.
+# К скорости загрузки отношения не имеет - источник данных group
+# delay-check (шаг 4 main()), не измерение скорости. Строки
+# отсортированы по убыванию uptime за окно; клик-сортировка по любой
+# колонке - в <script> в конце страницы.
+function render_node_stability(path,
+    line, f, nf, cnt, i, j, k, best, tmp, order,
+    name, win, wlen, ch, cls, label, srt, pctv, avg, alive_n, total_n) {
+  cnt = 0
+  if (path != "") {
+    while ((getline line < path) > 0) {
+      nf = split(line, f, "\t")
+      if (f[1] == "" || nf < 10) continue
+      cnt++
+      st_name[cnt] = f[1]
+      st_first[cnt] = f[2]
+      st_delay_sum[cnt] = f[7] + 0
+      st_delay_samples[cnt] = f[8] + 0
+      st_window[cnt] = f[10]
+    }
+    close(path)
+  }
+
+  print "<h2>Доступность нод пула</h2>"
+  print "<p class=\"legend\">все ноды пула по проверке задержки (delay-check) каждого прогона - к скорости загрузки отношения не имеет; серый индикатор и статус «нет в пуле» - нода сейчас не в пуле подписки.</p>"
+
+  if (cnt == 0) {
+    print "<p>Нет данных о стабильности нод.</p>"
+    return
+  }
+
+  for (i = 1; i <= cnt; i++) {
+    win = st_window[i]
+    wlen = length(win)
+    alive_n = 0; total_n = 0
+    for (k = 1; k <= wlen; k++) {
+      ch = substr(win, k, 1)
+      if (ch == "A") { alive_n++; total_n++ }
+      else if (ch == "D") total_n++
+    }
+    st_pct[i] = (total_n > 0) ? int(alive_n * 100 / total_n + 0.5) : -1
+  }
+
+  # сортировка по убыванию uptime за окно (набор невелик - выбором, как и везде в этом файле)
+  for (i = 1; i <= cnt; i++) order[i] = i
+  for (i = 1; i <= cnt; i++) {
+    best = i
+    for (j = i + 1; j <= cnt; j++) {
+      if (st_pct[order[j]] > st_pct[order[best]]) best = j
+    }
+    if (best != i) { tmp = order[i]; order[i] = order[best]; order[best] = tmp }
+  }
+
+  print "<div class=\"table-scroll\">"
+  print "<table id=\"stability-table\"><thead><tr>" \
+        "<th data-sort=\"str\" data-col=\"0\">Нода</th>" \
+        "<th data-sort=\"num\" data-col=\"1\">Сейчас</th>" \
+        "<th data-sort=\"num\" data-col=\"2\">Uptime (окно)</th>" \
+        "<th data-sort=\"none\" data-col=\"3\">Спарклайн</th>" \
+        "<th data-sort=\"num\" data-col=\"4\">Средняя задержка</th>" \
+        "<th data-sort=\"str\" data-col=\"5\">Впервые замечена</th>" \
+        "</tr></thead><tbody>"
+
+  for (i = 1; i <= cnt; i++) {
+    k = order[i]
+    name = st_name[k]
+    win = st_window[k]
+    wlen = length(win)
+    ch = (wlen > 0) ? substr(win, wlen, 1) : "."
+    if (ch == "A") { cls = "st-ok"; label = "жива"; srt = 2 }
+    else if (ch == "D") { cls = "st-bad"; label = "не отвечает"; srt = 1 }
+    else { cls = "st-gap"; label = "нет в пуле"; srt = 0 }
+
+    pctv = st_pct[k]
+    avg = (st_delay_samples[k] > 0) ? int(st_delay_sum[k] / st_delay_samples[k] + 0.5) : -1
+
+    printf "<tr><td data-v=\"%s\">%s</td>", jsesc(esc(name)), esc(name)
+    printf "<td data-v=\"%d\"><span class=\"dot %s\"></span>%s</td>", srt, cls, label
+    printf "<td data-v=\"%d\">%s</td>", pctv, (pctv >= 0 ? pctv "%" : "-")
+    printf "<td data-v=\"0\">%s</td>", sparkline(win)
+    printf "<td data-v=\"%d\">%s</td>", avg, (avg >= 0 ? avg " мс" : "-")
+    printf "<td data-v=\"%s\">%s</td>", jsesc(esc(st_first[k])), esc(st_first[k])
+    print "</tr>"
+  }
+  print "</tbody></table>"
+  print "</div>"
+}
+
 BEGIN {
   FS = "\t"
   n = 0
@@ -373,6 +477,18 @@ END {
   print ".stat-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted)}"
   print ".stat-label{display:flex;align-items:center;gap:4px;font-weight:600;color:var(--text)}"
   print ".stat b{color:var(--text);font-weight:600}"
+  print ".table-scroll{max-height:420px;overflow-y:auto}"
+  print "table th[data-sort]{cursor:pointer;user-select:none}"
+  print "table th[data-dir=\"asc\"]::after{content:\" \\2191\"}"
+  print "table th[data-dir=\"desc\"]::after{content:\" \\2193\"}"
+  print ".dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:-1px}"
+  print ".st-ok{background:var(--line-good)}"
+  print ".st-bad{background:#e34948}"
+  print ".st-gap{background:var(--muted)}"
+  print ".hist-ok,.hist-bad,.hist-gap{display:inline-block;width:5px;height:12px;margin-right:1px;border-radius:1px;vertical-align:middle}"
+  print ".hist-ok{background:var(--line-good)}"
+  print ".hist-bad{background:#e34948}"
+  print ".hist-gap{background:var(--border)}"
   print "</style>"
   print "<div class=\"wrap\">"
   print "<header>"
@@ -420,6 +536,12 @@ END {
       render_node_history(nodes, n)
       print "</div>"
     }
+  }
+
+  if (stability != "") {
+    print "<div class=\"card\">"
+    render_node_stability(stability)
+    print "</div>"
   }
 
   print "<div class=\"card\">"
@@ -527,6 +649,32 @@ END {
   print "apply(next);"
   print "try{if(next){localStorage.setItem(KEY,next);}else{localStorage.removeItem(KEY);}}catch(e){}"
   print "});"
+  print "})();"
+  print "</script>"
+  print "<script>"
+  print "(function(){"
+  print "var table=document.getElementById('stability-table');"
+  print "if(!table)return;"
+  print "var tbody=table.tBodies[0];"
+  print "var ths=table.querySelectorAll('th[data-sort]');"
+  print "for(var i=0;i<ths.length;i++){(function(th){"
+  print "if(th.getAttribute('data-sort')==='none')return;"
+  print "th.addEventListener('click',function(){"
+  print "var col=parseInt(th.getAttribute('data-col'),10);"
+  print "var type=th.getAttribute('data-sort');"
+  print "var dir=th.getAttribute('data-dir')==='asc'?'desc':'asc';"
+  print "for(var j=0;j<ths.length;j++)ths[j].removeAttribute('data-dir');"
+  print "th.setAttribute('data-dir',dir);"
+  print "var rows=Array.prototype.slice.call(tbody.rows);"
+  print "rows.sort(function(a,b){"
+  print "var av=a.cells[col].getAttribute('data-v');var bv=b.cells[col].getAttribute('data-v');"
+  print "if(type==='num'){av=parseFloat(av);bv=parseFloat(bv);}"
+  print "var cmp=av<bv?-1:av>bv?1:0;"
+  print "return dir==='asc'?cmp:-cmp;"
+  print "});"
+  print "for(var k=0;k<rows.length;k++)tbody.appendChild(rows[k]);"
+  print "});"
+  print "})(ths[i]);}"
   print "})();"
   print "</script>"
 }
