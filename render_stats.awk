@@ -157,7 +157,7 @@ function stat_row_html(name, sw_cls, mode, vals, cnt,   tmp, i, mn, mx, p95, cur
   cur = vals[cnt]
   label = (sw_cls != "") ? ("<span class=\"sw " sw_cls "\"></span>" esc(name)) : esc(name)
   printf "<div class=\"stat-group\"><span class=\"stat-label\">%s</span>" \
-    "<span class=\"stat\">Мин <b>%s</b></span><span class=\"stat\">Р95 <b>%s</b></span>" \
+    "<span class=\"stat\">Мин <b>%s</b></span><span class=\"stat\" title=\"95-й процентиль: 95%% замеров были не выше этого значения — устойчивая оценка «почти максимума» без случайных выбросов\">Р95 <b>%s</b></span>" \
     "<span class=\"stat\">Макс <b>%s</b></span><span class=\"stat\">Сейчас <b>%s</b></span></div>\n", \
     label, fmt_stat_val(mn, mode), fmt_stat_val(p95, mode), fmt_stat_val(mx, mode), fmt_stat_val(cur, mode)
 }
@@ -296,7 +296,7 @@ function render_node_history(path, run_n,
   print "</svg>"
   print "<div class=\"tooltip\" id=\"tooltip-hist\" hidden></div>"
   print "</div>"
-  printf "<script>window.STATS_CHARTS=window.STATS_CHARTS||{};STATS_CHARTS.hist={left:%d,top:%d,w:%d,h:%d,n:%d,max:%d,highlight:true,labels:[%s],series:[", \
+  printf "<script>window.STATS_CHARTS=window.STATS_CHARTS||{};STATS_CHARTS.hist={left:%d,top:%d,w:%d,h:%d,n:%d,max:%d,unit:\"mb\",highlight:true,labels:[%s],series:[", \
     left, top, w, h, run_n, hmax, join_str_js(iso, run_n)
   for (k = 1; k <= topk; k++) printf "%s%s", (k > 1 ? "," : ""), series_json[k]
   print "]};</script>"
@@ -619,6 +619,7 @@ END {
   print "}"
   print "function xFor(idx){return cfg.n>1?cfg.left+(idx*cfg.w/(cfg.n-1)):cfg.left+cfg.w/2;}"
   print "function yFor(v){var m=cfg.max||1;return cfg.top+cfg.h-(v*cfg.h/m);}"
+print "function fmtVal(cfg,v){if(cfg.unit!==\"mb\")return v;var mb=Math.floor(v/1048576);var frac=Math.floor((v%1048576)*10/1048576);return mb+\".\"+frac+\" МБ/с\";}"
   print "function show(clientX,clientY){"
   print "if(!cfg.n)return;"
   print "var loc=svgPoint(clientX,clientY);"
@@ -637,7 +638,7 @@ END {
   print "var s2=cfg.series[j];var v2=s2.values[idx];var dot=dots[s2.id];"
   print "if(v2===null||v2===undefined){if(dot)dot.setAttribute('visibility','hidden');}"
   print "else{if(dot){dot.setAttribute('cx',x);dot.setAttribute('cy',yFor(v2));dot.setAttribute('visibility','visible');}"
-  print "html+='<div class=\"tt-row\"><span class=\"sw sw-'+s2.id+'\"></span>'+s2.name+': '+v2+'</div>';}"
+  print "html+='<div class=\"tt-row\"><span class=\"sw sw-'+s2.id+'\"></span>'+s2.name+': '+fmtVal(cfg,v2)+'</div>';}"
   print "if(cfg.highlight&&groups[s2.id]){groups[s2.id].classList.toggle('dim',s2.id!==nearestId);}"
   print "}"
   print "tooltip.innerHTML=html;tooltip.hidden=false;"
