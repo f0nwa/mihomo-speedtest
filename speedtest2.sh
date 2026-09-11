@@ -75,6 +75,8 @@ STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для фор
 STATS_HTTP_CONF=${STATS_HTTP_CONF:-$DIR/stats_httpd.conf}          # конфиг busybox httpd (Basic Auth только на /cgi-bin), пишется сам
 STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
+STATS_RUN_SOURCE=${STATS_RUN_SOURCE:-$DIR/stats_run.sh}              # исходник CGI-скрипта кнопки force-прогона, ставится install.sh
+STATS_RUN_SCRIPT=${STATS_RUN_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/run}    # его же копия внутри раздаваемого каталога, пишется сама
 
 # Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
 # после правок") - только по команде --check-update, без автозапуска по
@@ -346,6 +348,23 @@ write_stats_cgi() {
   chmod +x "$STATS_CGI_SCRIPT" 2>/dev/null || true
 }
 
+write_stats_run() {
+  # Копирует CGI-скрипт кнопки "Запустить прогон сейчас" ($STATS_RUN_SOURCE,
+  # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
+  # ($STATS_RUN_SCRIPT) - см. комментарий в начале stats_run.sh. Как и
+  # write_stats_cgi(), каталог $STATS_HTTP_DIR/cgi-bin уже создан
+  # вызывающим ensure_stats_httpd(), отдельная проверка не нужна.
+  if [ ! -f "$STATS_RUN_SOURCE" ]; then
+    say "WARN: $STATS_RUN_SOURCE не найден, кнопка force-прогона недоступна (переустановите install.sh)"
+    return 0
+  fi
+  if ! publish_file "$STATS_RUN_SOURCE" "$STATS_RUN_SCRIPT"; then
+    say "WARN: не удалось записать $STATS_RUN_SCRIPT, кнопка force-прогона не обновлена"
+    return 0
+  fi
+  chmod +x "$STATS_RUN_SCRIPT" 2>/dev/null || true
+}
+
 ensure_stats_httpd() {
   # Поднимает (или перезапускает при смене адреса/порта) отдельный веб-сервис
   # для stats.html - раньше страница раздавалась только вместе с zashboard
@@ -371,6 +390,7 @@ ensure_stats_httpd() {
 
   write_stats_httpd_conf
   write_stats_cgi
+  write_stats_run
 
   # отпечаток адреса и защиты - смена любого из них требует перезапуска
   # httpd (логин/пароль читает только при старте из -c конфига); md5sum -

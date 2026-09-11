@@ -105,6 +105,8 @@ install_files() {
   atomic_install "$SELFDIR/render_stats.awk" "$DIR/render_stats.awk" || return 1
   atomic_install "$SELFDIR/stats_cgi.sh" "$DIR/stats_cgi.sh" || return 1
   chmod +x "$DIR/stats_cgi.sh"
+  atomic_install "$SELFDIR/stats_run.sh" "$DIR/stats_run.sh" || return 1
+  chmod +x "$DIR/stats_run.sh"
   # запасной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
   # запускается ensure_stats_httpd() из speedtest2.sh только если "busybox
   # httpd" недоступен на роутере; исполняемый бит не нужен, он вызывается
@@ -202,7 +204,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_httpd.py node_stats_update.awk sub_convert.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py node_stats_update.awk sub_convert.awk; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
