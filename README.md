@@ -236,7 +236,11 @@ DIRECT
     (`HISTORY_KEEP_RUNS`/`HISTORY_KEEP_DAYS`) и логин/пароль для самой
     этой формы (`STATS_AUTH_USER`/`STATS_AUTH_PASS` в `speedtest2.env`,
     Basic Auth только на `/cgi-bin` - сам `stats.html` всегда открыт без
-    пароля).
+    пароля);
+  - окно и срок хранения для таблицы "Доступность нод пула"
+    (`STABILITY_WINDOW`/`STABILITY_DROP_AFTER` - длина окна "недавних"
+    прогонов в `node_stability.tsv` и через сколько прогонов подряд без
+    ноды в пуле строка удаляется).
 
   Все значения пишутся в `speedtest2.env` тем же способом, что и
   `install.sh`, и действуют с ближайшего прогона (по cron или по кнопке

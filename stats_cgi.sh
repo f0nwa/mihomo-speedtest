@@ -117,6 +117,8 @@ if [ "$method" = "POST" ]; then
   topn=$(urldecode "$(get_field topn)")
   enough=$(urldecode "$(get_field enough)")
   min_winners=$(urldecode "$(get_field min_winners)")
+  stability_window=$(urldecode "$(get_field stability_window)")
+  stability_drop_after=$(urldecode "$(get_field stability_drop_after)")
 
   if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
     err="${err}Число нод на графике должно быть от 1 до 8.<br>"
@@ -157,6 +159,12 @@ if [ "$method" = "POST" ]; then
   if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
     err="${err}Минимум нод-победителей должен быть целым от 0 до 50.<br>"
   fi
+  if ! is_uint "$stability_window" || [ "$stability_window" -lt 1 ] || [ "$stability_window" -gt 5000 ]; then
+    err="${err}Длина окна стабильности должна быть целым от 1 до 5000 прогонов.<br>"
+  fi
+  if ! is_uint "$stability_drop_after"; then
+    err="${err}«Удалять ноду после» должно быть целым числом (0 = не удалять).<br>"
+  fi
   if [ -z "$no_auth" ]; then
     if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
       err="${err}Для смены пароля укажите и логин, и пароль.<br>"
@@ -179,6 +187,8 @@ if [ "$method" = "POST" ]; then
     set_env_var TOPN "$topn"
     set_env_var ENOUGH "$enough"
     set_env_var MIN_WINNERS "$min_winners"
+    set_env_var STABILITY_WINDOW "$stability_window"
+    set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
     if [ -n "$no_auth" ]; then
       set_env_var STATS_AUTH_USER ""
       set_env_var STATS_AUTH_PASS ""
@@ -302,6 +312,14 @@ $geo_filter_options</datalist>
 <label for="min_winners">Минимум нод в fast.yaml, даже ниже порога</label>
 <input type="number" min="0" max="50" id="min_winners" name="min_winners" value="$(html_escape "$MIN_WINNERS")">
 <p class="hint">Если рабочих нод меньше TOPN - добор идёт по убыванию скорости, пока не наберётся этот минимум.</p>
+</div>
+<div class="card">
+<h2>Стабильность нод</h2>
+<label for="stability_window">Длина окна "недавних" прогонов</label>
+<input type="number" min="1" max="5000" id="stability_window" name="stability_window" value="$(html_escape "$STABILITY_WINDOW")">
+<p class="hint">В прогонах, не в днях - 200 при прогоне раз в 3 часа - это около месяца. Влияет только на таблицу "Доступность нод пула" на stats.html.</p>
+<label for="stability_drop_after">Удалять ноду после стольких прогонов подряд без неё в пуле (0 = не удалять)</label>
+<input type="number" min="0" id="stability_drop_after" name="stability_drop_after" value="$(html_escape "$STABILITY_DROP_AFTER")">
 </div>
 <div class="card">
 <h2>График по нодам</h2>
