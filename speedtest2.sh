@@ -43,7 +43,9 @@ TOPN=20               # сколько нод класть в fast.yaml
 ENOUGH=25             # набрали столько выше порога - дальше не меряем
 MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
-SPEED_URL="https://speed.cloudflare.com/__down?bytes=$SIZE"
+# SPEED_URL строится ниже, ПОСЛЕ считывания speedtest2.env - иначе смена
+# SIZE через веб-форму/env молча не действовала бы (строка была бы уже
+# подставлена со старым SIZE до чтения $ENV).
 # гео-стоп-лист: ноды с такими кусками в имени не тестируются вовсе
 EXTYPE='trojan|ss'      # типы нод, которые вообще не тестируем
 BLOCK=${BLOCK:-}       # обязательный фильтр загружает install.sh через speedtest2.env
@@ -98,6 +100,7 @@ UPDATE_PROVIDERS_AWK=${UPDATE_PROVIDERS_AWK:-$DIR/providers.awk}
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
+SPEED_URL="https://speed.cloudflare.com/__down?bytes=$SIZE"  # см. комментарий у DELAY_URL выше
 
 say() {
   log_line="$(date '+%H:%M:%S') $*"

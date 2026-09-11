@@ -41,6 +41,34 @@ is_uint() {
   esac
 }
 
+is_pos_decimal() {
+  # $1 - строка. Успех: положительное число, точка - необязательный
+  # разделитель дробной части (напр. "10", "0.5", "1.25").
+  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 > 0) }'
+}
+
+is_nonneg_decimal() {
+  # то же самое, но допускает 0 (для MIN_FLOOR - 0 значит "без абсолютного
+  # минимума", остаётся только доля канала MIN_RATIO).
+  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 >= 0) }'
+}
+
+is_ratio() {
+  # $1 - строка. Успех: число в (0, 1] - доля прямого канала (MIN_RATIO).
+  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 > 0 && v + 0 <= 1) }'
+}
+
+mb_to_bytes() {
+  # Округление до целого байта - SIZE/MIN_SPEED/MIN_FLOOR в speedtest2.env
+  # всегда целые (сравниваются в awk/curl как обычные числа).
+  awk -v mb="$1" 'BEGIN { printf "%.0f", mb * 1048576 }'
+}
+
+bytes_to_mb() {
+  # %g сам обрезает лишние нули (10485760 -> "10", 524288 -> "0.5").
+  awk -v b="$1" 'BEGIN { printf "%g", b / 1048576 }'
+}
+
 get_field() {
   # $1 = имя поля. Ожидает $body с искусственным ведущим '&' (см. ниже) -
   # так шаблону не нужна альтернация "^|&", которую понимает не всякий sed.
@@ -80,6 +108,15 @@ if [ "$method" = "POST" ]; then
   auth_pass=$(urldecode "$(get_field auth_pass)")
   no_auth=$(urldecode "$(get_field no_auth)")
   geo_filter=$(urldecode "$(get_field geo_filter)")
+  extype=$(urldecode "$(get_field extype)")
+  size_mb=$(urldecode "$(get_field size_mb)")
+  dl_timeout=$(urldecode "$(get_field dl_timeout)")
+  min_speed_mb=$(urldecode "$(get_field min_speed_mb)")
+  min_ratio=$(urldecode "$(get_field min_ratio)")
+  min_floor_mb=$(urldecode "$(get_field min_floor_mb)")
+  topn=$(urldecode "$(get_field topn)")
+  enough=$(urldecode "$(get_field enough)")
+  min_winners=$(urldecode "$(get_field min_winners)")
 
   if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
     err="${err}Число нод на графике должно быть от 1 до 8.<br>"
@@ -96,6 +133,30 @@ if [ "$method" = "POST" ]; then
   if [ -z "$geo_filter" ]; then
     err="${err}Гео-фильтр обязателен - без него подписка может подставить российскую ноду.<br>"
   fi
+  if ! is_pos_decimal "$size_mb" || [ "$(awk -v v="$size_mb" 'BEGIN{print (v+0>=1 && v+0<=100)?1:0}')" != 1 ]; then
+    err="${err}Размер файла для замера должен быть числом от 1 до 100 МБ.<br>"
+  fi
+  if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
+    err="${err}Таймаут закачки должен быть целым числом от 1 до 120 секунд.<br>"
+  fi
+  if ! is_pos_decimal "$min_speed_mb" || [ "$(awk -v v="$min_speed_mb" 'BEGIN{print (v+0>0 && v+0<=1000)?1:0}')" != 1 ]; then
+    err="${err}Порог скорости должен быть числом больше 0 и не больше 1000 МБ/с.<br>"
+  fi
+  if ! is_ratio "$min_ratio"; then
+    err="${err}Доля канала должна быть числом больше 0 и не больше 1 (например 0.25).<br>"
+  fi
+  if ! is_nonneg_decimal "$min_floor_mb"; then
+    err="${err}Абсолютный минимум порога должен быть числом от 0 МБ/с (0 = без минимума).<br>"
+  fi
+  if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
+    err="${err}Число нод в fast.yaml (TOPN) должно быть целым от 1 до 50.<br>"
+  fi
+  if ! is_uint "$enough" || [ "$enough" -lt 1 ] || [ "$enough" -gt 100 ]; then
+    err="${err}«Хватит нод выше порога» должно быть целым от 1 до 100.<br>"
+  fi
+  if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
+    err="${err}Минимум нод-победителей должен быть целым от 0 до 50.<br>"
+  fi
   if [ -z "$no_auth" ]; then
     if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
       err="${err}Для смены пароля укажите и логин, и пароль.<br>"
@@ -109,6 +170,15 @@ if [ "$method" = "POST" ]; then
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
     set_env_var HISTORY_KEEP_DAYS "$keep_days"
     set_env_var BLOCK "$geo_filter"
+    set_env_var EXTYPE "$extype"
+    set_env_var SIZE "$(mb_to_bytes "$size_mb")"
+    set_env_var DL_TIMEOUT "$dl_timeout"
+    set_env_var MIN_SPEED "$(mb_to_bytes "$min_speed_mb")"
+    set_env_var MIN_RATIO "$min_ratio"
+    set_env_var MIN_FLOOR "$(mb_to_bytes "$min_floor_mb")"
+    set_env_var TOPN "$topn"
+    set_env_var ENOUGH "$enough"
+    set_env_var MIN_WINNERS "$min_winners"
     if [ -n "$no_auth" ]; then
       set_env_var STATS_AUTH_USER ""
       set_env_var STATS_AUTH_PASS ""
@@ -204,6 +274,34 @@ cat <<HTML
 <datalist id="geo_filter_options">
 $geo_filter_options</datalist>
 <p class="hint">Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter, найденные в текущем config.yaml.</p>
+</div>
+<div class="card">
+<h2>Как тестируем ноды</h2>
+<label for="extype">Исключить типы нод целиком (через |)</label>
+<input type="text" id="extype" name="extype" value="$(html_escape "$EXTYPE")" placeholder="например trojan|ss" autocomplete="off">
+<p class="hint">Пусто = тестировать все типы, которые понимает mihomo.</p>
+<label for="size_mb">Размер файла для замера, МБ</label>
+<input type="number" min="1" max="100" step="any" id="size_mb" name="size_mb" value="$(html_escape "$(bytes_to_mb "$SIZE")")">
+<p class="hint">Меньше 10 МБ занижает результат - треть времени уходит на TTFB.</p>
+<label for="dl_timeout">Таймаут закачки, сек</label>
+<input type="number" min="1" max="120" id="dl_timeout" name="dl_timeout" value="$(html_escape "$DL_TIMEOUT")">
+</div>
+<div class="card">
+<h2>Порог и число нод в fast.yaml</h2>
+<label for="min_speed_mb">Порог отбора (для текущего канала), МБ/с</label>
+<input type="number" min="0.1" max="1000" step="any" id="min_speed_mb" name="min_speed_mb" value="$(html_escape "$(bytes_to_mb "$MIN_SPEED")")">
+<p class="hint">Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.</p>
+<label for="min_ratio">Динамический порог, доля от прямого канала</label>
+<input type="number" min="0.01" max="1" step="any" id="min_ratio" name="min_ratio" value="$(html_escape "$MIN_RATIO")">
+<label for="min_floor_mb">Абсолютный минимум порога, МБ/с (0 = без минимума)</label>
+<input type="number" min="0" step="any" id="min_floor_mb" name="min_floor_mb" value="$(html_escape "$(bytes_to_mb "$MIN_FLOOR")")">
+<label for="topn">Сколько нод класть в fast.yaml (TOPN)</label>
+<input type="number" min="1" max="50" id="topn" name="topn" value="$(html_escape "$TOPN")">
+<label for="enough">Хватит нод выше порога - дальше не мерить</label>
+<input type="number" min="1" max="100" id="enough" name="enough" value="$(html_escape "$ENOUGH")">
+<label for="min_winners">Минимум нод в fast.yaml, даже ниже порога</label>
+<input type="number" min="0" max="50" id="min_winners" name="min_winners" value="$(html_escape "$MIN_WINNERS")">
+<p class="hint">Если рабочих нод меньше TOPN - добор идёт по убыванию скорости, пока не наберётся этот минимум.</p>
 </div>
 <div class="card">
 <h2>График по нодам</h2>
