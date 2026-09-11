@@ -111,6 +111,49 @@ function poly(vals, cnt, maxv,   i, x, y, out, w, h, left, top) {
   return out
 }
 
+# fmt_date_short(iso) — "YYYY-MM-DD HH:MM:SS" -> "DD.MM"
+function fmt_date_short(s) {
+  return substr(s, 9, 2) "." substr(s, 6, 2)
+}
+
+# fmt_time_short(iso) — "YYYY-MM-DD HH:MM:SS" -> "HH:MM"
+function fmt_time_short(s) {
+  return substr(s, 12, 5)
+}
+
+# render_x_axis_dates(left, top, w, h, run_n) — динамический таймлайн под
+# графиком: 2..6 подписей (по числу прогонов), позиции - как у точек на
+# графике (равномерно по индексу прогона, см. poly()/x в
+# render_node_history() - настоящий график тоже не привязан к реальным
+# интервалам времени, только к порядку прогонов). Если все выбранные
+# метки попадают на один календарный день - показывается время (HH:MM,
+# так полезнее при частых прогонах за день), иначе - дата (DD.MM).
+# Крайние подписи прижаты к краям графика (text-anchor start/end), чтобы
+# не вылезать за viewBox.
+function render_x_axis_dates(left, top, w, h, run_n,
+    tn, i, idx, prev_idx, x, anchor_pos, same_day, day1, lbl) {
+  if (run_n < 2) return
+  tn = (run_n < 6) ? run_n : 6
+  same_day = 1
+  day1 = substr(iso[1], 1, 10)
+  for (i = 1; i <= run_n; i++) {
+    if (substr(iso[i], 1, 10) != day1) { same_day = 0; break }
+  }
+  prev_idx = -1
+  for (i = 0; i < tn; i++) {
+    idx = 1 + int(i * (run_n - 1) / (tn - 1) + 0.5)
+    if (idx < 1) idx = 1
+    if (idx > run_n) idx = run_n
+    if (idx == prev_idx) continue
+    prev_idx = idx
+    x = (run_n > 1) ? left + int((idx - 1) * w / (run_n - 1)) : left + int(w / 2)
+    anchor_pos = (i == 0) ? "start" : (i == tn - 1) ? "end" : "middle"
+    lbl = same_day ? fmt_time_short(iso[idx]) : fmt_date_short(iso[idx])
+    printf "<line class=\"axis-tick\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", x, top + h, x, top + h + 4
+    printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"%s\">%s</text>\n", x, top + h + 15, anchor_pos, esc(lbl)
+  }
+}
+
 # sort_num(arr, cnt) — сортировка arr[1..cnt] по возрастанию на месте
 # (вставками — наборы небольшие, встроенной sort в POSIX awk нет).
 function sort_num(arr, cnt,   i, j, key) {
@@ -241,11 +284,12 @@ function render_node_history(path, run_n,
 
   left = 40; top = 10; w = 710; h = 170
   print "<div class=\"chart-wrap\">"
-  print "<svg id=\"svg-hist\" viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+  print "<svg id=\"svg-hist\" viewBox=\"0 0 760 214\" xmlns=\"http://www.w3.org/2000/svg\">"
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top, left, top + h
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top + h, left + w, top + h
   printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
   printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">0</text>\n", left - 6, top + h + 4
+  render_x_axis_dates(left, top, w, h, run_n)
 
   for (k = 1; k <= topk; k++) {
     nm = uniq[k]
@@ -473,6 +517,7 @@ END {
   print "h2{font-size:14.5px;margin:0 0 8px;font-weight:600}"
   print "svg{max-width:100%;height:auto;display:block;margin-bottom:8px}"
   print ".axis-line{stroke:var(--border)}"
+print ".axis-tick{stroke:var(--border)}"
   print ".axis-text{fill:var(--muted)}"
   print ".line-good{stroke:var(--line-good)}"
   print ".line-winners{stroke:var(--line-winners)}"
@@ -536,11 +581,12 @@ END {
     print "<p class=\"legend\"><span class=\"sw sw-good\"></span>нод выше порога" \
           "&nbsp; <span class=\"sw sw-winners\"></span>победителей (в fast.yaml)</p>"
     print "<div class=\"chart-wrap\">"
-    print "<svg id=\"svg-nodes\" viewBox=\"0 0 760 200\" xmlns=\"http://www.w3.org/2000/svg\">"
+    print "<svg id=\"svg-nodes\" viewBox=\"0 0 760 214\" xmlns=\"http://www.w3.org/2000/svg\">"
     printf "<line class=\"axis-line\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\"/>\n"
     printf "<line class=\"axis-line\" x1=\"40\" y1=\"180\" x2=\"750\" y2=\"180\"/>\n"
     printf "<text class=\"axis-text\" x=\"34\" y=\"14\" font-size=\"10\" text-anchor=\"end\">%d</text>\n", max2
     printf "<text class=\"axis-text\" x=\"34\" y=\"184\" font-size=\"10\" text-anchor=\"end\">0</text>\n"
+    render_x_axis_dates(40, 10, 710, 170, n)
     printf "<polyline class=\"line-good\" fill=\"none\" stroke-width=\"2\" points=\"%s\"/>\n", poly(good, n, max2)
     printf "<polyline class=\"line-winners\" fill=\"none\" stroke-width=\"2\" points=\"%s\"/>\n", poly(winners, n, max2)
     print "<line class=\"crosshair-line\" id=\"crosshair-nodes\" x1=\"40\" y1=\"10\" x2=\"40\" y2=\"180\" visibility=\"hidden\"/>"
