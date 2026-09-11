@@ -79,6 +79,7 @@ if [ "$method" = "POST" ]; then
   auth_user=$(urldecode "$(get_field auth_user)")
   auth_pass=$(urldecode "$(get_field auth_pass)")
   no_auth=$(urldecode "$(get_field no_auth)")
+  geo_filter=$(urldecode "$(get_field geo_filter)")
 
   if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
     err="${err}Число нод на графике должно быть от 1 до 8.<br>"
@@ -92,6 +93,9 @@ if [ "$method" = "POST" ]; then
   if [ -z "$err" ] && [ "$keep_runs" = 0 ] && [ "$keep_days" = 0 ]; then
     err="${err}Нельзя одновременно занулить оба лимита хранения истории.<br>"
   fi
+  if [ -z "$geo_filter" ]; then
+    err="${err}Гео-фильтр обязателен - без него подписка может подставить российскую ноду.<br>"
+  fi
   if [ -z "$no_auth" ]; then
     if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
       err="${err}Для смены пароля укажите и логин, и пароль.<br>"
@@ -104,6 +108,7 @@ if [ "$method" = "POST" ]; then
     set_env_var STATS_NODE_CAP "$node_cap"
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
     set_env_var HISTORY_KEEP_DAYS "$keep_days"
+    set_env_var BLOCK "$geo_filter"
     if [ -n "$no_auth" ]; then
       set_env_var STATS_AUTH_USER ""
       set_env_var STATS_AUTH_PASS ""
@@ -171,8 +176,35 @@ HTML
 
 cur_auth_user=$(html_escape "$STATS_AUTH_USER")
 
+# Кандидаты гео-фильтра из текущего config.yaml - те же, что install.sh
+# предложил бы при переустановке (providers.awk ищет exclude-filter у
+# proxy-providers). Файла может не быть или providers.awk не найти в нём
+# провайдеров - тогда просто нет подсказок, поле остаётся обычным текстовым.
+BLOCK_COUNT=0
+CONFIG_YAML=$DIR/config.yaml
+if [ -f "$CONFIG_YAML" ] && [ -n "${UPDATE_PROVIDERS_AWK:-}" ] && [ -f "$UPDATE_PROVIDERS_AWK" ]; then
+  block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
+  [ -n "$block_candidates" ] && eval "$block_candidates"
+fi
+geo_filter_options=""
+i=1
+while [ "$i" -le "$BLOCK_COUNT" ]; do
+  eval "cand=\$BLOCK_$i"
+  geo_filter_options="$geo_filter_options<option value=\"$(html_escape "$cand")\">
+"
+  i=$((i + 1))
+done
+
 cat <<HTML
 <form method="post">
+<div class="card">
+<h2>Гео-фильтр (BLOCK)</h2>
+<label for="geo_filter">Регулярное выражение для исключения нод</label>
+<input type="text" id="geo_filter" name="geo_filter" list="geo_filter_options" value="$(html_escape "$BLOCK")" autocomplete="off">
+<datalist id="geo_filter_options">
+$geo_filter_options</datalist>
+<p class="hint">Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter, найденные в текущем config.yaml.</p>
+</div>
 <div class="card">
 <h2>График по нодам</h2>
 <label for="node_cap">Число нод на графике (1-8)</label>
