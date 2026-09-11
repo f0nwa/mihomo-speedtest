@@ -272,6 +272,26 @@ atomic_install() {
 main() {
   check_mihomo_process && check_versions || return 1
 
+  # Существующий dns: и так переносится как есть (existing_config.awk,
+  # dns_out) - здесь речь не про сам DNS, а про стороннюю панель Xkeen UI:
+  # она хранит хэш ВСЕГО config.yaml на момент включения своей "Защищённой
+  # DNS Mihomo", и после перезаписи этот хэш неизбежно разойдётся, даже
+  # если блок dns: не тронут ни на байт. Тогда её кнопка "Восстановить"
+  # откатывает СВОЙ старый снимок и затирает то, что только что применил
+  # setup.sh. SKIP_DNS_GUARD_CHECK=1 - явный обход для неинтерактивных
+  # прогонов (тот, кто это выставляет, берёт ответственность на себя).
+  if [ "${SKIP_DNS_GUARD_CHECK:-0}" != 1 ] && xkeen_ui_dns_protection_active; then
+    echo "setup.sh: похоже, на роутере сейчас активна \"Защищённая DNS Mihomo\" панели Xkeen UI (или её DNS-over-VLESS для Xray - оба используют один и тот же переключатель Keenetic opkg dns-override)." >&2
+    echo "setup.sh: config.yaml будет перезаписан. Блок dns: перенесётся как есть, но хэш ВСЕГО файла, который панель Xkeen UI сверяет сама с собой, после этого не совпадёт." >&2
+    echo "setup.sh: после установки НЕ нажимайте \"Восстановить\" в панели Xkeen UI - это откатит её собственный старый снимок и затрёт результат этой установки. Если статус защиты в панели собьётся - просто включите её заново тем же способом, каким включали в первый раз." >&2
+    printf 'setup.sh: продолжить установку? [y/N] ' >&2
+    read -r dns_guard_ans || dns_guard_ans=""
+    case "$dns_guard_ans" in
+      [Yy]*) ;;
+      *) echo "setup.sh: установка отменена" >&2; return 1 ;;
+    esac
+  fi
+
   [ -f "$TEMPLATE" ] || { echo "setup.sh: шаблон $TEMPLATE не найден" >&2; return 1; }
 
   subs_file=$(mktemp "${TMPDIR:-/tmp}/setup_urls.XXXXXX")
