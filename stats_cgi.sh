@@ -41,21 +41,22 @@ is_uint() {
   esac
 }
 
-is_pos_decimal() {
-  # $1 - строка. Успех: положительное число, точка - необязательный
-  # разделитель дробной части (напр. "10", "0.5", "1.25").
-  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 > 0) }'
-}
-
-is_nonneg_decimal() {
-  # то же самое, но допускает 0 (для MIN_FLOOR - 0 значит "без абсолютного
-  # минимума", остаётся только доля канала MIN_RATIO).
-  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 >= 0) }'
-}
-
-is_ratio() {
-  # $1 - строка. Успех: число в (0, 1] - доля прямого канала (MIN_RATIO).
-  awk -v v="$1" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 > 0 && v + 0 <= 1) }'
+is_decimal_in_range() {
+  # $1=значение, $2=нижняя граница, $3="incl"|"excl" (входит ли сама
+  # граница), $4=верхняя граница ("" = без ограничения сверху, всегда
+  # включительно). Один awk-вызов вместо двух (было: отдельно формат,
+  # отдельно диапазон) - на форме с полутора десятками числовых полей
+  # лишние fork/exec на каждое поле складываются в заметную нагрузку на
+  # слабом роутере (см. CHANGELOG про фикс тайм-аута CGI).
+  awk -v v="$1" -v lo="$2" -v loType="$3" -v hi="$4" 'BEGIN {
+    ok = (v ~ /^[0-9]+(\.[0-9]+)?$/)
+    if (ok) {
+      n = v + 0
+      if (loType == "excl") { if (!(n > lo)) ok = 0 } else { if (!(n >= lo)) ok = 0 }
+      if (ok && hi != "" && !(n <= hi)) ok = 0
+    }
+    exit !ok
+  }'
 }
 
 mb_to_bytes() {
@@ -69,10 +70,26 @@ bytes_to_mb() {
   awk -v b="$1" 'BEGIN { printf "%g", b / 1048576 }'
 }
 
-get_field() {
-  # $1 = имя поля. Ожидает $body с искусственным ведущим '&' (см. ниже) -
-  # так шаблону не нужна альтернация "^|&", которую понимает не всякий sed.
-  printf '%s' "$body" | sed -n "s/.*&$1=\\([^&]*\\).*/\\1/p"
+parse_body_fields() {
+  # Разбирает $body (application/x-www-form-urlencoded) ОДНИМ проходом
+  # awk вместо отдельного sed на каждое из 16 полей формы (было: sed
+  # заново пересканировал всю строку на каждое имя поля - O(число полей)
+  # forkнутых процессов на один запрос). Печатает shell-присваивания
+  # RAW_<имя>='<ещё закодированное значение>' для eval - urldecode()
+  # по-прежнему делается отдельно на каждое значение (нельзя раскодировать
+  # $body целиком разом: закодированный литеральный '&' внутри значения
+  # после этого было бы не отличить от настоящего разделителя полей).
+  printf '%s' "$body" | awk -F '&' '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "") continue
+        eq = index($i, "=")
+        if (eq == 0) { name = $i; val = "" } else { name = substr($i, 1, eq - 1); val = substr($i, eq + 1) }
+        if (name !~ /^[A-Za-z_][A-Za-z0-9_]*$/) continue
+        gsub(/'"'"'/, "'"'"'\\'"'"''"'"'", val)
+        printf "RAW_%s='"'"'%s'"'"'\n", name, val
+      }
+    }'
 }
 
 set_env_var() {
@@ -99,26 +116,32 @@ if [ "$method" = "POST" ]; then
   else
     body=""
   fi
-  body="&$body"
 
-  node_cap=$(urldecode "$(get_field node_cap)")
-  keep_runs=$(urldecode "$(get_field keep_runs)")
-  keep_days=$(urldecode "$(get_field keep_days)")
-  auth_user=$(urldecode "$(get_field auth_user)")
-  auth_pass=$(urldecode "$(get_field auth_pass)")
-  no_auth=$(urldecode "$(get_field no_auth)")
-  geo_filter=$(urldecode "$(get_field geo_filter)")
-  extype=$(urldecode "$(get_field extype)")
-  size_mb=$(urldecode "$(get_field size_mb)")
-  dl_timeout=$(urldecode "$(get_field dl_timeout)")
-  min_speed_mb=$(urldecode "$(get_field min_speed_mb)")
-  min_ratio=$(urldecode "$(get_field min_ratio)")
-  min_floor_mb=$(urldecode "$(get_field min_floor_mb)")
-  topn=$(urldecode "$(get_field topn)")
-  enough=$(urldecode "$(get_field enough)")
-  min_winners=$(urldecode "$(get_field min_winners)")
-  stability_window=$(urldecode "$(get_field stability_window)")
-  stability_drop_after=$(urldecode "$(get_field stability_drop_after)")
+  RAW_node_cap=""; RAW_keep_runs=""; RAW_keep_days=""; RAW_auth_user=""
+  RAW_auth_pass=""; RAW_no_auth=""; RAW_geo_filter=""; RAW_extype=""
+  RAW_size_mb=""; RAW_dl_timeout=""; RAW_min_speed_mb=""; RAW_min_ratio=""
+  RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
+  RAW_stability_window=""; RAW_stability_drop_after=""
+  eval "$(parse_body_fields)"
+
+  node_cap=$(urldecode "$RAW_node_cap")
+  keep_runs=$(urldecode "$RAW_keep_runs")
+  keep_days=$(urldecode "$RAW_keep_days")
+  auth_user=$(urldecode "$RAW_auth_user")
+  auth_pass=$(urldecode "$RAW_auth_pass")
+  no_auth=$(urldecode "$RAW_no_auth")
+  geo_filter=$(urldecode "$RAW_geo_filter")
+  extype=$(urldecode "$RAW_extype")
+  size_mb=$(urldecode "$RAW_size_mb")
+  dl_timeout=$(urldecode "$RAW_dl_timeout")
+  min_speed_mb=$(urldecode "$RAW_min_speed_mb")
+  min_ratio=$(urldecode "$RAW_min_ratio")
+  min_floor_mb=$(urldecode "$RAW_min_floor_mb")
+  topn=$(urldecode "$RAW_topn")
+  enough=$(urldecode "$RAW_enough")
+  min_winners=$(urldecode "$RAW_min_winners")
+  stability_window=$(urldecode "$RAW_stability_window")
+  stability_drop_after=$(urldecode "$RAW_stability_drop_after")
 
   if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
     err="${err}Число нод на графике должно быть от 1 до 8.<br>"
@@ -135,19 +158,19 @@ if [ "$method" = "POST" ]; then
   if [ -z "$geo_filter" ]; then
     err="${err}Гео-фильтр обязателен - без него подписка может подставить российскую ноду.<br>"
   fi
-  if ! is_pos_decimal "$size_mb" || [ "$(awk -v v="$size_mb" 'BEGIN{print (v+0>=1 && v+0<=100)?1:0}')" != 1 ]; then
+  if ! is_decimal_in_range "$size_mb" 1 incl 100; then
     err="${err}Размер файла для замера должен быть числом от 1 до 100 МБ.<br>"
   fi
   if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
     err="${err}Таймаут закачки должен быть целым числом от 1 до 120 секунд.<br>"
   fi
-  if ! is_pos_decimal "$min_speed_mb" || [ "$(awk -v v="$min_speed_mb" 'BEGIN{print (v+0>0 && v+0<=1000)?1:0}')" != 1 ]; then
+  if ! is_decimal_in_range "$min_speed_mb" 0 excl 1000; then
     err="${err}Порог скорости должен быть числом больше 0 и не больше 1000 МБ/с.<br>"
   fi
-  if ! is_ratio "$min_ratio"; then
+  if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
     err="${err}Доля канала должна быть числом больше 0 и не больше 1 (например 0.25).<br>"
   fi
-  if ! is_nonneg_decimal "$min_floor_mb"; then
+  if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
     err="${err}Абсолютный минимум порога должен быть числом от 0 МБ/с (0 = без минимума).<br>"
   fi
   if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
