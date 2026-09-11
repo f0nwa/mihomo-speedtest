@@ -95,7 +95,6 @@ proxy-groups:
   # Внутри отобранного пула выбирается нода с минимальной задержкой.
   - name: '⚡ Быстрый пул'
     type: url-test
-    hidden: true
     use: [fast]
     url: "https://www.gstatic.com/generate_204"
     interval: 60
