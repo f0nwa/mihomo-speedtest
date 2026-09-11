@@ -11,6 +11,17 @@
 # NAME - ключ провайдера в старом proxy-providers: (setup.sh по
 # умолчанию предлагает сохранить это имя при переносе подписки).
 #
+# proxies_out: если исходный config.yaml уже был отрендерен render_config.awk,
+# блок proxies: содержит маркеры "  # --- STATIC_PROXIES:BEGIN ---" /
+# "  # --- STATIC_PROXIES:END ---" (см. render_config.awk). В этом случае в
+# proxies_out попадают только строки МЕЖДУ маркерами (сами маркеры и
+# следующий за END служебный комментарий "# --- Провайдеры прокси ---" в
+# файл не переносятся) - иначе render_config.awk при следующей установке
+# печатал бы поверх них свою собственную пару маркеров, и с каждым прогоном
+# setup.sh блок дублировался бы ещё на одну пару BEGIN/END. Если маркеров в
+# proxies: нет (ручной config.yaml без render_config.awk), сохраняется
+# старое поведение - переносится весь блок proxies: как есть.
+#
 # Использование:
 #   awk -v urls_out=PATH [-v proxies_out=PATH] [-v dns_out=PATH] -f existing_config.awk config.yaml
 #
@@ -23,7 +34,7 @@ BEGIN {
   in_pp = 0; prov_indent = -1; attr_indent = -1
   cur_has_url = 0; cur_is_file = 0; cur_url = ""; cur_ua = ""; cur_name = ""
   in_header = 0; header_indent = -1; ua_key_indent = -1
-  in_proxies = 0; proxies_text = ""; proxies_placeholder = 0
+  in_proxies = 0; in_proxies_capture = 0; proxies_text = ""; proxies_placeholder = 0
   in_dns = 0; dns_text = ""
 }
 
@@ -81,9 +92,21 @@ in_pp {
   }
 }
 
-/^proxies:[ \t]*$/ { flush_provider(); in_pp = 0; in_dns = 0; in_proxies = 1; next }
-in_proxies && /^[^ \t#]/ { in_proxies = 0 }
-in_proxies {
+/^proxies:[ \t]*$/ { flush_provider(); in_pp = 0; in_dns = 0; in_proxies = 1; in_proxies_capture = 1; next }
+in_proxies && /^[ \t]*# --- STATIC_PROXIES:BEGIN ---/ {
+  # Уже отрендеренный файл: всё, что могло накопиться до маркера, - не
+  # содержимое нод, а render_config.awk печатает свою собственную пару
+  # BEGIN/END при вставке. Без сброса здесь маркеры и следующий за ними
+  # комментарий "# --- Провайдеры прокси ---" дублировались бы на каждый
+  # прогон setup.sh.
+  proxies_text = ""
+  proxies_placeholder = 0
+  in_proxies_capture = 1
+  next
+}
+in_proxies && /^[ \t]*# --- STATIC_PROXIES:END ---/ { in_proxies = 0; in_proxies_capture = 0; next }
+in_proxies && /^[^ \t#]/ { in_proxies = 0; in_proxies_capture = 0 }
+in_proxies && in_proxies_capture {
   proxies_text = proxies_text $0 "\n"
   if ($0 ~ /CHANGE_ME/ || $0 ~ /example\.com/) proxies_placeholder = 1
 }
