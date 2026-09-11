@@ -323,7 +323,8 @@ function sparkline(win,   i, ch, out, cls) {
 # окно (по delay-check), спарклайн, отклонение последней измеренной
 # скорости от собственного среднего этой ноды (Δ скорости), дату первого
 # появления. Статус/uptime/спарклайн - из group delay-check (шаг 4
-# main(), весь пул каждый прогон); Δ скорости - из speed-теста (шаг 5,
+# main(), весь пул каждый прогон); средняя скорость (в скобках -
+# отклонение последнего замера от неё) - из speed-теста (шаг 5,
 # проходят не все ноды каждый прогон, см. ENOUGH в speedtest2.sh),
 # поэтому у части нод может стоять «-», даже если они «живы» по задержке.
 # Строки отсортированы по убыванию uptime за окно; клик-сортировка по
@@ -349,7 +350,7 @@ function render_node_stability(path,
   }
 
   print "<h2>Доступность нод пула</h2>"
-  print "<p class=\"legend\">статус, uptime и спарклайн - по проверке задержки (delay-check) каждого прогона, весь пул; Δ скорости - отклонение последнего измеренного значения от среднего этой же ноды, только у нод, хоть раз прошедших speed-тест (проходят не все ноды каждый прогон); серый индикатор и статус «нет в пуле» - нода сейчас не в пуле подписки.</p>"
+  print "<p class=\"legend\">статус, uptime и спарклайн - по проверке задержки (delay-check) каждого прогона, весь пул; средняя скорость - среднее всех замеров ноды, в скобках отклонение последнего замера от этого среднего; только у нод, хоть раз прошедших speed-тест (проходят не все ноды каждый прогон); серый индикатор и статус «нет в пуле» - нода сейчас не в пуле подписки.</p>"
 
   if (cnt == 0) {
     print "<p>Нет данных о стабильности нод.</p>"
@@ -384,7 +385,7 @@ function render_node_stability(path,
         "<th data-sort=\"num\" data-col=\"1\">Сейчас</th>" \
         "<th data-sort=\"num\" data-col=\"2\">Uptime (окно)</th>" \
         "<th data-sort=\"none\" data-col=\"3\">Спарклайн</th>" \
-        "<th data-sort=\"num\" data-col=\"4\">Δ скорости</th>" \
+        "<th data-sort=\"num\" data-col=\"4\">Средняя скорость</th>" \
         "<th data-sort=\"str\" data-col=\"5\">Впервые замечена</th>" \
         "</tr></thead><tbody>"
 
@@ -403,10 +404,10 @@ function render_node_stability(path,
       avg_speed = st_speed_sum[k] / st_speed_samples[k]
       delta = st_last_speed[k] - avg_speed
       delta_cls = (delta > 0) ? "delta-pos" : (delta < 0) ? "delta-neg" : ""
-      dv = delta
-      dtxt = "<span class=\"" delta_cls "\">" fmt_mb_signed(delta) " МБ/с</span>"
+      dv = avg_speed
+      dtxt = fmt_mb(avg_speed) " МБ/с <span class=\"" delta_cls "\">(" fmt_mb_signed(delta) ")</span>"
     } else {
-      dv = -2000000000
+      dv = -1
       dtxt = "-"
     }
 
