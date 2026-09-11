@@ -3,3 +3,5 @@ config.yaml
 __pycache__/
 *.pyc
 _preview/
+
+tests/
