@@ -25,9 +25,32 @@ if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
 fi
 
 urldecode() {
-  # busybox httpd -d делает то же декодирование, что браузер для
-  # application/x-www-form-urlencoded: '+' -> пробел, %XX -> байт.
-  busybox httpd -d "$1"
+  # Раньше: busybox httpd -d "$1" - на сборке Entware BusyBox без апплета
+  # httpd (busybox httpd -d "2" -> "httpd: applet not found", код 127,
+  # пустой stdout) любое поле формы декодировалось в пустую строку
+  # независимо от длины и содержимого - веб-форма при этом отдаётся,
+  # потому что сам httpd-сервер запускается другим путём/бинарником, а
+  # внутри CGI-скрипта голое имя "busybox" резолвится через PATH именно
+  # в этот урезанный busybox. Декодирование сделано чистым awk - не
+  # зависит от того, какой busybox и с какими апплетами найдётся в PATH.
+  printf '%s' "$1" | awk '
+    BEGIN {
+      for (i = 0; i <= 255; i++) {
+        h = sprintf("%02x", i); H = sprintf("%02X", i)
+        byte[h] = sprintf("%c", i); byte[H] = sprintf("%c", i)
+      }
+    }
+    {
+      s = $0; out = ""; n = length(s); i = 1
+      while (i <= n) {
+        c = substr(s, i, 1)
+        if (c == "+") { out = out " "; i += 1 }
+        else if (c == "%" && i + 2 <= n && substr(s, i + 1, 2) in byte) {
+          out = out byte[substr(s, i + 1, 2)]; i += 3
+        } else { out = out c; i += 1 }
+      }
+      printf "%s", out
+    }'
 }
 
 html_escape() {
