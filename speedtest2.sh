@@ -60,6 +60,7 @@ STABILITY_WINDOW=${STABILITY_WINDOW:-200}          # длина окна "нед
 STABILITY_DROP_AFTER=${STABILITY_DROP_AFTER:-$HISTORY_KEEP_RUNS}  # прогонов подряд без ноды в пуле -> строка удаляется из node_stability.tsv (0 = не удалять)
 
 STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # страница статистики (раздаётся отдельным веб-сервисом, см. STATS_HTTP_* ниже)
+STATS_JSON=${STATS_JSON:-$DIR/stats_www/stats.json}   # тот же дашборд в JSON (см. render_stats.awk -v format=json, шаг 2 SPA-миграции) - раздаётся как /api/stats
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
 STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
 STATS_HTTP_BIND=${STATS_HTTP_BIND:-0.0.0.0}        # адрес привязки (0.0.0.0 = вся локальная сеть, как и 9090)
@@ -67,9 +68,9 @@ STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-серви�
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # каталог, который раздаётся; создаётся сам, с zashboard не связан
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
-STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # основной сервер; -f -p BIND:PORT -h DIR -c CONF добавляются автоматически
-STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # запасной сервер на python3 (см. README) - если STATS_HTTPD_CMD не смог стартовать
-STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для запасного сервера
+STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # резервный сервер (шаг 5 SPA-миграции - см. design-док) - только старые адреса /stats.html и /cgi-bin/*, без чистых URL; используется, если недоступен python3 (см. STATS_HTTPD_PY ниже); -f -p BIND:PORT -h DIR -c CONF добавляются автоматически
+STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # основной сервер (нужен python3) - чистые URL (/, /stats, /settings) и /api/*, см. README; если python3 недоступен - используется резервный STATS_HTTPD_CMD выше
+STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для основного сервера
 STATS_HTTPD_IP_CMD=${STATS_HTTPD_IP_CMD:-ip}            # чем определять LAN-адрес роутера для адреса в консоли, см. stats_httpd_advertise_host()
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод показывать на графике по нодам, 1..8 (см. render_stats.awk)
 STATS_AUTH_USER=${STATS_AUTH_USER:-}                # логин для формы настройки /cgi-bin/config; пусто = без пароля
@@ -79,6 +80,12 @@ STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исход�
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
 STATS_RUN_SOURCE=${STATS_RUN_SOURCE:-$DIR/stats_run.sh}              # исходник CGI-скрипта кнопки force-прогона, ставится install.sh
 STATS_RUN_SCRIPT=${STATS_RUN_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/run}    # его же копия внутри раздаваемого каталога, пишется сама
+STATS_INDEX_SOURCE=${STATS_INDEX_SOURCE:-$DIR/stats_index.html}     # исходник SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md), ставится install.sh
+STATS_INDEX_HTML=${STATS_INDEX_HTML:-$STATS_HTTP_DIR/index.html}    # его же копия внутри раздаваемого каталога, пишется сама
+STATS_STYLE_SOURCE=${STATS_STYLE_SOURCE:-$DIR/stats_style.css}      # исходник общего CSS для SPA-shell, ставится install.sh
+STATS_STYLE_CSS=${STATS_STYLE_CSS:-$STATS_HTTP_DIR/style.css}       # его же копия внутри раздаваемого каталога, пишется сама
+STATS_APP_SOURCE=${STATS_APP_SOURCE:-$DIR/stats_app.js}             # исходник клиентского роутера/логики SPA-shell, ставится install.sh
+STATS_APP_JS=${STATS_APP_JS:-$STATS_HTTP_DIR/app.js}                # его же копия внутри раздаваемого каталога, пишется сама
 
 # Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
 # после правок") - только по команде --check-update, без автозапуска по
@@ -368,6 +375,31 @@ write_stats_run() {
   chmod +x "$STATS_RUN_SCRIPT" 2>/dev/null || true
 }
 
+write_stats_static() {
+  # Копирует статические файлы SPA-shell ($STATS_INDEX_SOURCE/$STATS_STYLE_SOURCE/
+  # $STATS_APP_SOURCE, ставятся install.sh рядом со speedtest2.sh) в
+  # раздаваемый каталог - см. docs/plans/2026-09-12-web-spa-migration-design.md.
+  # Файлы статические (без подстановки значений из $ENV, в отличие от
+  # stats.html из render_stats()) - copy как есть, исполняемый бит не
+  # нужен. Как и write_stats_cgi()/write_stats_run() - отсутствие
+  # источника или неудачная запись только логируют WARN и НЕ прерывают
+  # ensure_stats_httpd() (return 0 в любом случае): stats_httpd.py просто
+  # продолжит отдавать "/" как stats.html (или 404 на новых путях), как
+  # было до этой функции - см. _full_path_for()/_spa_fallback() в нём.
+  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS"; do
+    src=${pair%%:*}
+    dst=${pair#*:}
+    if [ ! -f "$src" ]; then
+      say "WARN: $src не найден, SPA-интерфейс (/stats, /settings) недоступен (переустановите install.sh)"
+      continue
+    fi
+    if ! publish_file "$src" "$dst"; then
+      say "WARN: не удалось записать $dst, SPA-интерфейс не обновлён"
+    fi
+  done
+  return 0
+}
+
 ensure_stats_httpd() {
   # Поднимает (или перезапускает при смене адреса/порта) отдельный веб-сервис
   # для stats.html - раньше страница раздавалась только вместе с zashboard
@@ -379,6 +411,11 @@ ensure_stats_httpd() {
   # DIR и ENV экспортируются, чтобы дочерний httpd и порождаемые им CGI-запросы
   # (stats_cgi.sh) видели те же настройки, что и текущий прогон - см.
   # комментарий в начале stats_cgi.sh.
+  #
+  # Выбор сервера (шаг 5 SPA-миграции, см.
+  # docs/plans/2026-09-12-web-spa-migration-design.md - решение по
+  # python3-зависимости: вариант 2, деградация, а не жёсткая зависимость) -
+  # ниже, перед выбором backend.
   export DIR ENV
 
   if [ "$STATS_HTTP_ENABLE" != 1 ]; then
@@ -394,6 +431,7 @@ ensure_stats_httpd() {
   write_stats_httpd_conf
   write_stats_cgi
   write_stats_run
+  write_stats_static
 
   # отпечаток адреса и защиты - смена любого из них требует перезапуска
   # httpd (логин/пароль читает только при старте из -c конфига); md5sum -
@@ -411,14 +449,31 @@ ensure_stats_httpd() {
     stop_stats_httpd
   fi
 
+  # Основной сервер - stats_httpd.py (python3): только он умеет чистые URL
+  # (/, /stats, /settings) и /api/* - см. docs/plans/2026-09-12-web-spa-migration-design.md.
+  # Если python3 недоступен (файла нет или сам интерпретатор не найден в
+  # PATH) - молча переходим к резервному "busybox httpd" ниже: старые
+  # адреса /stats.html и /cgi-bin/* при этом продолжают работать, просто
+  # без чистых URL и /api/*.
+  py_available=0
+  if [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
+    py_available=1
+  fi
+
   backend=""
-  newpid=$(start_stats_httpd_backend "$STATS_HTTPD_CMD") && backend=$STATS_HTTPD_CMD
-  if [ -z "$backend" ] && [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
-    say "веб-сервис статистики: $STATS_HTTPD_CMD недоступен, пробую запасной сервер ($STATS_HTTPD_PY_CMD $STATS_HTTPD_PY)"
+  if [ "$py_available" = 1 ]; then
     newpid=$(start_stats_httpd_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY") && backend="$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY"
   fi
   if [ -z "$backend" ]; then
-    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT ни основным сервером, ни запасным - подробности в $STATS_HTTP_LOG"
+    if [ "$py_available" = 1 ]; then
+      say "веб-сервис статистики: $STATS_HTTPD_PY_CMD $STATS_HTTPD_PY не запустился, пробую резервный сервер ($STATS_HTTPD_CMD)"
+    else
+      say "веб-сервис статистики: $STATS_HTTPD_PY_CMD не найден - используется резервный сервер ($STATS_HTTPD_CMD), доступны только /stats.html и /cgi-bin/*; для чистых URL поставьте python3 (см. README)"
+    fi
+    newpid=$(start_stats_httpd_backend "$STATS_HTTPD_CMD") && backend=$STATS_HTTPD_CMD
+  fi
+  if [ -z "$backend" ]; then
+    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT ни основным сервером, ни резервным - подробности в $STATS_HTTP_LOG"
     return 0
   fi
   if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
@@ -488,9 +543,10 @@ render_stats() {
     say "WARN: $RENDER_STATS не найден, stats.html не обновлён"
     return 0
   fi
+  generated_ts=$(date '+%Y-%m-%d %H:%M:%S')
   if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
        -v stability="$HISTORY_STABILITY" \
-       -v generated="$(date '+%Y-%m-%d %H:%M:%S')" \
+       -v generated="$generated_ts" \
        -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.html" 2> "$WORK/stats.err"; then
     say "WARN: render_stats.awk завершился с ошибкой, stats.html не обновлён"
     [ -s "$WORK/stats.err" ] && sed -n '1,3p' "$WORK/stats.err" >> "$RUN_LOG"
@@ -501,6 +557,27 @@ render_stats() {
     return 0
   fi
   publish_file "$WORK/stats.html" "$STATS_HTML" || say "WARN: stats.html не записан"
+
+  # stats.json - те же данные для /api/stats (см. шаг 2 SPA-миграции и
+  # маршрут "api/stats" в stats_httpd.py) - тот же вход, та же метка
+  # времени, что и у stats.html выше, отдельный awk-прогон с -v format=json.
+  # Ошибка/пустой результат здесь - только WARN, как и для stats.html:
+  # /api/stats на роутерах без python3-бэкенда всё равно не используется,
+  # а на новом бэкенде app.js сам покажет отсутствие данных.
+  if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
+       -v stability="$HISTORY_STABILITY" \
+       -v generated="$generated_ts" \
+       -v format=json \
+       -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.json" 2> "$WORK/stats.json.err"; then
+    say "WARN: render_stats.awk (JSON) завершился с ошибкой, stats.json не обновлён"
+    [ -s "$WORK/stats.json.err" ] && sed -n '1,3p' "$WORK/stats.json.err" >> "$RUN_LOG"
+    return 0
+  fi
+  if [ ! -s "$WORK/stats.json" ]; then
+    say "WARN: render_stats.awk (JSON) вернул пустой файл, stats.json не обновлён"
+    return 0
+  fi
+  publish_file "$WORK/stats.json" "$STATS_JSON" || say "WARN: stats.json не записан"
 }
 
 update_node_stability() {

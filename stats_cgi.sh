@@ -127,6 +127,162 @@ set_env_var() {
   mv "$tmp" "$ENV"
 }
 
+_add_err() {
+  # $1=условное имя поля (для err_fields - задел под будущий JSON-путь
+  # /api/settings, шаг 4), $2=текст сообщения без HTML-разметки. Пишет
+  # сразу в обе глобальные переменные - err (HTML, с <br> между
+  # сообщениями, как было раньше) и err_fields (по строке
+  # "поле|сообщение" на ошибку, без HTML-разметки) - у обеих один и тот
+  # же вызов validate_settings_fields() ниже как единственный источник
+  # правил.
+  err="${err}$2<br>"
+  err_fields="${err_fields}$1|$2
+"
+}
+
+validate_settings_fields() {
+  # Проверяет уже раскодированные значения полей формы настройки (18
+  # штук: node_cap, keep_runs, keep_days, geo_filter, extype, size_mb,
+  # dl_timeout, min_speed_mb, min_ratio, min_floor_mb, topn, enough,
+  # min_winners, stability_window, stability_drop_after, no_auth,
+  # auth_user, auth_pass - берутся из одноимённых shell-переменных,
+  # устанавливаемых ДО вызова этой функции: сегодня - urldecode() из тела
+  # POST HTML-формы ниже, в будущем (шаг 4, см.
+  # docs/plans/2026-09-12-web-spa-migration-design.md) - разбором
+  # JSON-тела POST /api/settings). Ни $ENV, ни другие файлы не трогает -
+  # только заполняет err/err_fields (см. _add_err()) и возвращает 0, если
+  # ошибок нет, иначе 1. Один набор правил на оба вызывающих пути - при
+  # подключении JSON API в шаге 4 их не дублировать, а звать эту же
+  # функцию.
+  err=""
+  err_fields=""
+
+  if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
+    _add_err node_cap "Число нод на графике должно быть от 1 до 8."
+  fi
+  if ! is_uint "$keep_runs"; then
+    _add_err keep_runs "«Хранить прогонов» должно быть целым числом (0 = не ограничивать)."
+  fi
+  if ! is_uint "$keep_days"; then
+    _add_err keep_days "«Хранить дней» должно быть целым числом (0 = не ограничивать)."
+  fi
+  if [ -z "$err" ] && [ "$keep_runs" = 0 ] && [ "$keep_days" = 0 ]; then
+    _add_err keep_days "Нельзя одновременно занулить оба лимита хранения истории."
+  fi
+  if [ -z "$geo_filter" ]; then
+    _add_err geo_filter "Гео-фильтр обязателен - без него подписка может подставить российскую ноду."
+  fi
+  if ! is_decimal_in_range "$size_mb" 1 incl 100; then
+    _add_err size_mb "Размер файла для замера должен быть числом от 1 до 100 МБ."
+  fi
+  if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
+    _add_err dl_timeout "Таймаут закачки должен быть целым числом от 1 до 120 секунд."
+  fi
+  if ! is_decimal_in_range "$min_speed_mb" 0 excl 1000; then
+    _add_err min_speed_mb "Порог скорости должен быть числом больше 0 и не больше 1000 МБ/с."
+  fi
+  if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
+    _add_err min_ratio "Доля канала должна быть числом больше 0 и не больше 1 (например 0.25)."
+  fi
+  if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
+    _add_err min_floor_mb "Абсолютный минимум порога должен быть числом от 0 МБ/с (0 = без минимума)."
+  fi
+  if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
+    _add_err topn "Число нод в fast.yaml (TOPN) должно быть целым от 1 до 50."
+  fi
+  if ! is_uint "$enough" || [ "$enough" -lt 1 ] || [ "$enough" -gt 100 ]; then
+    _add_err enough "«Хватит нод выше порога» должно быть целым от 1 до 100."
+  fi
+  if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
+    _add_err min_winners "Минимум нод-победителей должен быть целым от 0 до 50."
+  fi
+  if ! is_uint "$stability_window" || [ "$stability_window" -lt 1 ] || [ "$stability_window" -gt 5000 ]; then
+    _add_err stability_window "Длина окна стабильности должна быть целым от 1 до 5000 прогонов."
+  fi
+  if ! is_uint "$stability_drop_after"; then
+    _add_err stability_drop_after "«Удалять ноду после» должно быть целым числом (0 = не удалять)."
+  fi
+  if [ -z "$no_auth" ]; then
+    if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
+      _add_err auth_pass "Для смены пароля укажите и логин, и пароль."
+    elif [ -z "$auth_user" ] && [ -n "$auth_pass" ]; then
+      _add_err auth_user "Для смены пароля укажите и логин, и пароль."
+    fi
+  fi
+
+  [ -z "$err" ]
+}
+
+print_settings_json() {
+  # JSON-ответ для /api/settings (шаг 4, см.
+  # docs/plans/2026-09-12-web-spa-migration-design.md) - включается
+  # переменной окружения API_JSON=1, которую stats_httpd.py добавляет
+  # только для алиаса "/api/settings" (см. API_ALIASES в stats_httpd.py) -
+  # обычный "/cgi-bin/config" её не получает и продолжает отдавать HTML
+  # форму как раньше. GET - текущие значения полей (те же переменные,
+  # что подставляются в HTML-форму ниже - $STATS_NODE_CAP/$BLOCK/...).
+  # POST - результат validate_settings_fields()/сохранения выше:
+  # {"ok":true} либо {"ok":false,"errors":{"поле":"сообщение",...}}
+  # (errors собран из err_fields - см. _add_err()).
+  echo "Content-Type: application/json; charset=utf-8"
+  echo
+
+  if [ "$method" = "POST" ]; then
+    if [ -n "$err" ]; then
+      printf '%s\n' "$err_fields" | awk -F'|' '
+        function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+        BEGIN { printf "{\"ok\":false,\"errors\":{"; first = 1 }
+        NF >= 2 {
+          field = $1
+          msg = $0
+          sub(/^[^|]*\|/, "", msg)
+          if (!first) printf ","
+          first = 0
+          printf "\"%s\":\"%s\"", esc(field), esc(msg)
+        }
+        END { printf "}}" }'
+    else
+      printf '{"ok":true}'
+    fi
+    return 0
+  fi
+
+  # geo_filter/extype/auth_user - через окружение процесса (ENVIRON[] в
+  # awk), а не "-v": awk сам разбирает escape-последовательности внутри
+  # значений "-v" (POSIX) - буквальный "\\" в регулярном выражении
+  # гео-фильтра мог бы незаметно потеряться. Числовые поля ниже такому
+  # риску не подвержены (уже провалидированы как целые/десятичные) -
+  # для них "-v" как и везде в проекте.
+  MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" MST_API_AUTHUSER="$STATS_AUTH_USER" \
+  awk -v node_cap="$STATS_NODE_CAP" -v keep_runs="$HISTORY_KEEP_RUNS" \
+      -v keep_days="$HISTORY_KEEP_DAYS" \
+      -v size_mb="$(bytes_to_mb "$SIZE")" -v dl_timeout="$DL_TIMEOUT" \
+      -v min_speed_mb="$(bytes_to_mb "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
+      -v min_floor_mb="$(bytes_to_mb "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
+      -v min_winners="$MIN_WINNERS" -v stability_window="$STABILITY_WINDOW" \
+      -v stability_drop_after="$STABILITY_DROP_AFTER" '
+    function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+    BEGIN {
+      geo_filter = ENVIRON["MST_API_GEO"]
+      extype = ENVIRON["MST_API_EXTYPE"]
+      auth_user = ENVIRON["MST_API_AUTHUSER"]
+      printf "{\"ok\":true,\"values\":{"
+      printf "\"node_cap\":%d,\"keep_runs\":%d,\"keep_days\":%d,", node_cap + 0, keep_runs + 0, keep_days + 0
+      printf "\"geo_filter\":\"%s\",\"extype\":\"%s\",", esc(geo_filter), esc(extype)
+      printf "\"size_mb\":%s,\"dl_timeout\":%d,", size_mb + 0, dl_timeout + 0
+      printf "\"min_speed_mb\":%s,\"min_ratio\":%s,\"min_floor_mb\":%s,", min_speed_mb + 0, min_ratio + 0, min_floor_mb + 0
+      printf "\"topn\":%d,\"enough\":%d,\"min_winners\":%d,", topn + 0, enough + 0, min_winners + 0
+      printf "\"stability_window\":%d,\"stability_drop_after\":%d,", stability_window + 0, stability_drop_after + 0
+      printf "\"has_auth\":%s,\"auth_user\":\"%s\",", (auth_user == "" ? "false" : "true"), esc(auth_user)
+      printf "\"geo_filter_candidates\":["
+      gf_first = 1
+    }
+    { if ($0 == "") next; if (!gf_first) printf ","; gf_first = 0; printf "\"%s\"", esc($0) }
+    END { printf "]}}" }' <<GEOFILTER_CANDIDATES
+$geo_filter_candidates_raw
+GEOFILTER_CANDIDATES
+}
+
 method=${REQUEST_METHOD:-GET}
 msg=""
 err=""
@@ -166,58 +322,7 @@ if [ "$method" = "POST" ]; then
   stability_window=$(urldecode "$RAW_stability_window")
   stability_drop_after=$(urldecode "$RAW_stability_drop_after")
 
-  if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
-    err="${err}Число нод на графике должно быть от 1 до 8.<br>"
-  fi
-  if ! is_uint "$keep_runs"; then
-    err="${err}«Хранить прогонов» должно быть целым числом (0 = не ограничивать).<br>"
-  fi
-  if ! is_uint "$keep_days"; then
-    err="${err}«Хранить дней» должно быть целым числом (0 = не ограничивать).<br>"
-  fi
-  if [ -z "$err" ] && [ "$keep_runs" = 0 ] && [ "$keep_days" = 0 ]; then
-    err="${err}Нельзя одновременно занулить оба лимита хранения истории.<br>"
-  fi
-  if [ -z "$geo_filter" ]; then
-    err="${err}Гео-фильтр обязателен - без него подписка может подставить российскую ноду.<br>"
-  fi
-  if ! is_decimal_in_range "$size_mb" 1 incl 100; then
-    err="${err}Размер файла для замера должен быть числом от 1 до 100 МБ.<br>"
-  fi
-  if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
-    err="${err}Таймаут закачки должен быть целым числом от 1 до 120 секунд.<br>"
-  fi
-  if ! is_decimal_in_range "$min_speed_mb" 0 excl 1000; then
-    err="${err}Порог скорости должен быть числом больше 0 и не больше 1000 МБ/с.<br>"
-  fi
-  if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
-    err="${err}Доля канала должна быть числом больше 0 и не больше 1 (например 0.25).<br>"
-  fi
-  if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
-    err="${err}Абсолютный минимум порога должен быть числом от 0 МБ/с (0 = без минимума).<br>"
-  fi
-  if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
-    err="${err}Число нод в fast.yaml (TOPN) должно быть целым от 1 до 50.<br>"
-  fi
-  if ! is_uint "$enough" || [ "$enough" -lt 1 ] || [ "$enough" -gt 100 ]; then
-    err="${err}«Хватит нод выше порога» должно быть целым от 1 до 100.<br>"
-  fi
-  if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
-    err="${err}Минимум нод-победителей должен быть целым от 0 до 50.<br>"
-  fi
-  if ! is_uint "$stability_window" || [ "$stability_window" -lt 1 ] || [ "$stability_window" -gt 5000 ]; then
-    err="${err}Длина окна стабильности должна быть целым от 1 до 5000 прогонов.<br>"
-  fi
-  if ! is_uint "$stability_drop_after"; then
-    err="${err}«Удалять ноду после» должно быть целым числом (0 = не удалять).<br>"
-  fi
-  if [ -z "$no_auth" ]; then
-    if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
-      err="${err}Для смены пароля укажите и логин, и пароль.<br>"
-    elif [ -z "$auth_user" ] && [ -n "$auth_pass" ]; then
-      err="${err}Для смены пароля укажите и логин, и пароль.<br>"
-    fi
-  fi
+  validate_settings_fields
 
   if [ -z "$err" ]; then
     set_env_var STATS_NODE_CAP "$node_cap"
@@ -255,6 +360,36 @@ if [ "$method" = "POST" ]; then
     rm -rf "$WORK"
     msg="Настройки сохранены."
   fi
+fi
+
+# Кандидаты гео-фильтра из текущего config.yaml - те же, что install.sh
+# предложил бы при переустановке (providers.awk ищет exclude-filter у
+# proxy-providers). Файла может не быть или providers.awk не найти в нём
+# провайдеров - тогда просто нет подсказок (пустой geo_filter_options /
+# geo_filter_candidates_raw), поле в форме/API остаётся обычным текстовым.
+# Нужно и HTML-пути (datalist ниже), и JSON-пути (print_settings_json) -
+# посчитано один раз здесь, до ветвления по API_JSON.
+BLOCK_COUNT=0
+CONFIG_YAML=$DIR/config.yaml
+if [ -f "$CONFIG_YAML" ] && [ -n "${UPDATE_PROVIDERS_AWK:-}" ] && [ -f "$UPDATE_PROVIDERS_AWK" ]; then
+  block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
+  [ -n "$block_candidates" ] && eval "$block_candidates"
+fi
+geo_filter_options=""
+geo_filter_candidates_raw=""
+i=1
+while [ "$i" -le "$BLOCK_COUNT" ]; do
+  eval "cand=\$BLOCK_$i"
+  geo_filter_options="$geo_filter_options<option value=\"$(html_escape "$cand")\">
+"
+  geo_filter_candidates_raw="${geo_filter_candidates_raw}${cand}
+"
+  i=$((i + 1))
+done
+
+if [ -n "${API_JSON:-}" ]; then
+  print_settings_json
+  exit 0
 fi
 
 echo "Content-Type: text/html; charset=utf-8"
@@ -301,25 +436,6 @@ HTML
 [ -n "$err" ] && printf '<p class="msg-err">%s</p>\n' "$err"
 
 cur_auth_user=$(html_escape "$STATS_AUTH_USER")
-
-# Кандидаты гео-фильтра из текущего config.yaml - те же, что install.sh
-# предложил бы при переустановке (providers.awk ищет exclude-filter у
-# proxy-providers). Файла может не быть или providers.awk не найти в нём
-# провайдеров - тогда просто нет подсказок, поле остаётся обычным текстовым.
-BLOCK_COUNT=0
-CONFIG_YAML=$DIR/config.yaml
-if [ -f "$CONFIG_YAML" ] && [ -n "${UPDATE_PROVIDERS_AWK:-}" ] && [ -f "$UPDATE_PROVIDERS_AWK" ]; then
-  block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
-  [ -n "$block_candidates" ] && eval "$block_candidates"
-fi
-geo_filter_options=""
-i=1
-while [ "$i" -le "$BLOCK_COUNT" ]; do
-  eval "cand=\$BLOCK_$i"
-  geo_filter_options="$geo_filter_options<option value=\"$(html_escape "$cand")\">
-"
-  i=$((i + 1))
-done
 
 cat <<HTML
 <form method="post">

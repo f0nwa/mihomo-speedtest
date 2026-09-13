@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8">
+<title>speedtest2 - статистика</title>
+<link rel="stylesheet" href="style.css">
+<!--
+  SPA-shell веб-сервиса статистики speedtest2 (см. README, раздел про
+  stats_www, и docs/plans/2026-09-12-web-spa-migration-design.md). Один
+  и тот же файл отдаётся под "/", "/stats" и "/settings" (и вообще любым
+  путём, не совпавшим с реальным файлом - см. _spa_fallback() в
+  stats_httpd.py); какой раздел показать, решает app.js по
+  location.pathname. Ставится install.sh как $DIR/stats_index.html;
+  копия внутри раздаваемого каталога (index.html) пишется сама
+  write_stats_static() из speedtest2.sh при каждом прогоне
+  ensure_stats_httpd() - править нужно этот файл, копия перезаписывается
+  автоматически и правки в ней не сохранятся.
+-->
+<div class="wrap">
+<header>
+<div><h1>speedtest2</h1><p class="meta">Статистика и настройка</p></div>
+<div style="display:flex;gap:8px;flex:0 0 auto;align-items:center">
+<nav>
+<a href="/stats" data-link>Статистика</a>
+<a href="/settings" data-link>Настройки</a>
+</nav>
+<button class="theme-btn" id="themeBtn" type="button">Тема</button>
+</div>
+</header>
+<div id="app"></div>
+</div>
+<script src="app.js"></script>

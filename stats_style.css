@@ -1,0 +1,54 @@
+/* Общий CSS для SPA-shell веб-сервиса статистики speedtest2 (index.html +
+   app.js) - см. docs/plans/2026-09-12-web-spa-migration-design.md.
+   Перенесено из инлайнового <style> в stats_cgi.sh (форма настройки) -
+   тот же набор токенов/карточек/кнопок, один файл вместо двух копий,
+   см. TODO.md про дублирование CSS между stats.html и формой настройки.
+   Ставится install.sh как $DIR/stats_style.css; копия внутри
+   раздаваемого каталога (style.css) пишется сама write_stats_static()
+   из speedtest2.sh - править нужно этот файл, не копию. */
+
+:root{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--accent:#2a78d6}
+@media (prefers-color-scheme: dark){:root{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--accent:#2a78d6}}
+:root[data-theme="light"]{--bg:#f5f6f8;--card:#ffffff;--card-border:#e2e2e2;--text:#1b1f24;--muted:#666666;--border:#e2e2e2;--shadow:0 1px 2px rgba(15,17,21,.06);--accent:#2a78d6}
+:root[data-theme="dark"]{--bg:#0b0d12;--card:#161a21;--card-border:#262b33;--text:#e7e9ec;--muted:#9aa0a6;--border:#262b33;--shadow:0 1px 3px rgba(0,0,0,.4);--accent:#2a78d6}
+*{box-sizing:border-box}
+body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--text)}
+.wrap{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+h1{font-size:19px;margin:0}
+.meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
+nav{display:flex;gap:4px}
+nav a{color:var(--text);text-decoration:none;font-size:13px;padding:6px 10px;border-radius:8px}
+nav a:hover{background:var(--card-border)}
+nav a.active{background:var(--accent);color:#fff}
+.theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
+.card{background:var(--card);border:1px solid var(--card-border);border-radius:14px;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
+h2{font-size:14.5px;margin:0 0 8px;font-weight:600}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+label:first-child{margin-top:0}
+input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 9px;border:1px solid var(--card-border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px}
+.hint{color:var(--muted);font-size:12px;margin:4px 0 0}
+.row-checkbox{display:flex;align-items:center;gap:6px;margin-top:12px}
+.row-checkbox label{margin:0}
+button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
+button.submit:disabled{opacity:.6;cursor:default}
+.msg-ok{background:#16a34a22;border:1px solid #16a34a;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
+.msg-err{background:#dc262622;border:1px solid #dc2626;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
+pre{background:var(--card);border:1px solid var(--card-border);border-radius:8px;padding:12px;overflow:auto;font-size:12px}
+
+/* Раздел "Статистика" (шаг 4, /api/stats): легенда графика по нодам,
+   сам SVG-график и таблица доступности пула. */
+.legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-bottom:8px;font-size:12px;color:var(--muted)}
+.legend-item{display:inline-flex;align-items:center;gap:5px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px}
+svg{display:block;max-width:100%}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600}
+.status-alive{color:#16a34a}
+.status-down{color:#dc2626}
+.status-absent{color:var(--muted)}
+
+/* Раздел "Настройки" (шаг 4, /api/settings): подсветка поля с ошибкой,
+   пришедшей из errors в ответе POST. */
+.input-err{border-color:#dc2626 !important}

@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Запасной веб-сервер для веб-сервиса статистики speedtest2 (см. README,
-раздел про stats_www) - на случай, если busybox на роутере собран без
-апплета httpd (бывает на некоторых прошивках Keenetic). Ставится install.sh
-как $DIR/stats_httpd.py; ensure_stats_httpd() в speedtest2.sh запускает его
-теми же аргументами, что и "busybox httpd", если тот не смог стартовать.
+"""Веб-сервер веб-сервиса статистики speedtest2 (см. README, раздел про
+stats_www). Ставится install.sh как $DIR/stats_httpd.py; ensure_stats_httpd()
+в speedtest2.sh запускает его теми же аргументами, что и "busybox httpd".
+
+С шага 5 SPA-миграции (см.
+docs/plans/2026-09-12-web-spa-migration-design.md, решение по
+python3-зависимости - вариант 2, деградация) это ОСНОВНОЙ сервер: только
+он умеет чистые URL (/, /stats, /settings) и /api/* (см. ниже).
+"busybox httpd" остаётся резервным вариантом на роутерах без python3 -
+ensure_stats_httpd() переходит на него автоматически, если этот файл не
+найден или сам python3 не установлен; тогда работают только старые
+адреса /stats.html и /cgi-bin/*, без чистых URL.
 
 Поддерживает ту часть CLI busybox httpd, которой пользуется этот проект:
   -p BIND:PORT   адрес и порт
@@ -29,9 +36,39 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
 (отдельный процесс-обработчик на соединение). При потоках слушатель и
 обработчик были бы одним процессом, и kill оборвал бы поток, дописывающий
 ответ, вместе со всем остальным.
+
+Маршрутизация "чистых" URL (добавлено 2026-09-12, см. design-док выше -
+шаг 1 из плана миграции, дальше в шагах 2-6):
+  - "/api/run" - внутренний алиас на "cgi-bin/run": дальше запрос идёт по
+    тому же пути, что и раньше "/cgi-bin/run" (сам stats_run.sh не менялся)
+    - в т.ч. под тем же правилом Basic Auth, если он настроен на "/cgi-bin"
+    в конфиге write_stats_httpd_conf().
+  - "/api/settings" - внутренний алиас на "cgi-bin/config" (та же защита
+    Basic Auth, что и у "/cgi-bin", тот же stats_cgi.sh) с добавленной
+    переменной окружения API_JSON=1 - по ней stats_cgi.sh печатает JSON
+    вместо HTML-формы (см. шаг 3 design-дока и его же "Статус выполнения
+    шага 4"): GET отдаёт текущие значения полей, POST - результат
+    валидации/сохранения.
+  - "/api/stats" - внутренний алиас на статический "stats.json" в
+    docroot, который render_stats() в speedtest2.sh пишет рядом со
+    stats.html (тот же awk, режим -v format=json - см. шаг 2). Не CGI -
+    обычная раздача файла, данные всегда посчитаны заранее, а не по
+    запросу.
+  - "/api/..." (всё остальное) - алиасов нет, отвечает JSON с кодом 501,
+    а не 404, чтобы фронтенд мог отличить "эндпоинт ещё не существует" от
+    обрыва сети или опечатки в пути.
+  - "/", "/stats", "/settings" и вообще любой GET/HEAD, не попавший ни в
+    файл в docroot, ни в один из путей выше, - отдаёт "index.html"
+    (SPA-shell) с кодом 200, если он есть в docroot (SPA-фоллбек: клиентский
+    роутер сам решает, что показать, по location.pathname). Если
+    index.html ещё не установлен (роутер не обновлял install.sh) - как и
+    раньше, для корня подставляется "stats.html", если он на месте, а для
+    остальных путей - обычный 404. Ничего не ломает для тех, у кого этих
+    новых файлов ещё нет.
 """
 import base64
 import http.server
+import json
 import os
 import socketserver
 import subprocess
@@ -94,7 +131,26 @@ def guess_content_type(path):
         return "application/javascript; charset=utf-8"
     if path.endswith(".svg"):
         return "image/svg+xml"
+    if path.endswith(".json"):
+        return "application/json; charset=utf-8"
     return "application/octet-stream"
+
+
+# Внутренние алиасы "чистых" API-путей на существующие файлы/cgi-bin-скрипты
+# (см. шапку файла). Ключ - относительный путь без ведущего "/", в том
+# виде, в котором его возвращает Handler._normalize_rel(). Значение -
+# пара (target_rel, extra_env): target_rel - на что заменить путь дальше
+# по коду (тот же формат, без ведущего "/"), extra_env - дополнительные
+# переменные окружения, которые нужно добавить, если target_rel окажется
+# CGI (для обычного файла extra_env просто не используется). Раскрывать
+# такие алиасы нужно ДО проверки Basic Auth и ДО решения "это /api/*, без
+# алиаса" - только тогда, например, запрос к "/api/run" пройдёт по тем же
+# правилам защиты и исполнения, что и "/cgi-bin/run" сегодня.
+API_ALIASES = {
+    "api/run": ("cgi-bin/run", {}),
+    "api/settings": ("cgi-bin/config", {"API_JSON": "1"}),
+    "api/stats": ("stats.json", {}),
+}
 
 
 def make_handler(docroot, auth_rules):
@@ -107,12 +163,35 @@ def make_handler(docroot, auth_rules):
         def log_message(self, fmt, *args):
             pass  # тихо - лог уже ведёт speedtest2.sh поверх stdout/stderr процесса
 
-        def _resolve_path(self, url_path):
-            # Без ".." и абсолютных путей за пределы docroot.
+        def _normalize_rel(self, url_path):
+            # Возвращает (rel, ok). rel - путь относительно docroot без
+            # ведущего "/", None означает запрос корня ("" или ".").
+            # ok=False - попытка выйти за пределы docroot через ".." -
+            # проверяется по самой строке пути, а не после join+normpath,
+            # чтобы решение "отклонить" не зависело от того, существует ли
+            # там что-нибудь физически (защита от race и от особенностей
+            # symlink), и чтобы этот же rel можно было безопасно сверять с
+            # API_ALIASES/префиксом "api/" ещё до похода в файловую систему.
             raw = urllib.parse.unquote(url_path.split("?", 1)[0])
             rel = os.path.normpath(raw).lstrip("/\\")
             if rel in ("", "."):
-                rel = "stats.html"
+                return None, True
+            if rel == ".." or rel.startswith(".." + os.sep):
+                return None, False
+            return rel, True
+
+        def _full_path_for(self, rel):
+            # rel уже нормализован _normalize_rel() (или является одним из
+            # API_ALIASES) - None здесь означает корень.
+            if rel is None:
+                for cand in ("index.html", "stats.html"):
+                    p = os.path.join(docroot, cand)
+                    if os.path.isfile(p):
+                        return p
+                # Ни одного из двух нет - подставляем index.html: он не
+                # существует, но по нему дальше корректно посчитается
+                # url_path для Basic Auth и решится 404 в общем порядке.
+                return os.path.join(docroot, "index.html")
             full = os.path.normpath(os.path.join(docroot, rel))
             if full != docroot and not full.startswith(docroot + os.sep):
                 return None
@@ -147,6 +226,13 @@ def make_handler(docroot, auth_rules):
             if body_bytes:
                 self.wfile.write(body_bytes)
 
+        def _send_json(self, status, obj):
+            # /api/stats и /api/settings реализованы через алиасы на файл/CGI
+            # (см. API_ALIASES) - здесь остаётся единственный вызывающий:
+            # заглушка "не реализовано" в _handle() для /api/* без алиаса.
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self._send_simple(status, "application/json; charset=utf-8", body)
+
         def _send_auth_challenge(self):
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="stats"')
@@ -157,7 +243,7 @@ def make_handler(docroot, auth_rules):
             rel_parts = os.path.relpath(full_path, docroot).split(os.sep)
             return len(rel_parts) >= 2 and "cgi-bin" in rel_parts[:-1] and os.access(full_path, os.X_OK)
 
-        def _run_cgi(self, full_path):
+        def _run_cgi(self, full_path, extra_env=None):
             parsed = urllib.parse.urlsplit(self.path)
             length = int(self.headers.get("Content-Length", "0") or "0")
             body = self.rfile.read(length) if length > 0 else b""
@@ -169,6 +255,11 @@ def make_handler(docroot, auth_rules):
             env["SCRIPT_NAME"] = parsed.path
             env["SERVER_SOFTWARE"] = self.server_version
             env["REMOTE_ADDR"] = self.client_address[0]
+            if extra_env:
+                # Доп. переменные из API_ALIASES (например API_JSON=1 для
+                # "/api/settings") - только для алиасов, у обычных
+                # "/cgi-bin/..." extra_env пустой/None, поведение не меняется.
+                env.update(extra_env)
             try:
                 proc = subprocess.run(
                     [full_path],
@@ -213,22 +304,7 @@ def make_handler(docroot, auth_rules):
             self.end_headers()
             self.wfile.write(cgi_body)
 
-        def _handle(self):
-            full_path = self._resolve_path(self.path)
-            if full_path is None:
-                self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
-                return
-            url_path = self._url_path_of(full_path)
-            required = self._auth_required_for(url_path)
-            if required and not self._has_valid_auth(*required):
-                self._send_auth_challenge()
-                return
-            if self._is_cgi(full_path):
-                self._run_cgi(full_path)
-                return
-            if not os.path.isfile(full_path):
-                self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
-                return
+        def _serve_file(self, full_path):
             try:
                 with open(full_path, "rb") as f:
                     data = f.read()
@@ -236,6 +312,66 @@ def make_handler(docroot, auth_rules):
                 self._send_simple(500, "text/plain; charset=utf-8", b"500 internal error\n")
                 return
             self._send_simple(200, guess_content_type(full_path), data)
+
+        def _spa_fallback(self, rel):
+            # Только для GET/HEAD - POST на несуществующий путь так и должен
+            # оставаться 404, SPA-фоллбек нужен исключительно для того,
+            # чтобы переход/обновление страницы браузером на "чистый" путь
+            # клиентского роутера (например "/settings") не давал 404. Под
+            # "cgi-bin" не подставляем - отсутствующий CGI-скрипт честнее
+            # показать как 404, чем как SPA-shell.
+            if self.command not in ("GET", "HEAD"):
+                return False
+            rel_parts = rel.split("/") if rel else []
+            if rel_parts and "cgi-bin" in rel_parts[:-1]:
+                return False
+            index_path = os.path.join(docroot, "index.html")
+            if not os.path.isfile(index_path):
+                return False
+            self._serve_file(index_path)
+            return True
+
+        def _handle(self):
+            rel, ok = self._normalize_rel(self.path)
+            if not ok:
+                self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
+                return
+
+            alias_env = None
+            if rel is not None and rel in API_ALIASES:
+                rel, alias_env = API_ALIASES[rel]
+
+            if rel is not None and rel.split("/", 1)[0] == "api":
+                # Сюда попадает только "/api/*" без записи в API_ALIASES -
+                # "run"/"settings"/"stats" выше уже заменены на реальный
+                # путь. Отвечаем 501, а не 404 - фронтенд должен уметь
+                # отличить "эндпоинт ещё не существует" от опечатки в пути.
+                self._send_json(501, {"error": "not_implemented", "path": "/" + rel})
+                return
+
+            full_path = self._full_path_for(rel)
+            if full_path is None:
+                self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
+                return
+
+            url_path = self._url_path_of(full_path)
+            required = self._auth_required_for(url_path)
+            if required and not self._has_valid_auth(*required):
+                self._send_auth_challenge()
+                return
+
+            if self._is_cgi(full_path):
+                self._run_cgi(full_path, alias_env)
+                return
+
+            if os.path.isfile(full_path):
+                self._serve_file(full_path)
+                return
+
+            if self._spa_fallback(rel or ""):
+                return
+
+            self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
 
         def do_GET(self):
             self._handle()

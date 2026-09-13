@@ -107,6 +107,12 @@ install_files() {
   chmod +x "$DIR/stats_cgi.sh"
   atomic_install "$SELFDIR/stats_run.sh" "$DIR/stats_run.sh" || return 1
   chmod +x "$DIR/stats_run.sh"
+  # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
+  # веб-сервиса статистики - копируются в раздаваемый каталог сами,
+  # write_stats_static() из speedtest2.sh; исполняемый бит не нужен.
+  atomic_install "$SELFDIR/stats_index.html" "$DIR/stats_index.html" || return 1
+  atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
+  atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
   # запасной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
   # запускается ensure_stats_httpd() из speedtest2.sh только если "busybox
   # httpd" недоступен на роутере; исполняемый бит не нужен, он вызывается
@@ -200,11 +206,49 @@ measure_channel() {
   esac
 }
 
+have_python3() {
+  command -v python3 >/dev/null 2>&1
+}
+
+have_opkg() {
+  command -v opkg >/dev/null 2>&1
+}
+
+ensure_python3() {
+  # Роутеру нужен python3 для основного веб-сервиса статистики
+  # (stats_httpd.py, см. ensure_stats_httpd() в speedtest2.sh) - без него
+  # ensure_stats_httpd() тихо откатывается на резервный busybox httpd
+  # (только /stats.html и /cgi-bin/config, без чистых URL /stats и
+  # /settings, см. README). Пытаемся поставить python3 через opkg
+  # (пакетный менеджер Entware) сами, но неудача здесь никогда не
+  # останавливает install.sh - тогда просто предупреждаем и остаёмся на
+  # резервном варианте.
+  have_python3 && return 0
+
+  if ! have_opkg; then
+    echo "install.sh: python3 не найден, а opkg недоступен - поставить автоматически не получится. Веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную и перезапустите: sh speedtest2.sh --force" >&2
+    return 0
+  fi
+
+  echo "install.sh: python3 не найден, пробую поставить через opkg install python3..." >&2
+  if ! opkg install python3 >/dev/null 2>&1; then
+    echo "install.sh: opkg install python3 не удался с первого раза, обновляю список пакетов (opkg update) и пробую ещё раз..." >&2
+    opkg update >/dev/null 2>&1 || true
+    opkg install python3 >/dev/null 2>&1 || true
+  fi
+
+  if have_python3; then
+    echo "install.sh: python3 успешно установлен через opkg" >&2
+  else
+    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную (opkg update && opkg install python3) и перезапустите: sh speedtest2.sh --force" >&2
+  fi
+}
+
 main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py node_stats_update.awk sub_convert.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js node_stats_update.awk sub_convert.awk; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
@@ -255,6 +299,11 @@ main() {
     return 1
   }
   install_cron
+
+  # Ставим python3 (если получится) ДО пробного запуска, чтобы сам этот
+  # пробный запуск уже поднял основной веб-сервис (stats_httpd.py), а не
+  # резервный busybox httpd, если установка удалась.
+  ensure_python3
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
     "$DIR/speedtest2.sh" || true
