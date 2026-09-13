@@ -176,15 +176,67 @@
 
   // ----- раздел "Статистика" (/api/stats) -----
 
-  // Простой SVG-график по нодам без сторонних библиотек - polyline на
-  // каждую ноду из top, с разрывом линии на null (пропущенный прогон).
-  function buildNodeChart(nodeHistory, runsCount) {
-    var W = 600, H = 170, PAD = 6;
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // fmtDateShort/fmtTimeShort - как fmt_date_short()/fmt_time_short() в
+  // render_stats.awk: iso в формате "YYYY-MM-DD HH:MM:SS".
+  function fmtDateShort(iso) {
+    return iso.slice(8, 10) + '.' + iso.slice(5, 7);
+  }
+  function fmtTimeShort(iso) {
+    return iso.slice(11, 16);
+  }
+
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) { e.setAttribute(k, attrs[k]); }
+    return e;
+  }
+
+  // renderXAxisDates() - таймлайн под графиком, перенесено из
+  // render_x_axis_dates() в render_stats.awk (тот же алгоритм: 2-6 подписей
+  // на равных по индексу прогона позициях, дата или время в зависимости от
+  // того, попадают ли выбранные метки в один календарный день).
+  function renderXAxisDates(svg, left, padTop, w, h, labels) {
+    var n = labels.length;
+    if (n < 2) { return; }
+    var tn = n < 6 ? n : 6;
+    var day1 = labels[0].slice(0, 10);
+    var sameDay = true;
+    for (var i = 0; i < n; i++) {
+      if (labels[i].slice(0, 10) !== day1) { sameDay = false; break; }
+    }
+    var prevIdx = -1;
+    for (var t = 0; t < tn; t++) {
+      var idx = Math.round((t * (n - 1)) / (tn - 1));
+      if (idx < 0) { idx = 0; }
+      if (idx > n - 1) { idx = n - 1; }
+      if (idx === prevIdx) { continue; }
+      prevIdx = idx;
+      var x = n > 1 ? left + (idx * w) / (n - 1) : left + w / 2;
+      var anchor = t === 0 ? 'start' : t === tn - 1 ? 'end' : 'middle';
+      var lbl = sameDay ? fmtTimeShort(labels[idx]) : fmtDateShort(labels[idx]);
+      svg.appendChild(svgEl('line', { 'class': 'axis-tick', x1: x, y1: padTop + h, x2: x, y2: padTop + h + 4 }));
+      var text = svgEl('text', { 'class': 'axis-text', x: x, y: padTop + h + 15, 'font-size': 10, 'text-anchor': anchor });
+      text.textContent = lbl;
+      svg.appendChild(text);
+    }
+  }
+
+  // buildNodeChart() - SVG-график по нодам без сторонних библиотек,
+  // перенесено из render_node_history() в render_stats.awk (оси, таймлайн,
+  // подсказки-точки и наведение курсором с перекрестием - тот же набор
+  // возможностей, что был у старой server-rendered stats.html).
+  // runsSeries - data.runs.series из /api/stats (нужен только iso[] для
+  // подписей оси X и подсказки).
+  function buildNodeChart(nodeHistory, runsSeries) {
+    var left = 40, padTop = 10, w = 710, h = 170, W = 760, H = 214;
     var top = nodeHistory.top || [];
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-    svg.setAttribute('width', '100%');
-    svg.setAttribute('height', H);
+    var n = runsSeries.length;
+    var labels = runsSeries.map(function (r) { return r.iso; });
+
+    var wrap = el('div', 'chart-wrap');
+    var svg = svgEl('svg', { id: 'svg-hist', viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
 
     var max = 0;
     for (var i = 0; i < top.length; i++) {
@@ -196,34 +248,138 @@
     if (max <= 0) { max = 1; }
 
     function xOf(idx) {
-      if (runsCount <= 1) { return W / 2; }
-      return PAD + (idx / (runsCount - 1)) * (W - 2 * PAD);
+      return n > 1 ? left + (idx * w) / (n - 1) : left + w / 2;
     }
     function yOf(v) {
-      return H - PAD - (v / max) * (H - 2 * PAD);
+      return padTop + h - (v * h) / max;
     }
 
+    svg.appendChild(svgEl('line', { 'class': 'axis-line', x1: left, y1: padTop, x2: left, y2: padTop + h }));
+    svg.appendChild(svgEl('line', { 'class': 'axis-line', x1: left, y1: padTop + h, x2: left + w, y2: padTop + h }));
+    var maxLabel = svgEl('text', { 'class': 'axis-text', x: left - 6, y: padTop + 4, 'font-size': 10, 'text-anchor': 'end' });
+    maxLabel.textContent = fmtMB(max) + ' МБ/с';
+    svg.appendChild(maxLabel);
+    var zeroLabel = svgEl('text', { 'class': 'axis-text', x: left - 6, y: padTop + h + 4, 'font-size': 10, 'text-anchor': 'end' });
+    zeroLabel.textContent = '0';
+    svg.appendChild(zeroLabel);
+    renderXAxisDates(svg, left, padTop, w, h, labels);
+
+    var groups = {};
+    var dots = {};
     for (var k = 0; k < top.length; k++) {
       var values = top[k].values;
+      var color = top[k].color || '#2a78d6';
+      var group = svgEl('g', { 'class': 'node-series', id: 'series-hist-n' + k });
+
       var d = '';
       var pen = false;
-      for (var n = 0; n < values.length; n++) {
-        var val = values[n];
+      for (var m = 0; m < values.length; m++) {
+        var val = values[m];
         if (val === null) { pen = false; continue; }
         var cmd = pen ? 'L' : 'M';
-        d += cmd + xOf(n).toFixed(1) + ' ' + yOf(val).toFixed(1) + ' ';
+        d += cmd + xOf(m).toFixed(1) + ' ' + yOf(val).toFixed(1) + ' ';
         pen = true;
       }
       if (d) {
-        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d.trim());
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', top[k].color || '#2a78d6');
-        path.setAttribute('stroke-width', '2');
-        svg.appendChild(path);
+        group.appendChild(svgEl('path', { d: d.trim(), fill: 'none', stroke: color, 'stroke-width': 2 }));
       }
+      for (var p = 0; p < values.length; p++) {
+        var pv = values[p];
+        if (pv === null) { continue; }
+        var dot = svgEl('circle', { 'class': 'node-dot', cx: xOf(p).toFixed(1), cy: yOf(pv).toFixed(1), r: 3, fill: color, 'stroke-width': 1 });
+        var title = document.createElementNS(SVG_NS, 'title');
+        title.textContent = (labels[p] || '') + ' · ' + fmtMB(pv) + ' МБ/с · ' + top[k].name;
+        dot.appendChild(title);
+        group.appendChild(dot);
+      }
+      svg.appendChild(group);
+      groups[k] = group;
     }
-    return svg;
+
+    var crosshair = svgEl('line', { 'class': 'crosshair-line', id: 'crosshair-hist', x1: left, y1: padTop, x2: left, y2: padTop + h, visibility: 'hidden' });
+    svg.appendChild(crosshair);
+    for (var kk = 0; kk < top.length; kk++) {
+      var cdot = svgEl('circle', { 'class': 'crosshair-dot', id: 'dot-hist-n' + kk, r: 3.5, fill: top[kk].color || '#2a78d6', visibility: 'hidden' });
+      svg.appendChild(cdot);
+      dots[kk] = cdot;
+    }
+    var capture = svgEl('rect', { 'class': 'chart-capture', id: 'capture-hist', x: left, y: padTop, width: w, height: h });
+    svg.appendChild(capture);
+
+    wrap.appendChild(svg);
+    var tooltip = el('div', 'tooltip');
+    tooltip.id = 'tooltip-hist';
+    tooltip.hidden = true;
+    wrap.appendChild(tooltip);
+
+    // Наведение курсором (и touch) - перекрестие + подсветка ближайшей ноды +
+    // подсказка с показаниями всех нод в этой точке, как в старой
+    // server-rendered stats.html (см. общий initChart() в render_stats.awk).
+    function svgPoint(clientX, clientY) {
+      var pt = svg.createSVGPoint();
+      pt.x = clientX; pt.y = clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+    function idxAt(svgX) {
+      var step = n > 1 ? w / (n - 1) : 0;
+      var idx = step > 0 ? Math.round((svgX - left) / step) : 0;
+      if (idx < 0) { idx = 0; }
+      if (idx > n - 1) { idx = n - 1; }
+      return idx;
+    }
+    function show(clientX, clientY) {
+      if (!n) { return; }
+      var loc = svgPoint(clientX, clientY);
+      var idx = idxAt(loc.x);
+      var x = xOf(idx);
+      crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x);
+      crosshair.setAttribute('visibility', 'visible');
+      var html = '<div class="tt-label">' + (labels[idx] || '') + '</div>';
+      var nearestId = null, nearestDist = Infinity;
+      for (var ii = 0; ii < top.length; ii++) {
+        var vv = top[ii].values[idx];
+        if (vv === null || vv === undefined) { continue; }
+        var dist = Math.abs(loc.y - yOf(vv));
+        if (dist < nearestDist) { nearestDist = dist; nearestId = ii; }
+      }
+      for (var jj = 0; jj < top.length; jj++) {
+        var v2 = top[jj].values[idx];
+        var dot2 = dots[jj];
+        if (v2 === null || v2 === undefined) {
+          if (dot2) { dot2.setAttribute('visibility', 'hidden'); }
+        } else {
+          if (dot2) {
+            dot2.setAttribute('cx', x);
+            dot2.setAttribute('cy', yOf(v2));
+            dot2.setAttribute('visibility', 'visible');
+          }
+          html += '<div class="tt-row"><span class="sw" style="background:' + (top[jj].color || '#2a78d6') + '"></span>' + top[jj].name + ': ' + fmtMB(v2) + ' МБ/с</div>';
+        }
+        if (groups[jj]) { groups[jj].classList.toggle('dim', jj !== nearestId); }
+      }
+      tooltip.innerHTML = html;
+      tooltip.hidden = false;
+      var wrapRect = wrap.getBoundingClientRect();
+      var tleft = clientX - wrapRect.left + 12;
+      var ttop = clientY - wrapRect.top - 12;
+      var maxLeft = wrapRect.width - tooltip.offsetWidth - 4;
+      if (tleft > maxLeft) { tleft = clientX - wrapRect.left - tooltip.offsetWidth - 12; }
+      if (tleft < 0) { tleft = 0; }
+      tooltip.style.left = tleft + 'px';
+      tooltip.style.top = ttop + 'px';
+    }
+    function hide() {
+      crosshair.setAttribute('visibility', 'hidden');
+      for (var kd in dots) { if (dots[kd]) { dots[kd].setAttribute('visibility', 'hidden'); } }
+      for (var kg in groups) { if (groups[kg]) { groups[kg].classList.remove('dim'); } }
+      tooltip.hidden = true;
+    }
+    capture.addEventListener('mousemove', function (e) { show(e.clientX, e.clientY); });
+    capture.addEventListener('mouseleave', hide);
+    capture.addEventListener('touchmove', function (e) { if (e.touches && e.touches[0]) { show(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: true });
+    capture.addEventListener('touchend', hide);
+
+    return wrap;
   }
 
   function buildNodeLegend(nodeHistory) {
@@ -301,7 +457,7 @@
       var chartCard = card('Скорость по нодам (последние ' + data.runs.count + ' прогонов)');
       if (data.node_history && data.node_history.total_unique > 0) {
         chartCard.appendChild(buildNodeLegend(data.node_history));
-        chartCard.appendChild(buildNodeChart(data.node_history, data.runs.count));
+        chartCard.appendChild(buildNodeChart(data.node_history, data.runs.series));
       } else {
         chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для графика.'));
       }
