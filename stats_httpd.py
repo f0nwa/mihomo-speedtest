@@ -159,6 +159,18 @@ def make_handler(docroot, auth_rules):
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "stats_httpd.py/1"
         protocol_version = "HTTP/1.1"
+        # Без этого таймаута сокет не имеет ограничения по времени ни на
+        # одном чтении - обнаружено на реальном роутере: одно повисшее
+        # keep-alive-соединение (HTTP/1.1 держит его открытым между
+        # запросами) заблокировало ВЕСЬ процесс на неопределённый срок -
+        # ни один новый клиент, включая localhost, не мог достучаться,
+        # хотя порт оставался в состоянии LISTEN (см. CHANGELOG). Значение
+        # берётся из stdlib: BaseHTTPRequestHandler.handle_one_request()
+        # сам ловит socket.timeout и корректно закрывает соединение, если
+        # этот атрибут не None - здесь только включаем эту защиту.
+        # STATS_HTTPD_READ_TIMEOUT позволяет тестам подставить маленькое
+        # значение вместо ожидания секунд по умолчанию.
+        timeout = int(os.environ.get("STATS_HTTPD_READ_TIMEOUT", "30"))
 
         def log_message(self, fmt, *args):
             pass  # тихо - лог уже ведёт speedtest2.sh поверх stdout/stderr процесса
@@ -246,7 +258,18 @@ def make_handler(docroot, auth_rules):
         def _run_cgi(self, full_path, extra_env=None):
             parsed = urllib.parse.urlsplit(self.path)
             length = int(self.headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(length) if length > 0 else b""
+            # Content-Length может быть враньём клиента (случайным или нет)
+            # - без self.timeout (см. класс Handler выше) чтение тела ждало
+            # бы недостающие байты бесконечно, вешая процесс целиком на
+            # этом единственном соединении. При таймауте отвечаем 408, а не
+            # роняем необработанным исключением - это ожидаемая ситуация
+            # для внешнего клиента, а не баг сервера.
+            try:
+                body = self.rfile.read(length) if length > 0 else b""
+            except OSError as exc:
+                self._send_simple(408, "text/plain; charset=utf-8",
+                                   ("Request timeout: %s\n" % exc).encode())
+                return
             env = os.environ.copy()
             env["REQUEST_METHOD"] = self.command
             env["CONTENT_LENGTH"] = str(length)
@@ -389,6 +412,71 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
     # ForkingMixIn - см. пояснение в шапке файла про self-restart.
     allow_reuse_address = True
     daemon_threads = False
+
+    def process_request(self, request, client_address):
+        # Переопределяем socketserver.ForkingMixIn.process_request(): в
+        # оригинале дочерний процесс НЕ закрывает self.socket - слушающий
+        # сокет, принимающий НОВЫЕ соединения на STATS_HTTP_BIND:PORT. После
+        # fork() он открыт в обоих процессах (fork дублирует все файловые
+        # дескрипторы), и ребёнку он не нужен - но пока ребёнок жив, этот
+        # дескриптор держит порт занятым, даже если родительский процесс уже
+        # убит (например, stop_stats_httpd() в speedtest2.sh перед
+        # перезапуском на новый адрес/порт или обновление кода).
+        #
+        # На практике это давало на роутере полностью недоступный веб-сервис
+        # после setup.sh: клиент держал соединение открытым без завершения
+        # тела запроса (см. STATS_HTTPD_READ_TIMEOUT выше - без него чтение
+        # тела в _run_cgi() могло ждать вечно), speedtest2.sh перезапускал
+        # сервис и убивал СТАРЫЙ родительский pid из pidfile - но зависший
+        # ребёнок пережил родителя и продолжал слушать порт, так что НОВЫЙ
+        # процесс (что python3, что резервный busybox httpd) не мог
+        # забиндиться на тот же адрес: "OSError: [Errno 125] Address already
+        # in use" в stats_httpd.log (125 - это EADDRINUSE на MIPS, на
+        # x86/ARM тот же код ошибки - 98; в обоих случаях суть одна). При
+        # этом "netstat" продолжал показывать порт как LISTEN (сокет-то у
+        # ребёнка открыт), только Recv-Q рос, а не отдавался ни один запрос -
+        # ни новый процесс не поднимался, ни старый (зависший) ничего не
+        # принимал.
+        #
+        # Фикс - закрыть self.socket в РЕБЁНКЕ сразу после fork(): для
+        # обработки уже принятого соединения (request) слушающий сокет не
+        # нужен. Дальше - копия socketserver.ForkingMixIn.process_request()
+        # из стандартной библиотеки.
+        pid = os.fork()
+        if pid:
+            # Родитель - как в оригинале: просто регистрирует ребёнка и
+            # закрывает СВОЮ копию request (не листенер, а принятое
+            # соединение - им теперь занимается ребёнок). active_children -
+            # ленивая инициализация (None до первого ребёнка), как в
+            # socketserver.ForkingMixIn - без этой проверки первый же запрос
+            # падал с "TypeError: argument of type 'NoneType' is not
+            # iterable" ДО close_request(), а последующий handle_error()/
+            # shutdown_request() в родителе вызывает socket.shutdown() на
+            # СЕТЕВОМ соединении, разделяемом с ребёнком (fork дублирует
+            # дескриптор, но не сам сокет) - ребёнок в этот момент ловил
+            # "BrokenPipeError" при попытке ответить клиенту, то есть
+            # вообще ни один запрос не обслуживался.
+            if self.active_children is None:
+                self.active_children = set()
+            self.active_children.add(pid)
+            self.close_request(request)
+            return
+        # Ребёнок - никогда не возвращается, только os._exit() в finally.
+        try:
+            self.socket.close()
+        except OSError:
+            pass
+        try:
+            self.finish_request(request, client_address)
+            status = 0
+        except Exception:
+            self.handle_error(request, client_address)
+            status = 1
+        finally:
+            try:
+                self.shutdown_request(request)
+            finally:
+                os._exit(status)
 
 
 def main(argv):
