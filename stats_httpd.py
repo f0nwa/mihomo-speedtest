@@ -234,6 +234,16 @@ def make_handler(docroot, auth_rules):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body_bytes)))
+            # Без ETag/Last-Modified (их этот сервер не отдаёт) браузер не
+            # может ничего сверить и в их отсутствие иногда просто отдаёт
+            # старую версию app.js/style.css/index.html из диска - на
+            # практике так и произошло: правка графика по нодам работала
+            # только в приватном окне (пустой кэш), в обычном браузер
+            # продолжал показывать старый файл. no-store - на каждый
+            # запрос идти в сеть, не сохраняя ответ в кэше вовсе; для
+            # админки роутера с низкой нагрузкой безопаснее, чем городить
+            # условные запросы, которые этот сервер не поддерживает.
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             if body_bytes:
                 self.wfile.write(body_bytes)
