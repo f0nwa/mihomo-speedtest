@@ -388,7 +388,7 @@ main() {
   fi
 
   echo "setup.sh: конфиг применён, запускаю install.sh" >&2
-  exec "$SELFDIR/install.sh"
+  exec sh "$SELFDIR/install.sh"
 }
 
 if [ "${SETUP_LIB_ONLY:-0}" != 1 ]; then
