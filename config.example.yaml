@@ -101,7 +101,6 @@ proxy-groups:
     use: [fast]
     url: "https://www.gstatic.com/generate_204"
     interval: 60
-    timeout: 5000
     tolerance: 50
     lazy: true
 
@@ -116,7 +115,6 @@ proxy-groups:
     proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']
     url: "https://www.gstatic.com/generate_204"
     interval: 600
-    timeout: 5000
     lazy: true
 
   # Автоматический выбор самого быстрого узла.
@@ -135,7 +133,6 @@ proxy-groups:
     url: "http://www.gstatic.com/generate_204"
     exclude-filter: *geofilter
     interval: 600
-    timeout: 5000
     tolerance: 50
     lazy: true
 
@@ -153,7 +150,6 @@ proxy-groups:
     url: "http://www.gstatic.com/generate_204"
     exclude-filter: *geofilter
     interval: 600
-    timeout: 5000
     lazy: true
 
   # Ручной выбор узла.
@@ -414,6 +410,7 @@ rules:
 
   - OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # Разблокировка высокого качества на Twitch.tv
   - DOMAIN-SUFFIX,opencode.ai,AI # OpenCode Zen передаёт upstream-провайдерам геозаголовки клиента
+  - DOMAIN-SUFFIX,gamma.app,AI # Не входит в category-ai 
   - RULE-SET,category-ai@domain,AI
   - RULE-SET,steam@domain,Steam
   - RULE-SET,spotify@domain,Spotify
