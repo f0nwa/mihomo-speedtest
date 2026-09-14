@@ -118,7 +118,7 @@ proxy-groups:
     lazy: true
 
   # Автоматический выбор самого быстрого узла.
-  # Берет все прокси из subscription и subscription_provider-b,
+  # Берет все прокси из subscription и proxies,
   # проверяет http://www.gstatic.com/generate_204 каждые 600 секунд
   # и выбирает узел с минимальной задержкой.
   # tolerance: 50 снижает частые переключения: если текущий узел
@@ -214,7 +214,6 @@ proxy-groups:
   - name: Meta
     <<: *select-default
     icon: https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
-    proxies: ['Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS, DIRECT]
 
   # --- Платформы и сервисы ---
   - name: AI

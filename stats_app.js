@@ -525,31 +525,60 @@
     authCard.appendChild(rc);
     form.appendChild(authCard);
 
-    var submitBtn = el('button', 'submit', 'Сохранить');
-    submitBtn.type = 'submit';
-    form.appendChild(submitBtn);
+    var btnRow = el('div', 'btn-row');
+    var saveBtn = el('button', 'submit', 'Сохранить');
+    saveBtn.type = 'submit';
+    var saveRunBtn = el('button', 'submit secondary', 'Сохранить и запустить');
+    saveRunBtn.type = 'submit';
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(saveRunBtn);
+    form.appendChild(btnRow);
+
+    // Какая кнопка нажата - запоминаем по клику (событие click срабатывает
+    // раньше submit), чтобы после успешного сохранения решить, звать ли
+    // ещё и /api/run (кнопка "Сохранить и запустить").
+    var runAfterSave = false;
+    saveBtn.addEventListener('click', function () { runAfterSave = false; });
+    saveRunBtn.addEventListener('click', function () { runAfterSave = true; });
+
+    function setFormButtonsDisabled(disabled) {
+      saveBtn.disabled = disabled;
+      saveRunBtn.disabled = disabled;
+    }
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      submitBtn.disabled = true;
+      var shouldRun = runAfterSave;
+      setFormButtonsDisabled(true);
       showFormMessage(form, null);
       var body = new URLSearchParams(new FormData(form));
       fetchJson('/api/settings', { method: 'POST', body: body }).then(function (resp) {
-        if (resp.ok) {
+        if (!resp.ok) {
+          var texts = [];
+          var errs = resp.errors || {};
+          Object.keys(errs).forEach(function (key) {
+            texts.push(errs[key]);
+            var badInput = form.querySelector('[name="' + key + '"]');
+            if (badInput) { badInput.classList.add('input-err'); }
+          });
+          showFormMessage(form, texts.join(' '), 'err');
+          setFormButtonsDisabled(false);
+          return;
+        }
+        if (!shouldRun) {
           renderSettings('Настройки сохранены.');
           return;
         }
-        var texts = [];
-        var errs = resp.errors || {};
-        Object.keys(errs).forEach(function (key) {
-          texts.push(errs[key]);
-          var badInput = form.querySelector('[name="' + key + '"]');
-          if (badInput) { badInput.classList.add('input-err'); }
+        return fetchJson('/api/run', { method: 'POST' }).then(function (d) {
+          var msg = d.started ? 'Настройки сохранены, прогон запущен.' : 'Настройки сохранены, прогон уже шёл - новый не запускался.';
+          renderSettings(msg);
+        })['catch'](function (err) {
+          renderSettings('Настройки сохранены, но не удалось запустить прогон: ' + err.message);
         });
-        showFormMessage(form, texts.join(' '), 'err');
       })['catch'](function (err) {
         showFormMessage(form, 'Не удалось сохранить: ' + err.message, 'err');
-      })['finally'](function () { submitBtn.disabled = false; });
+        setFormButtonsDisabled(false);
+      });
     });
 
     return form;
