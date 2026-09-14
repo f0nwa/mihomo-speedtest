@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Mihomo-Speedtest</title>
+  <desc id="desc">Реальные замеры скорости прокси на Keenetic: подписки проходят проверку и замер загрузки, после чего проект обновляет быстрый пул и статистику.</desc>
+
+  <defs>
+    <linearGradient id="chart" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="420" rx="28" fill="#0d1117"/>
+  <path d="M0 334 H1200" stroke="#212936"/>
+
+  <g id="title-block" transform="translate(64 58)">
+    <text x="0" y="26" fill="#7dd3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="2">KEENETIC · XKEEN · MIHOMO</text>
+    <text x="0" y="98" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="58" font-weight="700">Mihomo-Speedtest</text>
+    <text x="0" y="148" fill="#a8b3c2" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">Реальные замеры скорости прокси</text>
+    <text x="0" y="184" fill="#a8b3c2" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">и автоматический быстрый пул</text>
+
+    <g transform="translate(0 238)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+      <rect width="200" height="42" rx="21" fill="#142533" stroke="#24506a"/>
+      <circle cx="23" cy="21" r="5" fill="#38bdf8"/>
+      <text x="39" y="27" fill="#c9d6e2">REAL DOWNLOAD</text>
+      <rect x="214" width="200" height="42" rx="21" fill="#142921" stroke="#245c45"/>
+      <circle cx="237" cy="21" r="5" fill="#34d399"/>
+      <text x="253" y="27" fill="#c9d6e2">ATOMIC UPDATE</text>
+    </g>
+  </g>
+
+  <g id="project-flow" transform="translate(680 52)">
+    <rect width="456" height="284" rx="20" fill="#111821" stroke="#293342"/>
+    <text x="28" y="42" fill="#6e7d90" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17">SPEEDTEST2.SH / RUN</text>
+
+    <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20">
+      <rect x="28" y="68" width="116" height="52" rx="10" fill="#182331" stroke="#304258"/>
+      <text x="48" y="100" fill="#d7e1ec">Подписки</text>
+      <path d="M144 94 H174" stroke="#52647a" stroke-width="2"/>
+      <path d="M168 88 L176 94 L168 100" fill="none" stroke="#52647a" stroke-width="2"/>
+
+      <rect x="178" y="68" width="114" height="52" rx="10" fill="#182331" stroke="#304258"/>
+      <text x="201" y="100" fill="#d7e1ec">Mihomo</text>
+      <path d="M292 94 H322" stroke="#52647a" stroke-width="2"/>
+      <path d="M316 88 L324 94 L316 100" fill="none" stroke="#52647a" stroke-width="2"/>
+
+      <rect x="326" y="68" width="102" height="52" rx="10" fill="#152a2a" stroke="#2f7668"/>
+      <text x="347" y="100" fill="#bdf7df">Замер</text>
+    </g>
+
+    <g transform="translate(28 150)">
+      <path d="M0 72 L42 56 L84 62 L126 35 L168 48 L210 12 L252 30 L294 20 L336 34 L400 5" fill="none" stroke="url(#chart)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M0 88 H400" stroke="#273140"/>
+      <circle cx="210" cy="12" r="6" fill="#34d399" stroke="#0d1117" stroke-width="3"/>
+      <circle cx="400" cy="5" r="6" fill="#34d399" stroke="#0d1117" stroke-width="3"/>
+    </g>
+  </g>
+
+  <g transform="translate(680 361)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
+    <text x="0" y="0" fill="#38bdf8">fast.yaml</text>
+    <text x="102" y="0" fill="#56677c">+</text>
+    <text x="126" y="0" fill="#34d399">история и веб-статистика</text>
+  </g>
+</svg>

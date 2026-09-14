@@ -80,6 +80,8 @@ proxy-providers:
     type: file
     path: ./fast.yaml
     exclude-type: trojan|ss
+    # В fast обычно не больше 20 нод, поэтому минутная проверка допустима.
+    # Не копируйте interval: 60 в группы со всеми нодами подписок.
     health-check:
       enable: true
       url: "https://www.gstatic.com/generate_204"
@@ -93,6 +95,7 @@ proxy-groups:
   # --- Базовые режимы выбора ---
   # Ноды, прошедшие замер реальной скорости в speedtest2.sh.
   # Внутри отобранного пула выбирается нода с минимальной задержкой.
+  # Пул маленький (по умолчанию до 20 нод), поэтому interval: 60 безопасен.
   - name: '⚡ Быстрый пул'
     type: url-test
     use: [fast]
@@ -102,33 +105,36 @@ proxy-groups:
     tolerance: 50
     lazy: true
 
-  # Публичное имя группы не меняется. Приоритет 1: быстрый пул выше.
+  # Публичная fallback-группа. Приоритет 1: быстрый пул выше.
   # При недоступности быстрого пула используется 🛡️Fallback-Stable.
   # DIRECT в эту цепочку не входит: если оба выхода не работают,
   # соединения завершаются ошибкой, а не идут напрямую.
-  - name: '⚡ Самые быстрые'
+  # Проверка может зайти внутрь обеих дочерних групп: не ставьте interval ниже 300;
+  # для большого пула рекомендуется 600.
+  - name: '⚡ Самые быстрые + Fallback'
     type: fallback
     proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']
     url: "https://www.gstatic.com/generate_204"
-    interval: 60
+    interval: 600
     timeout: 5000
     lazy: true
 
   # Автоматический выбор самого быстрого узла.
   # Берет все прокси из subscription и subscription_provider-b,
-  # проверяет http://www.gstatic.com/generate_204 каждые 300 секунд
+  # проверяет http://www.gstatic.com/generate_204 каждые 600 секунд
   # и выбирает узел с минимальной задержкой.
   # tolerance: 50 снижает частые переключения: если текущий узел
   # медленнее лучшего менее чем на 50 мс, он может остаться выбранным.
   # lazy: true не проверяет узлы, пока группа не выбрана активной -
   # массовая группа не гоняет фоновые проверки, если ей не пользуются.
+  # Для полного пула не ставьте interval ниже 300; при 100+ нодах используйте 600.
   - name: '🚀 Авто по пингу'
     type: url-test
     use: *sub-names
     proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
     url: "http://www.gstatic.com/generate_204"
     exclude-filter: *geofilter
-    interval: 300
+    interval: 600
     timeout: 5000
     tolerance: 50
     lazy: true
@@ -139,6 +145,7 @@ proxy-groups:
   # Если текущий узел перестает проходить проверку доступности,
   # переключается на следующий рабочий.
   # interval: 300 означает проверку доступности каждые 300 секунд.
+  # Для полного пула 300 секунд - рекомендуемый минимум; при 100+ нодах допустимо 600.
   - name: '🛡️Fallback-Stable'
     type: fallback
     use: *sub-names
@@ -161,7 +168,7 @@ proxy-groups:
   # Единый режим для всех сервисных групп.
   - name: 'Заблок. сервисы'
     type: select
-    proxies: ['⚡ Самые быстрые', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
+    proxies: ['⚡ Самые быстрые + Fallback', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
 
   # --- Видео и медиа ---
   - name: YouTube
