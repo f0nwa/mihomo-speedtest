@@ -414,8 +414,12 @@ sh /opt/etc/mihomo/speedtest2.sh --check-update
 на GitHub (сначала `raw.githubusercontent.com`, при недоступности -
 зеркало на `cdn.jsdelivr.net`, без всякой настройки с вашей стороны):
 
-- `core` - `speedtest2.sh`, `install.sh`, `prep.awk`, `providers.awk`,
-  `node_stats_update.awk`, `sub_convert.awk`;
+- `core` - `speedtest2.sh`, `install.sh`, `setup.sh`, `version_check.sh`,
+  `detect_ua.sh`, `render_config.awk`, `existing_config.awk`,
+  `config.example.yaml`, `prep.awk`, `providers.awk`,
+  `node_stats_update.awk`, `sub_convert.awk` - весь набор, который
+  исполняется на роутере (ежедневный цикл спидтеста и разовые/повторные
+  install.sh/setup.sh), а не только файлы самого спидтеста;
 - `stats` - `render_stats.awk`, `stats_cgi.sh`, `stats_run.sh`,
   `stats_httpd.py`, `stats_index.html`, `stats_style.css`,
   `stats_app.js`, `stats_chart.js`.
@@ -447,9 +451,18 @@ py_compile` для `.py`, если `python3` вообще есть на роут
 `stats.html` и переподнимает веб-сервис статистики (`stop_stats_httpd`
 + `ensure_stats_httpd`), не дожидаясь cron - иначе обновлённый
 `stats_httpd.py` продолжил бы молча работать под старым уже запущенным
-процессом. `--update-core` вступает в силу только со следующего запуска
-(ближайший cron либо ручной `speedtest2.sh --force`), т.к. правит и сам
-запускающийся сейчас скрипт.
+процессом. Это единственный постоянно работающий процесс среди всех
+обновляемых файлов, поэтому перезапуск нужен только здесь.
+
+`--update-core` перезапуска не требует - ни один файл из группы `core`
+не работает как постоянный сервис, каждый читается с диска заново при
+следующем вызове: `speedtest2.sh` - на ближайшем cron либо ручном
+`speedtest2.sh --force`, `install.sh`/`setup.sh` (и их общий
+инструментарий `version_check.sh`/`detect_ua.sh`/`render_config.awk`/
+`existing_config.awk`/`config.example.yaml`) - при следующем ручном
+запуске (`--recalibrate`, пересборка подписок и т.п.). Пока такого
+запуска не было - на роутере продолжает исполняться старая версия, это
+ожидаемо, а не незамеченный сбой.
 
 **Важно: пока репозиторий `f0nwa/mihomo-speedtest` на GitHub приватный.**
 `raw.githubusercontent.com`/`cdn.jsdelivr.net` отдают приватным

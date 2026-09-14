@@ -95,22 +95,35 @@ STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его ж�
 # частей; меняются вручную при подготовке релиза и сверяются с файлом
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
 # им быть не следует).
-CORE_VERSION=${CORE_VERSION:-2}    # speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
+CORE_VERSION=${CORE_VERSION:-3}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
 STATS_VERSION=${STATS_VERSION:-2}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
-# Отдельные UPDATE_*-переменные ниже - только для трёх файлов, у которых
-# нет своего "канонического" имени переменной за пределами этого блока
+# Отдельные UPDATE_*-переменные ниже - только для файлов, у которых нет
+# своего "канонического" имени переменной за пределами этого блока
 # (prep.awk/node_stats_update.awk/sub_convert.awk и все stats_*-файлы для
 # --update-stats используют уже существующие PREP/NODE_STATS_UPDATE/
 # SUB_CONVERT/RENDER_STATS/STATS_CGI_SOURCE/STATS_RUN_SOURCE/
 # STATS_HTTPD_PY/STATS_INDEX_SOURCE/STATS_STYLE_SOURCE/STATS_APP_SOURCE/
-# STATS_CHARTJS_SOURCE, объявленные выше).
+# STATS_CHARTJS_SOURCE, объявленные выше). version_check.sh/setup.sh/
+# detect_ua.sh/render_config.awk/existing_config.awk/config.example.yaml -
+# инструментарий setup.sh (см. его же комментарий в шапке) - сам
+# speedtest2.sh их не использует, поэтому у них тоже нет отдельного
+# канонического имени, только это. version_check.sh нужен install.sh при
+# КАЖДОМ запуске (source в его же шапке, включая --recalibrate) - без
+# него в "core" install.sh на устаревшем version_check.sh тихо сверялся
+# бы со старыми минимальными версиями.
 UPDATE_SELF_SCRIPT=${UPDATE_SELF_SCRIPT:-$DIR/speedtest2.sh}
 UPDATE_INSTALL_SH=${UPDATE_INSTALL_SH:-$DIR/install.sh}
 UPDATE_PROVIDERS_AWK=${UPDATE_PROVIDERS_AWK:-$DIR/providers.awk}
+UPDATE_VERSION_CHECK_SH=${UPDATE_VERSION_CHECK_SH:-$DIR/version_check.sh}
+UPDATE_SETUP_SH=${UPDATE_SETUP_SH:-$DIR/setup.sh}
+UPDATE_DETECT_UA_SH=${UPDATE_DETECT_UA_SH:-$DIR/detect_ua.sh}
+UPDATE_RENDER_CONFIG_AWK=${UPDATE_RENDER_CONFIG_AWK:-$DIR/render_config.awk}
+UPDATE_EXISTING_CONFIG_AWK=${UPDATE_EXISTING_CONFIG_AWK:-$DIR/existing_config.awk}
+UPDATE_CONFIG_EXAMPLE_YAML=${UPDATE_CONFIG_EXAMPLE_YAML:-$DIR/config.example.yaml}
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
@@ -1181,13 +1194,26 @@ update_component_files() {
 
 update_core() {
   # Точка входа для --update-core. Обновляет весь набор целиком (см.
-  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk,
-  # node_stats_update.awk, sub_convert.awk.
-  # Изменения вступают в силу со следующего запуска - текущий процесс
-  # (если что-то его всё же вызвало) доработает со старым кодом.
+  # README) - speedtest2.sh, install.sh, setup.sh и весь их
+  # вспомогательный инструментарий (version_check.sh, detect_ua.sh,
+  # render_config.awk, existing_config.awk, config.example.yaml),
+  # prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk. Ни
+  # один из этих файлов не запускается как постоянный сервис - для них
+  # не нужен перезапуск (в отличие от update_stats(), см.
+  # apply_stats_update()), т.к. каждый вызывается заново с диска при
+  # следующем запуске (cron/--force для speedtest2.sh, руками для
+  # install.sh/setup.sh). Изменения вступают в силу со следующего
+  # запуска - текущий процесс (если что-то его всё же вызвало) доработает
+  # со старым кодом.
   update_component_files core \
     "speedtest2.sh:$UPDATE_SELF_SCRIPT" \
     "install.sh:$UPDATE_INSTALL_SH" \
+    "setup.sh:$UPDATE_SETUP_SH" \
+    "version_check.sh:$UPDATE_VERSION_CHECK_SH" \
+    "detect_ua.sh:$UPDATE_DETECT_UA_SH" \
+    "render_config.awk:$UPDATE_RENDER_CONFIG_AWK" \
+    "existing_config.awk:$UPDATE_EXISTING_CONFIG_AWK" \
+    "config.example.yaml:$UPDATE_CONFIG_EXAMPLE_YAML" \
     "prep.awk:$PREP" \
     "providers.awk:$UPDATE_PROVIDERS_AWK" \
     "node_stats_update.awk:$NODE_STATS_UPDATE" \
