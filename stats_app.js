@@ -7,8 +7,14 @@
 // Шаг 4 плана: "/api/stats" и "/api/settings" теперь отдают реальные
 // данные (см. render_stats.awk -v format=json и print_settings_json() в
 // stats_cgi.sh) - вместо заглушки "раздел переезжает" здесь рисуются сами
-// разделы. Никаких сторонних библиотек (на роутере нет Node.js и сборки) -
-// график по нодам рисуется вручную через SVG.
+// разделы.
+//
+// График по нодам (buildNodeChart() ниже) рисует Chart.js - stats_chart.js
+// (вендоренная UMD-сборка, MIT, кладётся рядом с этим файлом и раздаётся
+// как есть, без npm/сборки на роутере - тег <script src="chart.js">
+// подключается в stats_index.html перед этим файлом). Раньше график был
+// на ручном SVG - от него отказались, когда всплыли кросс-браузерные баги
+// с перехватом событий мыши (см. CHANGELOG.md).
 (function () {
   'use strict';
 
@@ -176,10 +182,9 @@
 
   // ----- раздел "Статистика" (/api/stats) -----
 
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-
   // fmtDateShort/fmtTimeShort - как fmt_date_short()/fmt_time_short() в
-  // render_stats.awk: iso в формате "YYYY-MM-DD HH:MM:SS".
+  // render_stats.awk: iso в формате "YYYY-MM-DD HH:MM:SS". Используются
+  // для подписей оси X в buildNodeChart().
   function fmtDateShort(iso) {
     return iso.slice(8, 10) + '.' + iso.slice(5, 7);
   }
@@ -187,197 +192,116 @@
     return iso.slice(11, 16);
   }
 
-  function svgEl(tag, attrs) {
-    var e = document.createElementNS(SVG_NS, tag);
-    for (var k in attrs) { e.setAttribute(k, attrs[k]); }
-    return e;
-  }
-
-  // renderXAxisDates() - таймлайн под графиком, перенесено из
-  // render_x_axis_dates() в render_stats.awk (тот же алгоритм: 2-6 подписей
-  // на равных по индексу прогона позициях, дата или время в зависимости от
-  // того, попадают ли выбранные метки в один календарный день).
-  function renderXAxisDates(svg, left, padTop, w, h, labels) {
-    var n = labels.length;
-    if (n < 2) { return; }
-    var tn = n < 6 ? n : 6;
+  // Все прогоны попадают в один календарный день - тогда подписи оси X
+  // это время, иначе дата (тот же критерий, что был у старого
+  // render_x_axis_dates() в render_stats.awk).
+  function sameCalendarDay(labels) {
+    if (!labels.length) { return true; }
     var day1 = labels[0].slice(0, 10);
-    var sameDay = true;
-    for (var i = 0; i < n; i++) {
-      if (labels[i].slice(0, 10) !== day1) { sameDay = false; break; }
+    for (var i = 1; i < labels.length; i++) {
+      if (labels[i].slice(0, 10) !== day1) { return false; }
     }
-    var prevIdx = -1;
-    for (var t = 0; t < tn; t++) {
-      var idx = Math.round((t * (n - 1)) / (tn - 1));
-      if (idx < 0) { idx = 0; }
-      if (idx > n - 1) { idx = n - 1; }
-      if (idx === prevIdx) { continue; }
-      prevIdx = idx;
-      var x = n > 1 ? left + (idx * w) / (n - 1) : left + w / 2;
-      var anchor = t === 0 ? 'start' : t === tn - 1 ? 'end' : 'middle';
-      var lbl = sameDay ? fmtTimeShort(labels[idx]) : fmtDateShort(labels[idx]);
-      svg.appendChild(svgEl('line', { 'class': 'axis-tick', x1: x, y1: padTop + h, x2: x, y2: padTop + h + 4 }));
-      var text = svgEl('text', { 'class': 'axis-text', x: x, y: padTop + h + 15, 'font-size': 10, 'text-anchor': anchor });
-      text.textContent = lbl;
-      svg.appendChild(text);
-    }
+    return true;
   }
 
-  // buildNodeChart() - SVG-график по нодам без сторонних библиотек,
-  // перенесено из render_node_history() в render_stats.awk (оси, таймлайн,
-  // подсказки-точки и наведение курсором с перекрестием - тот же набор
-  // возможностей, что был у старой server-rendered stats.html).
-  // runsSeries - data.runs.series из /api/stats (нужен только iso[] для
-  // подписей оси X и подсказки).
+  // Вертикальное перекрестие в точке наведения - тултип Chart.js рисует
+  // сам, а линию под курсором - нет, поэтому небольшой локальный плагин
+  // (afterDraw поверх уже нарисованного графика). Регистрируется только
+  // на этом графике (через options.plugins ниже), глобально не нужен.
+  function makeCrosshairPlugin() {
+    return {
+      id: 'nodeCrosshair',
+      afterDraw: function (chart) {
+        var active = chart.getActiveElements();
+        if (!active.length) { return; }
+        var x = active[0].element.x;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted') || '#9aa0a6';
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+  }
+
+  // buildNodeChart() - график по нодам на Chart.js (см. комментарий в
+  // начале файла про stats_chart.js). runsSeries - data.runs.series из
+  // /api/stats (нужен только iso[] для подписей оси X и тултипа).
   function buildNodeChart(nodeHistory, runsSeries) {
-    var left = 40, padTop = 10, w = 710, h = 170, W = 760, H = 214;
     var top = nodeHistory.top || [];
-    var n = runsSeries.length;
     var labels = runsSeries.map(function (r) { return r.iso; });
 
     var wrap = el('div', 'chart-wrap');
-    var svg = svgEl('svg', { id: 'svg-hist', viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
 
-    var max = 0;
-    for (var i = 0; i < top.length; i++) {
-      for (var j = 0; j < top[i].values.length; j++) {
-        var v = top[i].values[j];
-        if (v !== null && v > max) { max = v; }
-      }
-    }
-    if (max <= 0) { max = 1; }
-
-    function xOf(idx) {
-      return n > 1 ? left + (idx * w) / (n - 1) : left + w / 2;
-    }
-    function yOf(v) {
-      return padTop + h - (v * h) / max;
+    if (typeof Chart === 'undefined') {
+      wrap.appendChild(el('p', 'hint', 'chart.js не загрузился - график недоступен (переустановите install.sh).'));
+      return wrap;
     }
 
-    svg.appendChild(svgEl('line', { 'class': 'axis-line', x1: left, y1: padTop, x2: left, y2: padTop + h }));
-    svg.appendChild(svgEl('line', { 'class': 'axis-line', x1: left, y1: padTop + h, x2: left + w, y2: padTop + h }));
-    var maxLabel = svgEl('text', { 'class': 'axis-text', x: left - 6, y: padTop + 4, 'font-size': 10, 'text-anchor': 'end' });
-    maxLabel.textContent = fmtMB(max) + ' МБ/с';
-    svg.appendChild(maxLabel);
-    var zeroLabel = svgEl('text', { 'class': 'axis-text', x: left - 6, y: padTop + h + 4, 'font-size': 10, 'text-anchor': 'end' });
-    zeroLabel.textContent = '0';
-    svg.appendChild(zeroLabel);
-    renderXAxisDates(svg, left, padTop, w, h, labels);
+    var sameDay = sameCalendarDay(labels);
+    var canvas = document.createElement('canvas');
+    wrap.appendChild(canvas);
 
-    var groups = {};
-    var dots = {};
-    for (var k = 0; k < top.length; k++) {
-      var values = top[k].values;
-      var color = top[k].color || '#2a78d6';
-      var group = svgEl('g', { 'class': 'node-series', id: 'series-hist-n' + k });
+    var datasets = top.map(function (node) {
+      var color = node.color || '#2a78d6';
+      return {
+        label: node.name,
+        data: node.values.map(function (v) { return v === null || v === undefined ? null : v / 1048576; }),
+        borderColor: color,
+        backgroundColor: color,
+        pointRadius: 2.5,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+        spanGaps: false,
+        tension: 0
+      };
+    });
 
-      var d = '';
-      var pen = false;
-      for (var m = 0; m < values.length; m++) {
-        var val = values[m];
-        if (val === null) { pen = false; continue; }
-        var cmd = pen ? 'L' : 'M';
-        d += cmd + xOf(m).toFixed(1) + ' ' + yOf(val).toFixed(1) + ' ';
-        pen = true;
-      }
-      if (d) {
-        group.appendChild(svgEl('path', { d: d.trim(), fill: 'none', stroke: color, 'stroke-width': 2 }));
-      }
-      for (var p = 0; p < values.length; p++) {
-        var pv = values[p];
-        if (pv === null) { continue; }
-        var dot = svgEl('circle', { 'class': 'node-dot', cx: xOf(p).toFixed(1), cy: yOf(pv).toFixed(1), r: 3, fill: color, 'stroke-width': 1 });
-        var title = document.createElementNS(SVG_NS, 'title');
-        title.textContent = (labels[p] || '') + ' · ' + fmtMB(pv) + ' МБ/с · ' + top[k].name;
-        dot.appendChild(title);
-        group.appendChild(dot);
-      }
-      svg.appendChild(group);
-      groups[k] = group;
-    }
-
-    var crosshair = svgEl('line', { 'class': 'crosshair-line', id: 'crosshair-hist', x1: left, y1: padTop, x2: left, y2: padTop + h, visibility: 'hidden' });
-    svg.appendChild(crosshair);
-    for (var kk = 0; kk < top.length; kk++) {
-      var cdot = svgEl('circle', { 'class': 'crosshair-dot', id: 'dot-hist-n' + kk, r: 3.5, fill: top[kk].color || '#2a78d6', visibility: 'hidden' });
-      svg.appendChild(cdot);
-      dots[kk] = cdot;
-    }
-    var capture = svgEl('rect', { 'class': 'chart-capture', id: 'capture-hist', x: left, y: padTop, width: w, height: h });
-    svg.appendChild(capture);
-
-    wrap.appendChild(svg);
-    var tooltip = el('div', 'tooltip');
-    tooltip.id = 'tooltip-hist';
-    tooltip.hidden = true;
-    wrap.appendChild(tooltip);
-
-    // Наведение курсором (и touch) - перекрестие + подсветка ближайшей ноды +
-    // подсказка с показаниями всех нод в этой точке, как в старой
-    // server-rendered stats.html (см. общий initChart() в render_stats.awk).
-    function svgPoint(clientX, clientY) {
-      var pt = svg.createSVGPoint();
-      pt.x = clientX; pt.y = clientY;
-      return pt.matrixTransform(svg.getScreenCTM().inverse());
-    }
-    function idxAt(svgX) {
-      var step = n > 1 ? w / (n - 1) : 0;
-      var idx = step > 0 ? Math.round((svgX - left) / step) : 0;
-      if (idx < 0) { idx = 0; }
-      if (idx > n - 1) { idx = n - 1; }
-      return idx;
-    }
-    function show(clientX, clientY) {
-      if (!n) { return; }
-      var loc = svgPoint(clientX, clientY);
-      var idx = idxAt(loc.x);
-      var x = xOf(idx);
-      crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x);
-      crosshair.setAttribute('visibility', 'visible');
-      var html = '<div class="tt-label">' + (labels[idx] || '') + '</div>';
-      var nearestId = null, nearestDist = Infinity;
-      for (var ii = 0; ii < top.length; ii++) {
-        var vv = top[ii].values[idx];
-        if (vv === null || vv === undefined) { continue; }
-        var dist = Math.abs(loc.y - yOf(vv));
-        if (dist < nearestDist) { nearestDist = dist; nearestId = ii; }
-      }
-      for (var jj = 0; jj < top.length; jj++) {
-        var v2 = top[jj].values[idx];
-        var dot2 = dots[jj];
-        if (v2 === null || v2 === undefined) {
-          if (dot2) { dot2.setAttribute('visibility', 'hidden'); }
-        } else {
-          if (dot2) {
-            dot2.setAttribute('cx', x);
-            dot2.setAttribute('cy', yOf(v2));
-            dot2.setAttribute('visibility', 'visible');
+    new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: labels, datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false }, // своя легенда - buildNodeLegend() (в ней ещё и число побед)
+          tooltip: {
+            callbacks: {
+              title: function (items) { return items.length ? items[0].label : ''; },
+              label: function (item) {
+                return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' МБ/с';
+              }
+            }
           }
-          html += '<div class="tt-row"><span class="sw" style="background:' + (top[jj].color || '#2a78d6') + '"></span>' + top[jj].name + ': ' + fmtMB(v2) + ' МБ/с</div>';
+        },
+        scales: {
+          x: {
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: 6,
+              maxRotation: 0,
+              callback: function (value, index) {
+                var iso = labels[index];
+                return iso ? (sameDay ? fmtTimeShort(iso) : fmtDateShort(iso)) : '';
+              }
+            }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function (value) { return value + ' МБ/с'; }
+            }
+          }
         }
-        if (groups[jj]) { groups[jj].classList.toggle('dim', jj !== nearestId); }
-      }
-      tooltip.innerHTML = html;
-      tooltip.hidden = false;
-      var wrapRect = wrap.getBoundingClientRect();
-      var tleft = clientX - wrapRect.left + 12;
-      var ttop = clientY - wrapRect.top - 12;
-      var maxLeft = wrapRect.width - tooltip.offsetWidth - 4;
-      if (tleft > maxLeft) { tleft = clientX - wrapRect.left - tooltip.offsetWidth - 12; }
-      if (tleft < 0) { tleft = 0; }
-      tooltip.style.left = tleft + 'px';
-      tooltip.style.top = ttop + 'px';
-    }
-    function hide() {
-      crosshair.setAttribute('visibility', 'hidden');
-      for (var kd in dots) { if (dots[kd]) { dots[kd].setAttribute('visibility', 'hidden'); } }
-      for (var kg in groups) { if (groups[kg]) { groups[kg].classList.remove('dim'); } }
-      tooltip.hidden = true;
-    }
-    capture.addEventListener('mousemove', function (e) { show(e.clientX, e.clientY); });
-    capture.addEventListener('mouseleave', hide);
-    capture.addEventListener('touchmove', function (e) { if (e.touches && e.touches[0]) { show(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: true });
-    capture.addEventListener('touchend', hide);
+      },
+      plugins: [makeCrosshairPlugin()]
+    });
 
     return wrap;
   }

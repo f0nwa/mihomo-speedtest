@@ -86,6 +86,8 @@ STATS_STYLE_SOURCE=${STATS_STYLE_SOURCE:-$DIR/stats_style.css}      # исход
 STATS_STYLE_CSS=${STATS_STYLE_CSS:-$STATS_HTTP_DIR/style.css}       # его же копия внутри раздаваемого каталога, пишется сама
 STATS_APP_SOURCE=${STATS_APP_SOURCE:-$DIR/stats_app.js}             # исходник клиентского роутера/логики SPA-shell, ставится install.sh
 STATS_APP_JS=${STATS_APP_JS:-$STATS_HTTP_DIR/app.js}                # его же копия внутри раздаваемого каталога, пишется сама
+STATS_CHARTJS_SOURCE=${STATS_CHARTJS_SOURCE:-$DIR/stats_chart.js}   # вендоренная UMD-сборка Chart.js для графика по нодам, ставится install.sh
+STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его же копия внутри раздаваемого каталога, пишется сама
 
 # Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
 # после правок") - только по команде --check-update, без автозапуска по
@@ -377,16 +379,21 @@ write_stats_run() {
 
 write_stats_static() {
   # Копирует статические файлы SPA-shell ($STATS_INDEX_SOURCE/$STATS_STYLE_SOURCE/
-  # $STATS_APP_SOURCE, ставятся install.sh рядом со speedtest2.sh) в
-  # раздаваемый каталог - см. docs/plans/2026-09-12-web-spa-migration-design.md.
-  # Файлы статические (без подстановки значений из $ENV, в отличие от
-  # stats.html из render_stats()) - copy как есть, исполняемый бит не
-  # нужен. Как и write_stats_cgi()/write_stats_run() - отсутствие
-  # источника или неудачная запись только логируют WARN и НЕ прерывают
-  # ensure_stats_httpd() (return 0 в любом случае): stats_httpd.py просто
-  # продолжит отдавать "/" как stats.html (или 404 на новых путях), как
-  # было до этой функции - см. _full_path_for()/_spa_fallback() в нём.
-  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS"; do
+  # $STATS_APP_SOURCE/$STATS_CHARTJS_SOURCE, ставятся install.sh рядом со
+  # speedtest2.sh) в раздаваемый каталог - см.
+  # docs/plans/2026-09-12-web-spa-migration-design.md. Файлы статические
+  # (без подстановки значений из $ENV, в отличие от stats.html из
+  # render_stats()) - copy как есть, исполняемый бит не нужен.
+  # $STATS_CHARTJS_SOURCE - вендоренная UMD-сборка Chart.js для графика по
+  # нодам (buildNodeChart() в stats_app.js), не наш код - тоже просто
+  # копируется как есть, отдельной логики не требует. Как и
+  # write_stats_cgi()/write_stats_run() - отсутствие источника или
+  # неудачная запись только логируют WARN и НЕ прерывают ensure_stats_httpd()
+  # (return 0 в любом случае): stats_httpd.py просто продолжит отдавать "/"
+  # как stats.html (или 404 на новых путях), как было до этой функции -
+  # см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
+  # покажет "chart.js не загрузился", см. buildNodeChart() в stats_app.js).
+  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS" "$STATS_CHARTJS_SOURCE:$STATS_CHARTJS_JS"; do
     src=${pair%%:*}
     dst=${pair#*:}
     if [ ! -f "$src" ]; then

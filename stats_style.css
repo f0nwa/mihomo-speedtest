@@ -41,25 +41,12 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:8px
 .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-bottom:8px;font-size:12px;color:var(--muted)}
 .legend-item{display:inline-flex;align-items:center;gap:5px}
 .sw{display:inline-block;width:10px;height:10px;border-radius:2px}
-svg{display:block;max-width:100%}
-/* Оси, таймлайн и наведение курсором на графике по нодам (buildNodeChart()
-   в stats_app.js) - перенесено из <style> в render_stats.awk, тот же
-   набор классов. */
-.chart-wrap{position:relative}
-.axis-line{stroke:var(--border)}
-.axis-tick{stroke:var(--border)}
-.axis-text{fill:var(--muted)}
-.node-dot{stroke:var(--card)}
-.node-series{opacity:1;transition:opacity .15s ease}
-.node-series.dim{opacity:.2}
-.chart-capture{fill:transparent;cursor:crosshair}
-.crosshair-line{stroke:var(--muted);stroke-width:1;pointer-events:none}
-.crosshair-dot{stroke:var(--card);stroke-width:1;pointer-events:none}
-.tooltip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--card-border);border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:var(--shadow);max-width:240px;z-index:10}
-.tooltip[hidden]{display:none}
-.tooltip .tt-label{font-weight:600;margin-bottom:4px}
-.tooltip .tt-row{display:flex;align-items:center;gap:6px;line-height:1.4}
-.tooltip .sw{margin-right:0}
+/* График по нодам (buildNodeChart() в stats_app.js) - Chart.js рисует
+   сам на canvas внутри .chart-wrap (оси, таймлайн, тултип); тут только
+   размер контейнера - canvas растягивается на всю его ширину/высоту
+   (responsive+maintainAspectRatio:false в опциях графика). */
+.chart-wrap{position:relative;height:240px}
+.chart-wrap canvas{max-width:100%}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:600}

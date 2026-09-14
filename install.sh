@@ -110,9 +110,12 @@ install_files() {
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
   # веб-сервиса статистики - копируются в раздаваемый каталог сами,
   # write_stats_static() из speedtest2.sh; исполняемый бит не нужен.
+  # stats_chart.js - вендоренная UMD-сборка Chart.js для графика по нодам
+  # (buildNodeChart() в stats_app.js), не наш код, ставится так же.
   atomic_install "$SELFDIR/stats_index.html" "$DIR/stats_index.html" || return 1
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
+  atomic_install "$SELFDIR/stats_chart.js" "$DIR/stats_chart.js" || return 1
   # запасной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
   # запускается ensure_stats_httpd() из speedtest2.sh только если "busybox
   # httpd" недоступен на роутере; исполняемый бит не нужен, он вызывается
@@ -248,7 +251,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js node_stats_update.awk sub_convert.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1

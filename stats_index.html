@@ -12,6 +12,9 @@
   write_stats_static() из speedtest2.sh при каждом прогоне
   ensure_stats_httpd() - править нужно этот файл, копия перезаписывается
   автоматически и правки в ней не сохранятся.
+
+  chart.js (перед app.js) - вендоренная UMD-сборка Chart.js для графика
+  по нодам в app.js (buildNodeChart()), раздаётся как есть, так же.
 -->
 <div class="wrap">
 <header>
@@ -26,4 +29,5 @@
 </header>
 <div id="app"></div>
 </div>
+<script src="chart.js"></script>
 <script src="app.js"></script>
