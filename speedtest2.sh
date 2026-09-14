@@ -95,14 +95,19 @@ STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его ж�
 # частей; меняются вручную при подготовке релиза и сверяются с файлом
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
 # им быть не следует).
-CORE_VERSION=${CORE_VERSION:-1}    # speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk
-STATS_VERSION=${STATS_VERSION:-1}  # render_stats.awk, stats_cgi.sh
+CORE_VERSION=${CORE_VERSION:-2}    # speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
+STATS_VERSION=${STATS_VERSION:-2}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
-# Локальные пути для --update-core; render_stats.awk/stats_cgi.sh для
-# --update-stats используют уже существующие RENDER_STATS/STATS_CGI_SOURCE.
+# Отдельные UPDATE_*-переменные ниже - только для трёх файлов, у которых
+# нет своего "канонического" имени переменной за пределами этого блока
+# (prep.awk/node_stats_update.awk/sub_convert.awk и все stats_*-файлы для
+# --update-stats используют уже существующие PREP/NODE_STATS_UPDATE/
+# SUB_CONVERT/RENDER_STATS/STATS_CGI_SOURCE/STATS_RUN_SOURCE/
+# STATS_HTTPD_PY/STATS_INDEX_SOURCE/STATS_STYLE_SOURCE/STATS_APP_SOURCE/
+# STATS_CHARTJS_SOURCE, объявленные выше).
 UPDATE_SELF_SCRIPT=${UPDATE_SELF_SCRIPT:-$DIR/speedtest2.sh}
 UPDATE_INSTALL_SH=${UPDATE_INSTALL_SH:-$DIR/install.sh}
 UPDATE_PROVIDERS_AWK=${UPDATE_PROVIDERS_AWK:-$DIR/providers.awk}
@@ -1133,6 +1138,16 @@ update_component_files() {
           break
         fi
         ;;
+      *.py)
+        # Только если python3 вообще есть - на роутере он опционален (см.
+        # STATS_HTTPD_PY выше, резервный busybox httpd без него), отсутствие
+        # интерпретатора само по себе не повод браковать обновление.
+        if command -v python3 >/dev/null 2>&1 && ! python3 -m py_compile "$update_tmp/$remote" 2>/dev/null; then
+          say "WARN: $label - $remote не прошёл проверку синтаксиса (python3 -m py_compile) - обновление не выполнено"
+          ok=0
+          break
+        fi
+        ;;
     esac
   done
   if [ "$ok" != 1 ]; then
@@ -1166,7 +1181,8 @@ update_component_files() {
 
 update_core() {
   # Точка входа для --update-core. Обновляет весь набор целиком (см.
-  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk, node_stats_update.awk.
+  # README) - speedtest2.sh, install.sh, prep.awk, providers.awk,
+  # node_stats_update.awk, sub_convert.awk.
   # Изменения вступают в силу со следующего запуска - текущий процесс
   # (если что-то его всё же вызвало) доработает со старым кодом.
   update_component_files core \
@@ -1174,7 +1190,8 @@ update_core() {
     "install.sh:$UPDATE_INSTALL_SH" \
     "prep.awk:$PREP" \
     "providers.awk:$UPDATE_PROVIDERS_AWK" \
-    "node_stats_update.awk:$NODE_STATS_UPDATE"
+    "node_stats_update.awk:$NODE_STATS_UPDATE" \
+    "sub_convert.awk:$SUB_CONVERT"
   rc=$?
   if [ "$rc" = 0 ]; then
     say "core: изменения вступят в силу со следующего запуска (cron или speedtest2.sh --force)"
@@ -1186,20 +1203,38 @@ apply_stats_update() {
   # После успешного обновления stats-файлов - перегенерировать stats.html
   # и переподнять веб-сервис немедленно, не дожидаясь cron. Тот же приём,
   # что stats_cgi.sh использует после сохранения формы настройки.
+  # stop_stats_httpd() перед ensure_stats_httpd() - обязательно: сама
+  # ensure_stats_httpd() перезапускает процесс только при смене
+  # адреса/порта/пароля (см. её же комментарий), а не при изменении кода -
+  # без явной остановки здесь обновлённый stats_httpd.py просто продолжит
+  # молча работать под старым, уже запущенным процессом до следующего
+  # ручного вмешательства (ровно так и вышло один раз вручную в этом
+  # проекте - см. CHANGELOG.md).
   WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-apply.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-apply.$$
   mkdir -p "$WORK" 2>/dev/null
   render_stats
+  stop_stats_httpd
   ensure_stats_httpd
   rm -rf "$WORK"
 }
 
 update_stats() {
-  # Точка входа для --update-stats. render_stats.awk и stats_cgi.sh
-  # обновляются вместе, т.к. используют общий формат HTML/CSS (см. TODO.md
-  # про дублирование стилей между ними).
+  # Точка входа для --update-stats. Все файлы веб-сервиса статистики
+  # обновляются вместе одним "всё-или-ничего" набором (см.
+  # update_component_files()) - и старый server-rendered путь
+  # (render_stats.awk/stats_cgi.sh), и SPA-shell (stats_index.html/
+  # stats_style.css/stats_app.js/stats_chart.js), и сам веб-сервер
+  # (stats_httpd.py/stats_run.sh) - разносить их по отдельным командам
+  # смысла нет, все меняются вместе при доработке раздела "Статистика".
   if ! update_component_files stats \
       "render_stats.awk:$RENDER_STATS" \
-      "stats_cgi.sh:$STATS_CGI_SOURCE"; then
+      "stats_cgi.sh:$STATS_CGI_SOURCE" \
+      "stats_run.sh:$STATS_RUN_SOURCE" \
+      "stats_httpd.py:$STATS_HTTPD_PY" \
+      "stats_index.html:$STATS_INDEX_SOURCE" \
+      "stats_style.css:$STATS_STYLE_SOURCE" \
+      "stats_app.js:$STATS_APP_SOURCE" \
+      "stats_chart.js:$STATS_CHARTJS_SOURCE"; then
     return 1
   fi
   apply_stats_update
