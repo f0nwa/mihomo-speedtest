@@ -39,8 +39,10 @@ DL_TIMEOUT=15         # потолок на одну закачку, секун�
 MIN_SPEED=1048576     # порог отбора, байт/с (1 МБ/с для текущего канала)
 MIN_RATIO=0.25         # динамический порог = доля от прямого канала
 MIN_FLOOR=524288       # абсолютный минимум порога, байт/с (0.5 МиБ/с)
-TOPN=20               # сколько нод класть в fast.yaml
-ENOUGH=25             # набрали столько выше порога - дальше не меряем
+TOPN=15               # сколько нод класть в fast.yaml
+ENOUGH=20             # набрали столько выше порога - дальше не меряем
+MAX_PING_MS=500       # максимальная задержка кандидата, мс; 0 = без ограничения
+MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
 # SPEED_URL строится ниже, ПОСЛЕ считывания speedtest2.env - иначе смена
@@ -236,6 +238,14 @@ remember_name() {
     return 1
   fi
   echo "$name" >> "$seen_file"
+}
+
+select_candidates() {
+  # Вход: задержка и техническое имя. Лимит применяется до загрузок.
+  sort -n "$1" | awk -v ping="$MAX_PING_MS" -v cap="$MAX_TESTED" '
+    $1 > 0 && (ping == 0 || $1 <= ping) {
+      if (cap == 0 || n < cap) { print; n++ }
+    }' > "$2"
 }
 
 select_winners() {
@@ -670,8 +680,8 @@ record_history() {
   # Дописывает сводку прогона в speedtest_runs.tsv и историю нод-победителей
   # в speedtest_history.tsv, применяет ротацию по HISTORY_KEEP_RUNS/HISTORY_KEEP_DAYS,
   # затем перегенерирует stats.html. Вызывается из main() после успешной
-  # публикации fast.yaml — сам по себе не критичен для работы замерщика:
-  # любая ошибка здесь — WARN в лог, а не остановка.
+  # публикации fast.yaml - сам по себе не критичен для работы замерщика:
+  # любая ошибка здесь - WARN в лог, а не остановка.
   channel=$1; threshold=$2; total=$3; alive=$4; tested=$5; good=$6; winners=$7
 
   if [ "$HISTORY_KEEP_RUNS" = 0 ] && [ "$HISTORY_KEEP_DAYS" = 0 ]; then
@@ -860,6 +870,11 @@ cleanup() {
 }
 
 main() {
+for limit_value in "$MAX_PING_MS" "$MAX_TESTED"; do
+  case $limit_value in
+    ''|*[!0-9]*) say "WARN: MAX_PING_MS и MAX_TESTED должны быть целыми неотрицательными числами"; return 1 ;;
+  esac
+done
 if [ -z "$BLOCK" ]; then
   say "WARN: BLOCK не задан; запустите install.sh для создания speedtest2.env"
   return 1
@@ -936,7 +951,15 @@ if [ "$ALIVE" -lt 1 ]; then
   say "WARN: живых нод нет, fast.yaml не трогаю"; exit 0
 fi
 
-# 5. замер скорости: живые по возрастанию задержки, пока не наберём ENOUGH выше порога
+# 5. отбор по задержке и количеству до последовательных загрузок
+select_candidates "$WORK/alive.txt" "$WORK/candidates.txt"
+CANDIDATES=$(wc -l < "$WORK/candidates.txt")
+say "кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_PING_MS=$MAX_PING_MS, MAX_TESTED=$MAX_TESTED"
+if [ "$CANDIDATES" -lt 1 ]; then
+  update_node_stability
+  say "WARN: нет кандидатов в пределах лимитов, сохраняю прежний fast.yaml"
+  exit 0
+fi
 CHANNEL=$(measure_direct)
 if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
   EFFECTIVE_MIN=$(compute_threshold "$CHANNEL")
@@ -962,7 +985,7 @@ while read -r D IDX; do
     GOOD=$((GOOD+1))
     [ "$GOOD" -ge "$ENOUGH" ] && break
   fi
-done < "$WORK/alive.txt"
+done < "$WORK/candidates.txt"
 update_node_stability
 
 # 6. отбор победителей и сборка fast.yaml

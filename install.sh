@@ -74,7 +74,7 @@ resolve_block() {
     echo "install.sh: пустой фильтр не принимается (попытка $attempt из 3)" >&2
     attempt=$((attempt + 1))
   done
-  echo "install.sh: фильтр обязателен — без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
+  echo "install.sh: фильтр обязателен - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
   return 1
 }
 
@@ -140,6 +140,22 @@ write_env() {
     [ -n "${EXTYPE:-}" ] && printf "EXTYPE='%s'\n" "$EXTYPE"
     printf "BLOCK='%s'\n" "$BLOCK"
     printf "MIN_SPEED='%s'\n" "$MIN_SPEED"
+    # При повторной установке сохраняем пользовательские лимиты отбора.
+    for limit_key in MAX_PING_MS MAX_TESTED TOPN ENOUGH MIN_WINNERS; do
+      saved_limit=$(sed -n "/^$limit_key=/p" "$dst" 2>/dev/null | tail -1)
+      if [ -n "$saved_limit" ]; then
+        printf '%s\n' "$saved_limit"
+      else
+        case $limit_key in
+          MAX_PING_MS) limit_default=500 ;;
+          MAX_TESTED) limit_default=40 ;;
+          TOPN) limit_default=15 ;;
+          ENOUGH) limit_default=20 ;;
+          MIN_WINNERS) limit_default=3 ;;
+        esac
+        printf "%s='%s'\n" "$limit_key" "$(read_speedtest_const "$limit_key" "$limit_default")"
+      fi
+    done
   } > "$tmp"
   mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
 }
@@ -163,7 +179,7 @@ read_speedtest_const() {
   # Читает числовую константу вида "ИМЯ=значение  # комментарий" из
   # шапки speedtest2.sh. Используется, чтобы MIN_RATIO/MIN_FLOOR не
   # дублировались magic-числами в install.sh (см. compute_threshold()
-  # в speedtest2.sh — источник истины для этой арифметики).
+  # в speedtest2.sh - источник истины для этой арифметики).
   name=$1
   default=$2
   val=$(awk -v n="$name" '
@@ -186,7 +202,7 @@ read_speedtest_const() {
 compute_min_speed() {
   # $1 = CHANNEL (байт/с прямого замера).
   # Дублирует compute_threshold() из speedtest2.sh на числах, прочитанных
-  # оттуда же через read_speedtest_const; 0.25/524288 ниже — fallback
+  # оттуда же через read_speedtest_const; 0.25/524288 ниже - fallback
   # ТОЛЬКО если строки MIN_RATIO=/MIN_FLOOR= не найдены в speedtest2.sh
   # (они ДОЛЖНЫ совпадать с дефолтами в его шапке).
   channel=$1
@@ -287,7 +303,7 @@ main() {
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
     echo "install.sh: канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
   else
-    # MIN_SPEED в шапке speedtest2.sh — не в кавычках (число), в отличие
+    # MIN_SPEED в шапке speedtest2.sh - не в кавычках (число), в отличие
     # от BLOCK; читаем тем же read_speedtest_const, что и MIN_RATIO/MIN_FLOOR.
     MIN_SPEED=$(read_speedtest_const MIN_SPEED 1048576)
     echo "install.sh: прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
