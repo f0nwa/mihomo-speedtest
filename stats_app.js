@@ -150,7 +150,10 @@
 
   // ----- кнопка "Запустить сейчас" (уже полностью рабочая часть, шаг 1) -----
 
-  function renderRunButton(container) {
+  function renderRunButton(container, onRunning) {
+    // onRunning() - необязательный колбэк, вызывается, когда обнаружился
+    // (при открытии страницы) или только что начался активный прогон -
+    // им пользуется startProgressPolling() ниже (карточка "Идёт прогон").
     var btn = document.createElement('button');
     btn.className = 'submit';
     btn.type = 'button';
@@ -163,6 +166,7 @@
     function refreshStatus() {
       fetchJson('/api/run').then(function (d) {
         status.textContent = d.running ? 'Прогон уже идёт.' : 'Сейчас прогонов не идёт.';
+        if (d.running && onRunning) { onRunning(); }
       })['catch'](function (err) {
         status.textContent = 'Не удалось узнать статус: ' + err.message;
       });
@@ -172,12 +176,101 @@
       btn.disabled = true;
       fetchJson('/api/run', { method: 'POST' }).then(function (d) {
         status.textContent = d.started ? 'Прогон запущен.' : 'Прогон уже шёл, новый не запускался.';
+        if (d.running && onRunning) { onRunning(); }
       })['catch'](function (err) {
         status.textContent = 'Не удалось запустить: ' + err.message;
       })['finally'](function () { btn.disabled = false; });
     });
 
     refreshStatus();
+  }
+
+  // ----- живой прогресс скоростного теста по нодам ТЕКУЩЕГО прогона
+  // (/api/progress, шаг 3 задачи "видно по нодам при прогоне" - шаги 1-2
+  // см. CHANGELOG.md) -----
+  //
+  // У /api/progress нет отдельного признака "прогона нет вовсе" (см.
+  // комментарий в stats_httpd.py про SPA-фоллбек, если progress.json ещё
+  // не существует) - поэтому "идёт ли прогон" проверяется тем же
+  // /api/run, что и раньше у кнопки "Запустить сейчас" (см. renderRunButton
+  // выше). Карточка обновляется НА МЕСТЕ (без переотрисовки всей
+  // страницы) - полный renderStats() зовётся только один раз, когда
+  // прогон завершается, чтобы подтянуть уже посчитанные финальные данные
+  // (график/таблица/"последний прогон").
+
+  var PROGRESS_POLL_MS = 2000;
+  var progressPollTimer = null;
+  var progressCardEl = null;
+
+  function stopProgressPolling() {
+    if (progressPollTimer) { clearInterval(progressPollTimer); progressPollTimer = null; }
+    progressCardEl = null;
+  }
+
+  function buildProgressTable(results) {
+    var table = el('table');
+    var thead = el('thead');
+    var htr = el('tr');
+    ['Нода', 'Скорость, МБ/с', 'Статус'].forEach(function (t) {
+      htr.appendChild(el('th', null, t));
+    });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+    var tbody = el('tbody');
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      var tr = el('tr');
+      tr.appendChild(el('td', null, r.name));
+      tr.appendChild(el('td', null, fmtMB(r.speed_bytes)));
+      var ok = r.status === 'ok';
+      tr.appendChild(el('td', ok ? 'status-alive' : 'status-absent', ok ? 'выше порога' : 'ниже порога'));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function updateProgressCard(progress) {
+    if (!progressCardEl) { return; }
+    var tested = progress && typeof progress.tested === 'number' ? progress.tested : 0;
+    var total = progress && typeof progress.total === 'number' ? progress.total : 0;
+    var results = (progress && progress.results) || [];
+    var summary = progressCardEl.querySelector('.progress-summary');
+    summary.textContent = total > 0
+      ? ('Протестировано ' + tested + ' из ' + total + '.')
+      : 'Ожидание начала скоростного теста...';
+    var oldTable = progressCardEl.querySelector('table');
+    var table = buildProgressTable(results);
+    if (oldTable) { progressCardEl.replaceChild(table, oldTable); } else { progressCardEl.appendChild(table); }
+  }
+
+  function progressPollTick() {
+    fetchJson('/api/progress').then(function (data) {
+      // {} - /api/progress без файла на диске (см. комментарий в
+      // stats_httpd.py: ещё не было прогона с этой версией speedtest2.sh -
+      // SPA-фоллбек отдаёт index.html, fetchJson() превращает
+      // нераспарсенный JSON в {}) - трактуем как "прогресса ещё нет", а
+      // не как ошибку.
+      updateProgressCard(data && typeof data.tested === 'number' ? data : null);
+    })['catch'](function () { /* временная сетевая заминка - опрос продолжится следующим тиком */ });
+
+    fetchJson('/api/run').then(function (d) {
+      if (!d.running) {
+        stopProgressPolling();
+        renderStats();
+      }
+    })['catch'](function () { /* см. выше */ });
+  }
+
+  function startProgressPolling(container, insertBefore) {
+    if (!progressCardEl) {
+      progressCardEl = card('Идёт прогон');
+      progressCardEl.appendChild(el('p', 'hint progress-summary', 'Ожидание начала скоростного теста...'));
+      if (insertBefore) { container.insertBefore(progressCardEl, insertBefore); } else { container.appendChild(progressCardEl); }
+    }
+    if (progressPollTimer) { return; }
+    progressPollTick();
+    progressPollTimer = setInterval(progressPollTick, PROGRESS_POLL_MS);
   }
 
   // ----- раздел "Статистика" (/api/stats) -----
@@ -357,6 +450,7 @@
   }
 
   function renderStats() {
+    stopProgressPolling();
     setLoading();
     fetchJson('/api/stats').then(function (data) {
       clearApp();
@@ -406,12 +500,12 @@
       app.appendChild(stabilityCard);
 
       var runCard = card('Запустить прогон вручную');
-      renderRunButton(runCard);
+      renderRunButton(runCard, function () { startProgressPolling(app, lastRunCard); });
       app.appendChild(runCard);
     })['catch'](function (err) {
       if (err.message === 'not_implemented') {
         showNotYetMoved('Раздел статистики ещё переезжает на новый интерфейс.');
-        renderRunButton(app);
+        renderRunButton(app, function () { startProgressPolling(app, null); });
         return;
       }
       showError('Не удалось загрузить статистику: ', err);
@@ -612,6 +706,7 @@
   }
 
   function render(path) {
+    stopProgressPolling();
     if (path === '/settings') { renderSettings(); } else { renderStats(); }
   }
 
