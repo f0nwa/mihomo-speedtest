@@ -613,6 +613,7 @@ function json_node_stability(path,
       cnt++
       s_name[cnt] = f[1]
       s_first[cnt] = f[2]
+      s_last_seen[cnt] = f[3]
       s_window[cnt] = f[10]
       s_last_speed[cnt] = f[11] + 0
       s_speed_sum[cnt] = f[12] + 0
@@ -662,6 +663,7 @@ function json_node_stability(path,
 
     out = out (i > 1 ? "," : "") "{\"name\":" json_str(name) \
       ",\"first_seen\":" json_str(s_first[k]) \
+      ",\"last_seen\":" json_str(s_last_seen[k]) \
       ",\"status\":\"" status "\"" \
       ",\"uptime_pct\":" (pctv >= 0 ? pctv : "null") \
       ",\"window\":" json_str(win) \

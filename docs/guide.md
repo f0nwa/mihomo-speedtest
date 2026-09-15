@@ -388,7 +388,7 @@ write_stats_static()/install.sh будут смотреть на старую в
 scp -O -P <порт SSH, если не 22> install.sh speedtest2.sh prep.awk \
     providers.awk render_stats.awk stats_cgi.sh stats_run.sh \
     stats_httpd.py stats_index.html stats_style.css stats_app.js \
-    stats_chart.js node_stats_update.awk sub_convert.awk \
+    stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk \
     root@<IP роутера>:/opt/etc/mihomo/
 ```
 
@@ -412,7 +412,7 @@ sh /opt/etc/mihomo/speedtest2.sh --force
 (`write_stats_static()`) и переподнимает веб-сервис статистики
 (`ensure_stats_httpd()` в `speedtest2.sh`), если изменились
 `render_stats.awk`, `stats_cgi.sh`, `stats_httpd.py`,
-`stats_index.html`/`stats_style.css`/`stats_app.js`/`stats_chart.js`
+`stats_index.html`/`stats_style.css`/`stats_app.js`/`stats_chart.js`/`render_progress.awk`
 или настройки в `speedtest2.env`. Полный `sh install.sh` для одного
 только обновления скриптов не нужен - он заново пройдёт калибровку
 порога и, если гео-фильтр почему-то не сохранился, повторно запросит
@@ -458,7 +458,7 @@ sh /opt/etc/mihomo/speedtest2.sh --check-update
   install.sh/setup.sh), а не только файлы самого спидтеста;
 - `stats` - `render_stats.awk`, `stats_cgi.sh`, `stats_run.sh`,
   `stats_httpd.py`, `stats_index.html`, `stats_style.css`,
-  `stats_app.js`, `stats_chart.js`.
+  `stats_app.js`, `stats_chart.js`, `render_progress.awk`.
 
 Печатает "core: установлена версия N, доступна M" (или "... это
 актуально") и завершается - по cron не запускается, только руками.

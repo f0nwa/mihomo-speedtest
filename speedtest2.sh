@@ -25,6 +25,7 @@ UPDATE_CORE=${UPDATE_CORE:-0}   # 1 -- только --update-core: скачат�
 UPDATE_STATS=${UPDATE_STATS:-0} # 1 -- только --update-stats: скачать и применить stats, main() не запускать
 MPID=
 PUBLISH_TMP=
+PROGRESS_ACTIVE=0   # 1, когда цикл шага 5 (write_progress) начат в этом прогоне - см. cleanup()
 RUN_LOG=${RUN_LOG:-$WORK/speedtest.log}
 LOG_LIMIT=${LOG_LIMIT:-102400}
 LOG_FLUSHED=0
@@ -64,6 +65,8 @@ STABILITY_DROP_AFTER=${STABILITY_DROP_AFTER:-$HISTORY_KEEP_RUNS}  # прогон
 STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # страница статистики (раздаётся отдельным веб-сервисом, см. STATS_HTTP_* ниже)
 STATS_JSON=${STATS_JSON:-$DIR/stats_www/stats.json}   # тот же дашборд в JSON (см. render_stats.awk -v format=json, шаг 2 SPA-миграции) - раздаётся как /api/stats
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
+STATS_PROGRESS=${STATS_PROGRESS:-$DIR/stats_www/progress.json}   # прогресс скоростного теста по нодам текущего прогона (см. write_progress() ниже) - шаг 1 задачи "видно по нодам при прогоне", пока без раздачи через веб-сервис (см. TODO.md)
+RENDER_PROGRESS=${RENDER_PROGRESS:-$DIR/render_progress.awk}
 STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
 STATS_HTTP_BIND=${STATS_HTTP_BIND:-0.0.0.0}        # адрес привязки (0.0.0.0 = вся локальная сеть, как и 9090)
 STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-сервиса статистики; должен быть свободен (не 5000/5001/9090)
@@ -98,7 +101,7 @@ STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его ж�
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
 # им быть не следует).
 CORE_VERSION=${CORE_VERSION:-3}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
-STATS_VERSION=${STATS_VERSION:-2}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js
+STATS_VERSION=${STATS_VERSION:-2}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
@@ -229,6 +232,42 @@ publish_file() {
 publish_fast() {
   publish_file "$1" "$2" || return 1
   FAST_CHANGED=$FILE_CHANGED
+}
+
+write_progress() {
+  # Прогресс скоростного теста по нодам ТЕКУЩЕГО прогона - шаг 1 задачи
+  # "видно по нодам при прогоне" (пока только пишет файл, без раздачи
+  # через веб-сервис и без страницы - следующие шаги отдельными
+  # коммитами). Источник - $WORK/progress.tsv, накапливается построчно в
+  # цикле шага 5 ниже (по одной строке на протестированную ноду). $1 - 1,
+  # пока цикл ещё идёт (вызов после каждой ноды и один раз перед циклом с
+  # пустым progress.tsv), 0 - финальный вызов (сразу после цикла и
+  # повторно, для надёжности, из cleanup() перед удалением $WORK - см. её
+  # комментарий про early-exit/INT/TERM). Не критично для работы
+  # замерщика - любая ошибка здесь WARN, publish_fast/fast.yaml не
+  # трогает - та же схема, что и у update_node_stability()/render_stats().
+  # kill -9 (в отличие от INT/TERM) обычным trap не перехватить - тогда
+  # файл так и останется running:true до следующего прогона, то же
+  # ограничение, что и у lock-файла в acquire_lock().
+  progress_running=$1
+  if [ ! -f "$RENDER_PROGRESS" ]; then
+    say "WARN: $RENDER_PROGRESS не найден, progress.json не обновлён"
+    return 0
+  fi
+  progressdir=${STATS_PROGRESS%/*}
+  if [ ! -d "$progressdir" ] && ! mkdir -p "$progressdir" 2>/dev/null; then
+    say "WARN: не удалось создать $progressdir, progress.json не обновлён"
+    return 0
+  fi
+  if ! awk -v running="$progress_running" -v total="${PROGRESS_TOTAL:-0}" \
+       -v started_iso="${PROGRESS_STARTED_ISO:-}" -v updated_iso="$(date '+%Y-%m-%d %H:%M:%S')" \
+       -f "$RENDER_PROGRESS" "$WORK/progress.tsv" \
+       > "$WORK/progress.new" 2> "$WORK/progress.err"; then
+    say "WARN: render_progress.awk завершился с ошибкой, progress.json не обновлён"
+    [ -s "$WORK/progress.err" ] && sed -n '1,3p' "$WORK/progress.err" >> "$RUN_LOG"
+    return 0
+  fi
+  publish_file "$WORK/progress.new" "$STATS_PROGRESS" || say "WARN: progress.json не записан"
 }
 
 remember_name() {
@@ -862,6 +901,12 @@ cleanup() {
   fi
   flush_log 2>/dev/null || true
   [ -n "$PUBLISH_TMP" ] && rm -f "$PUBLISH_TMP"
+  # Страховка на случай, если цикл шага 5 (write_progress 0 после него,
+  # см. main()) не был достигнут - ранний return/exit по ходу самого
+  # цикла, INT/TERM и т.п.: без этого progress.json мог бы остаться
+  # running:true до следующего прогона. Порядок важен - до rm -rf "$WORK"
+  # (write_progress читает "$WORK/progress.tsv").
+  [ "$PROGRESS_ACTIVE" = 1 ] && write_progress 0
   [ -n "$WORK" ] && rm -rf "$WORK"
   if [ "$LOCK_HELD" = 1 ]; then
     rm -rf "$LOCK"
@@ -968,6 +1013,11 @@ else
   EFFECTIVE_MIN=$MIN_SPEED
   say "WARN: прямой замер канала не удался, порог из настроек: $((EFFECTIVE_MIN/1048576)) МБ/с"
 fi
+PROGRESS_TOTAL=$CANDIDATES
+PROGRESS_STARTED_ISO=$(date '+%Y-%m-%d %H:%M:%S')
+PROGRESS_ACTIVE=1
+: > "$WORK/progress.tsv"
+write_progress 1
 GOOD=0
 : > "$WORK/good_names.txt"
 while read -r D IDX; do
@@ -981,11 +1031,16 @@ while read -r D IDX; do
   NM=$(awk -v k="$IDX" -F'	' '$1 == k {print $2}' "$WORK/map.txt")
   echo "$((SP/1048576)).$(( (SP%1048576)*10/1048576 ))	МБ/с	$NM" >> "$WORK/full.txt"
   [ "$FORCE" = 1 ] && say "  $((SP/1048576)).$(( (SP%1048576)*10/1048576 )) МБ/с  $NM"
+  PROGRESS_STATUS=slow
+  [ "$SP" -ge "$EFFECTIVE_MIN" ] && PROGRESS_STATUS=ok
+  printf '%s\t%s\t%s\n' "$NM" "$SP" "$PROGRESS_STATUS" >> "$WORK/progress.tsv"
+  write_progress 1
   if [ "$SP" -ge "$EFFECTIVE_MIN" ] && remember_name "$NM" "$WORK/good_names.txt"; then
     GOOD=$((GOOD+1))
     [ "$GOOD" -ge "$ENOUGH" ] && break
   fi
 done < "$WORK/candidates.txt"
+write_progress 0
 update_node_stability
 
 # 6. отбор победителей и сборка fast.yaml
@@ -1283,7 +1338,8 @@ update_stats() {
       "stats_index.html:$STATS_INDEX_SOURCE" \
       "stats_style.css:$STATS_STYLE_SOURCE" \
       "stats_app.js:$STATS_APP_SOURCE" \
-      "stats_chart.js:$STATS_CHARTJS_SOURCE"; then
+      "stats_chart.js:$STATS_CHARTJS_SOURCE" \
+      "render_progress.awk:$RENDER_PROGRESS"; then
     return 1
   fi
   apply_stats_update

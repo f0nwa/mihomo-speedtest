@@ -126,6 +126,10 @@ install_files() {
   atomic_install "$SELFDIR/node_stats_update.awk" "$DIR/node_stats_update.awk" || return 1
   # вызывается напрямую через "awk -f" в speedtest2.sh - исполняемый бит не нужен.
   atomic_install "$SELFDIR/sub_convert.awk" "$DIR/sub_convert.awk" || return 1
+  # прогресс скоростного теста по нодам текущего прогона (write_progress()
+  # в speedtest2.sh) - вызывается напрямую через "awk -f", исполняемый бит
+  # не нужен.
+  atomic_install "$SELFDIR/render_progress.awk" "$DIR/render_progress.awk" || return 1
 }
 
 write_env() {
@@ -267,7 +271,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1

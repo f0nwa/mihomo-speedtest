@@ -192,6 +192,15 @@
     return iso.slice(11, 16);
   }
 
+  // fmtLastSeen(iso) - "последний раз жива" в таблице "Доступность нод
+  // пула": last_seen из node_stability.tsv (см. node_stats_update.awk) -
+  // та же строка "YYYY-MM-DD HH:MM:SS", что и iso прогонов, пусто, если
+  // нода ни разу не отвечала (ещё не тестировалась/только добавлена).
+  function fmtLastSeen(iso) {
+    if (!iso) { return '-'; }
+    return fmtDateShort(iso) + ' ' + fmtTimeShort(iso);
+  }
+
   // Все прогоны попадают в один календарный день - тогда подписи оси X
   // это время, иначе дата (тот же критерий, что был у старого
   // render_x_axis_dates() в render_stats.awk).
@@ -324,7 +333,7 @@
     var table = el('table');
     var thead = el('thead');
     var htr = el('tr');
-    ['Нода', 'Статус', 'Uptime', 'Сейчас, МБ/с', 'Средняя, МБ/с', 'Δ, МБ/с'].forEach(function (t) {
+    ['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, МБ/с', 'Средняя, МБ/с', 'Δ, МБ/с'].forEach(function (t) {
       htr.appendChild(el('th', null, t));
     });
     thead.appendChild(htr);
@@ -336,6 +345,7 @@
       tr.appendChild(el('td', null, r.name));
       var st = statusLabel(r.status);
       tr.appendChild(el('td', st.cls, st.text));
+      tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
       tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
       tr.appendChild(el('td', null, fmtMB(r.last_speed_bytes)));
       tr.appendChild(el('td', null, fmtMB(r.avg_speed_bytes)));
