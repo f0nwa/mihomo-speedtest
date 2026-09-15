@@ -518,8 +518,7 @@
   // подсказками/диапазонами, что и в прежней HTML-форме stats_cgi.sh, -
   // группировка по карточкам ниже повторяет прежнюю разбивку.
   var FIELD_DEFS = {
-    max_ping_ms: { label: 'Максимальная задержка кандидата, мс', type: 'number', min: 0, hint: 'Ноды выше порога не участвуют в скоростном тесте. 0 = без ограничения.' },
-    max_tested: { label: 'Максимум кандидатов на скоростной тест', type: 'number', min: 0, hint: 'Берём первые ноды по возрастанию задержки. 0 = без ограничения.' },
+    max_tested: { label: 'Максимум кандидатов на скоростной тест', type: 'number', min: 0, hint: 'Берём первые живые ноды по возрастанию технического времени ответа второго ядра. 0 = без ограничения.' },
     geo_filter: { label: 'Регулярное выражение для исключения нод', type: 'text', hint: 'Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter, найденные в текущем config.yaml.', datalist: 'geo_filter_options' },
     extype: { label: 'Исключить типы нод целиком (через |)', type: 'text', placeholder: 'например trojan|ss', hint: 'Пусто = тестировать все типы, которые понимает mihomo.' },
     size_mb: { label: 'Размер файла для замера, МБ', type: 'number', min: 1, max: 100, step: 'any', hint: 'Меньше 10 МБ занижает результат - треть времени уходит на TTFB.' },
@@ -539,7 +538,7 @@
 
   var CARDS = [
     { title: 'Гео-фильтр (BLOCK)', fields: ['geo_filter'] },
-    { title: 'Как тестируем ноды', fields: ['extype', 'max_ping_ms', 'max_tested', 'size_mb', 'dl_timeout'] },
+    { title: 'Как тестируем ноды', fields: ['extype', 'max_tested', 'size_mb', 'dl_timeout'] },
     { title: 'Порог и число нод в fast.yaml', fields: ['min_speed_mb', 'min_ratio', 'min_floor_mb', 'topn', 'enough', 'min_winners'] },
     { title: 'Стабильность нод', fields: ['stability_window', 'stability_drop_after'] },
     { title: 'График по нодам', fields: ['node_cap'] },

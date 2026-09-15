@@ -145,13 +145,12 @@ write_env() {
     printf "BLOCK='%s'\n" "$BLOCK"
     printf "MIN_SPEED='%s'\n" "$MIN_SPEED"
     # При повторной установке сохраняем пользовательские лимиты отбора.
-    for limit_key in MAX_PING_MS MAX_TESTED TOPN ENOUGH MIN_WINNERS; do
+    for limit_key in MAX_TESTED TOPN ENOUGH MIN_WINNERS; do
       saved_limit=$(sed -n "/^$limit_key=/p" "$dst" 2>/dev/null | tail -1)
       if [ -n "$saved_limit" ]; then
         printf '%s\n' "$saved_limit"
       else
         case $limit_key in
-          MAX_PING_MS) limit_default=500 ;;
           MAX_TESTED) limit_default=40 ;;
           TOPN) limit_default=15 ;;
           ENOUGH) limit_default=20 ;;

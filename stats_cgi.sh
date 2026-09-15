@@ -15,7 +15,6 @@
 
 export MST_LIB_ONLY=1
 [ -n "$DIR" ] && [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
-MAX_PING_MS=${MAX_PING_MS:-500}
 MAX_TESTED=${MAX_TESTED:-40}
 
 if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
@@ -143,11 +142,11 @@ _add_err() {
 }
 
 validate_settings_fields() {
-  # Проверяет уже раскодированные значения полей формы настройки (18
+  # Проверяет уже раскодированные значения полей формы настройки (19
   # штук: node_cap, keep_runs, keep_days, geo_filter, extype, size_mb,
   # dl_timeout, min_speed_mb, min_ratio, min_floor_mb, topn, enough,
   # min_winners, stability_window, stability_drop_after, no_auth,
-  # auth_user, auth_pass - берутся из одноимённых shell-переменных,
+  # auth_user, auth_pass и max_tested - берутся из одноимённых shell-переменных,
   # устанавливаемых ДО вызова этой функции: сегодня - urldecode() из тела
   # POST HTML-формы ниже, в будущем (шаг 4, см.
   # docs/plans/2026-09-12-web-spa-migration-design.md) - разбором
@@ -159,9 +158,6 @@ validate_settings_fields() {
   err=""
   err_fields=""
 
-  if ! is_uint "$max_ping_ms"; then
-    _add_err max_ping_ms "Предел задержки должен быть целым числом от 0 мс (0 = без ограничения)."
-  fi
   if ! is_uint "$max_tested"; then
     _add_err max_tested "Лимит кандидатов должен быть целым числом от 0 (0 = без ограничения)."
   fi
@@ -265,7 +261,7 @@ print_settings_json() {
   MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" MST_API_AUTHUSER="$STATS_AUTH_USER" \
   awk -v node_cap="$STATS_NODE_CAP" -v keep_runs="$HISTORY_KEEP_RUNS" \
       -v keep_days="$HISTORY_KEEP_DAYS" \
-      -v max_ping_ms="$MAX_PING_MS" -v max_tested="$MAX_TESTED" \
+      -v max_tested="$MAX_TESTED" \
       -v size_mb="$(bytes_to_mb "$SIZE")" -v dl_timeout="$DL_TIMEOUT" \
       -v min_speed_mb="$(bytes_to_mb "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
       -v min_floor_mb="$(bytes_to_mb "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
@@ -277,7 +273,7 @@ print_settings_json() {
       extype = ENVIRON["MST_API_EXTYPE"]
       auth_user = ENVIRON["MST_API_AUTHUSER"]
       printf "{\"ok\":true,\"values\":{"
-      printf "\"max_ping_ms\":%d,\"max_tested\":%d,", max_ping_ms + 0, max_tested + 0
+      printf "\"max_tested\":%d,", max_tested + 0
       printf "\"node_cap\":%d,\"keep_runs\":%d,\"keep_days\":%d,", node_cap + 0, keep_runs + 0, keep_days + 0
       printf "\"geo_filter\":\"%s\",\"extype\":\"%s\",", esc(geo_filter), esc(extype)
       printf "\"size_mb\":%s,\"dl_timeout\":%d,", size_mb + 0, dl_timeout + 0
@@ -312,11 +308,10 @@ if [ "$method" = "POST" ]; then
   RAW_size_mb=""; RAW_dl_timeout=""; RAW_min_speed_mb=""; RAW_min_ratio=""
   RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
   RAW_stability_window=""; RAW_stability_drop_after=""
-  RAW_max_ping_ms="$MAX_PING_MS"; RAW_max_tested="$MAX_TESTED"
+  RAW_max_tested="$MAX_TESTED"
   eval "$(parse_body_fields)"
 
   node_cap=$(urldecode "$RAW_node_cap")
-  max_ping_ms=$(urldecode "$RAW_max_ping_ms")
   max_tested=$(urldecode "$RAW_max_tested")
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
@@ -339,7 +334,6 @@ if [ "$method" = "POST" ]; then
   validate_settings_fields
 
   if [ -z "$err" ]; then
-    set_env_var MAX_PING_MS "$max_ping_ms"
     set_env_var MAX_TESTED "$max_tested"
     set_env_var STATS_NODE_CAP "$node_cap"
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
@@ -483,8 +477,6 @@ $geo_filter_options</datalist>
 <input type="number" min="0.01" max="1" step="any" id="min_ratio" name="min_ratio" value="$(html_escape "$MIN_RATIO")">
 <label for="min_floor_mb">Абсолютный минимум порога, МБ/с (0 = без минимума)</label>
 <input type="number" min="0" step="any" id="min_floor_mb" name="min_floor_mb" value="$(html_escape "$(bytes_to_mb "$MIN_FLOOR")")">
-<label for="max_ping_ms">Максимальная задержка кандидата, мс (0 = без ограничения)</label>
-<input type="number" min="0" id="max_ping_ms" name="max_ping_ms" value="$(html_escape "$MAX_PING_MS")">
 <label for="max_tested">Максимум кандидатов на скоростной тест (0 = без ограничения)</label>
 <input type="number" min="0" id="max_tested" name="max_tested" value="$(html_escape "$MAX_TESTED")">
 <label for="topn">Сколько нод класть в fast.yaml (TOPN)</label>
