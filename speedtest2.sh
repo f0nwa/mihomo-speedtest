@@ -42,9 +42,10 @@ MIN_RATIO=0.25         # динамический порог = доля от п�
 MIN_FLOOR=524288       # абсолютный минимум порога, байт/с (0.5 МиБ/с)
 TOPN=15               # сколько нод класть в fast.yaml
 ENOUGH=20             # набрали столько выше порога - дальше не меряем
-MAX_PING_MS=500       # максимальная задержка кандидата, мс; 0 = без ограничения
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
+DELAY_BATCH_SIZE=10   # сколько нод одновременно проверяет второе ядро
+DELAY_TIMEOUT_MS=5000 # таймаут одной ноды внутри небольшой пакетной группы
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
 # SPEED_URL строится ниже, ПОСЛЕ считывания speedtest2.env - иначе смена
 # SIZE через веб-форму/env молча не действовала бы (строка была бы уже
@@ -280,9 +281,12 @@ remember_name() {
 }
 
 select_candidates() {
-  # Вход: задержка и техническое имя. Лимит применяется до загрузок.
-  sort -n "$1" | awk -v ping="$MAX_PING_MS" -v cap="$MAX_TESTED" '
-    $1 > 0 && (ping == 0 || $1 <= ping) {
+  # Вход: техническое время ответа и имя. Число приходит от второго,
+  # только что запущенного ядра под массовой нагрузкой и не сопоставимо с
+  # пингом рабочего Mihomo, поэтому служит только для сортировки. Перед
+  # последовательными загрузками применяется лишь лимит количества.
+  sort -n "$1" | awk -v cap="$MAX_TESTED" '
+    $1 > 0 {
       if (cap == 0 || n < cap) { print; n++ }
     }' > "$2"
 }
@@ -474,6 +478,58 @@ write_stats_static() {
   return 0
 }
 
+zash_ui_dir() {
+  # Каталог external-ui из config.yaml (обычно "./zash", относительно
+  # $DIR - именно так mihomo распаковывает туда zashboard при первом
+  # запуске, см. external-ui-url в config.yaml/config.example.yaml).
+  # Используется только cleanup_old_zash_stats() ниже. Разбор нарочно
+  # минимальный - одна строка верхнего уровня "external-ui: <путь>" без
+  # общего YAML-парсера, ровно то, что кладёт туда сама установка (см.
+  # config.example.yaml). Пусто, если config.yaml отсутствует, строки
+  # нет или значение после разбора пустое.
+  [ -f "$SOURCES" ] || return 0
+  raw=$(sed -n 's/^external-ui:[[:space:]]*//p' "$SOURCES" | head -n 1)
+  raw=${raw%%#*}
+  raw=$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')
+  raw=${raw#./}   # "./zash" -> "zash" - косметика, чтобы не собирать путь вида "$DIR/./zash"
+  [ -n "$raw" ] || return 0
+  case "$raw" in
+    /*) printf '%s' "$raw" ;;
+    *) printf '%s/%s' "$DIR" "$raw" ;;
+  esac
+}
+
+cleanup_old_zash_stats() {
+  # Убирает хвост старой схемы (см. TODO.md - "убрать старую страницу
+  # статистики из встроенного веб-UI mihomo"): до появления отдельного
+  # веб-сервиса статистики (см. комментарий в начале ensure_stats_httpd())
+  # stats.html лежал прямо в каталоге external-ui и раздавался вместе с
+  # zashboard на порту API_MAIN (обычно 9090, например
+  # http://<роутер>:9090/ui/stats.html). Текущий код туда больше ничего
+  # не пишет (write_stats_static()/render_stats() работают только с
+  # $STATS_HTTP_DIR, не связанным с zashboard) - оставшийся там файл
+  # только дублирует новый сервис и путает читателя двумя разными
+  # адресами с похожим содержимым.
+  #
+  # Вызывается из ensure_stats_httpd() при каждом прогоне (включая
+  # --force), поэтому самовосстанавливается так же, как остальной код
+  # этого файла: если zashboard когда-нибудь переустановят и туда снова
+  # вручную скопируют stats.html - следующий прогон уберёт его опять.
+  # Удаляется только файл с нашей подписью (проверка заголовка ниже) -
+  # чтобы случайно не стереть чужой файл с тем же именем, если он когда-
+  # нибудь там окажется.
+  zdir=$(zash_ui_dir)
+  [ -n "$zdir" ] || return 0
+  target=$zdir/stats.html
+  [ -f "$target" ] || return 0
+  grep -q '<title>speedtest2 - статистика</title>' "$target" 2>/dev/null || return 0
+  if rm -f "$target"; then
+    say "OK: убран устаревший $target (дублировал новый веб-сервис статистики, см. TODO.md)"
+  else
+    say "WARN: не удалось убрать устаревший $target - уберите вручную"
+  fi
+}
+
 ensure_stats_httpd() {
   # Поднимает (или перезапускает при смене адреса/порта) отдельный веб-сервис
   # для stats.html - раньше страница раздавалась только вместе с zashboard
@@ -491,6 +547,8 @@ ensure_stats_httpd() {
   # python3-зависимости: вариант 2, деградация, а не жёсткая зависимость) -
   # ниже, перед выбором backend.
   export DIR ENV
+
+  cleanup_old_zash_stats
 
   if [ "$STATS_HTTP_ENABLE" != 1 ]; then
     stop_stats_httpd
@@ -841,16 +899,62 @@ reload_provider() {
   curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/fast" >/dev/null 2>&1
 }
 
-# timeout=20000: при большом пуле (160+ нод, все проверяются одним
-# параллельным запросом) роутер не успевает поднять все TLS-соединения
-# за 5 секунд - mihomo возвращает 504 "all proxies timeout" на весь
-# групповой запрос целиком, а не только для медленных нод. 20 секунд -
-# временный запас, подобранный опытным путём под текущий размер пула;
-# при дальнейшем росте пула стоит разбивать проверку на батчи вместо
-# дальнейшего повышения этого числа.
+write_test_config() {
+  # T содержит весь пул, но используется только для последовательного
+  # переключения нод во время замера скорости. Группы D0001... разбивают
+  # массовый delay-check на небольшие последовательные партии: внутри
+  # каждой Mihomo проверяет ноды параллельно, между партиями - нет.
+  awk -F '\t' -v size="$DELAY_BATCH_SIZE" '
+    (NR - 1) % size == 0 {
+      group++
+      printf "  - name: D%04d\n", group
+      print "    type: select"
+      print "    proxies:"
+    }
+    { print "      - " $1 }
+  ' "$WORK/map.txt" > "$WORK/delay_groups.yaml"
+
+  awk -v size="$DELAY_BATCH_SIZE" '
+    (NR - 1) % size == 0 { printf "D%04d\n", ++group }
+  ' "$WORK/map.txt" > "$WORK/delay_groups.txt"
+
+  {
+    echo "mixed-port: $MIXED_PORT"
+    echo "external-controller: $API"
+    echo "log-level: silent"
+    echo "mode: rule"
+    echo "proxies:"
+    cat "$WORK/all.yaml"
+    echo "proxy-groups:"
+    echo "  - name: T"
+    echo "    type: select"
+    echo "    include-all-proxies: true"
+    cat "$WORK/delay_groups.yaml"
+    echo "rules:"
+    echo "  - MATCH,T"
+  } > "$WORK/config.yaml"
+}
+
 fetch_delays() {
-  curl -f -s -m 60 "http://$API/group/T/delay?url=$DELAY_URL&timeout=20000" \
-       -o "$WORK/delay.json" 2>/dev/null
+  : > "$WORK/alive.raw"
+  delay_batches_ok=0
+  while IFS= read -r delay_group; do
+    [ -n "$delay_group" ] || continue
+    delay_json=$WORK/delay-$delay_group.json
+    if curl -f -s -m 10 \
+         "http://$API/group/$delay_group/delay?url=$DELAY_URL&timeout=$DELAY_TIMEOUT_MS" \
+         -o "$delay_json" 2>/dev/null; then
+      delay_batches_ok=$((delay_batches_ok + 1))
+      tr ',' '\n' < "$delay_json" \
+        | sed -n 's/.*"\(n[0-9]\{4\}\)":\([0-9]*\).*/\2 \1/p' \
+        >> "$WORK/alive.raw"
+    else
+      say "WARN: пакетная проверка задержки $delay_group не выполнена, продолжаю с остальными"
+    fi
+  done < "$WORK/delay_groups.txt"
+
+  sort -n "$WORK/alive.raw" > "$WORK/alive.txt"
+  [ "$delay_batches_ok" -gt 0 ]
 }
 
 select_proxy() {
@@ -915,11 +1019,9 @@ cleanup() {
 }
 
 main() {
-for limit_value in "$MAX_PING_MS" "$MAX_TESTED"; do
-  case $limit_value in
-    ''|*[!0-9]*) say "WARN: MAX_PING_MS и MAX_TESTED должны быть целыми неотрицательными числами"; return 1 ;;
-  esac
-done
+case $MAX_TESTED in
+  ''|*[!0-9]*) say "WARN: MAX_TESTED должен быть целым неотрицательным числом"; return 1 ;;
+esac
 if [ -z "$BLOCK" ]; then
   say "WARN: BLOCK не задан; запустите install.sh для создания speedtest2.env"
   return 1
@@ -950,20 +1052,7 @@ if [ "$TOTAL" -lt 1 ]; then
 fi
 
 # 2. конфиг для тестового ядра
-{
-  echo "mixed-port: $MIXED_PORT"
-  echo "external-controller: $API"
-  echo "log-level: silent"
-  echo "mode: rule"
-  echo "proxies:"
-  cat "$WORK/all.yaml"
-  echo "proxy-groups:"
-  echo "  - name: T"
-  echo "    type: select"
-  echo "    include-all-proxies: true"
-  echo "rules:"
-  echo "  - MATCH,T"
-} > "$WORK/config.yaml"
+write_test_config
 
 if ! "$BIN" -t -d "$WORK" -f "$WORK/config.yaml" > "$WORK/test.log" 2>&1; then
   say "WARN: тестовый конфиг не прошёл валидацию, fast.yaml не трогаю"
@@ -982,12 +1071,11 @@ if ! curl -s -m 2 "http://$API/version" > /dev/null 2>&1; then
   say "WARN: тестовое ядро не поднялось, fast.yaml не трогаю"; exit 0
 fi
 
-# 4. отсев мёртвых одним групповым запросом (ядро проверяет ноды параллельно)
+# 4. отсев мёртвых последовательными пакетами (внутри пакета - параллельно)
 if ! fetch_delays; then
   say "WARN: групповая проверка задержки не выполнена, fast.yaml не трогаю"
   exit 0
 fi
-tr ',' '\n' < "$WORK/delay.json" | sed -n 's/.*"\(n[0-9]\{4\}\)":\([0-9]*\).*/\2 \1/p' | sort -n > "$WORK/alive.txt"
 ALIVE=$(wc -l < "$WORK/alive.txt")
 say "нод в пуле: $TOTAL, живых: $ALIVE"
 : > "$WORK/res.txt"
@@ -999,7 +1087,7 @@ fi
 # 5. отбор по задержке и количеству до последовательных загрузок
 select_candidates "$WORK/alive.txt" "$WORK/candidates.txt"
 CANDIDATES=$(wc -l < "$WORK/candidates.txt")
-say "кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_PING_MS=$MAX_PING_MS, MAX_TESTED=$MAX_TESTED"
+say "кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_TESTED=$MAX_TESTED"
 if [ "$CANDIDATES" -lt 1 ]; then
   update_node_stability
   say "WARN: нет кандидатов в пределах лимитов, сохраняю прежний fast.yaml"
