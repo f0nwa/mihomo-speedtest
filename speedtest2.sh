@@ -694,7 +694,23 @@ stats_httpd_advertise_host() {
 }
 
 render_stats() {
-  ensure_stats_httpd
+  # С порции 2 задачи "независимая служба веб-интерфейса статистики"
+  # (docs/superpowers/specs/2026-09-15-independent-stats-service-design.md)
+  # render_stats() больше НЕ вызывает ensure_stats_httpd() - обычные
+  # прогоны speedtest2.sh (cron, --force) не поднимают, не проверяют и не
+  # перезапускают HTTP-бэкенд. Это отдельная забота stats_service.sh
+  # (supervisor с собственным respawn/backoff, см. design). render_stats()
+  # отвечает только за атомарную публикацию stats.html/stats.json - как и
+  # write_progress() отдельно отвечает за progress.json.
+  #
+  # ensure_stats_httpd() и её вспомогательные функции (write_stats_*(),
+  # cleanup_old_zash_stats(), start_stats_httpd_backend(),
+  # stats_httpd_advertise_host(), stop_stats_httpd()) пока остаются в этом
+  # файле - их всё ещё вызывают stats_cgi.sh (после сохранения настроек) и
+  # update_stats() ниже (после обновления stats-компонента). Перевод этих
+  # мест на "/opt/etc/init.d/S80speedtest-stats reconfigure/restart" -
+  # порция 3; удалять функции раньше переключения всех вызывающих мест
+  # design прямо запрещает.
   statsdir=${STATS_HTML%/*}
   if [ ! -d "$statsdir" ]; then
     say "WARN: каталог $statsdir не найден, stats.html не записан"
