@@ -469,6 +469,10 @@
       } else {
         lastRunCard.appendChild(el('p', 'hint', 'Прогонов ещё не было.'));
       }
+      // Кнопка ручного запуска - в этой же карточке ("состояние и время
+      // последнего прогона"), чтобы её было видно сразу, без прокрутки
+      // вниз мимо графика и таблицы доступности (см. TODO.md).
+      renderRunButton(lastRunCard, function () { startProgressPolling(app, lastRunCard); });
       app.appendChild(lastRunCard);
 
       var lastMeasureCard = card('Последний замер');
@@ -498,10 +502,6 @@
         stabilityCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
       }
       app.appendChild(stabilityCard);
-
-      var runCard = card('Запустить прогон вручную');
-      renderRunButton(runCard, function () { startProgressPolling(app, lastRunCard); });
-      app.appendChild(runCard);
     })['catch'](function (err) {
       if (err.message === 'not_implemented') {
         showNotYetMoved('Раздел статистики ещё переезжает на новый интерфейс.');
