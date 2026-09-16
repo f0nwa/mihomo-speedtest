@@ -3,9 +3,9 @@
 # README.md, раздел про stats_www/cgi-bin/run). Ставится install.sh в
 # $DIR/stats_run.sh; в раздаваемый каталог (STATS_RUN_SCRIPT, обычно
 # $DIR/stats_www/cgi-bin/run) его копирует write_stats_run() из
-# speedtest2.sh при каждом прогоне ensure_stats_httpd() - править нужно
-# этот файл, копия перезаписывается автоматически и правки в ней не
-# сохранятся.
+# speedtest2.sh при каждом запуске/перезапуске независимой службы
+# (prepare() в stats_service.sh, порция 3) - править нужно этот файл,
+# копия перезаписывается автоматически и правки в ней не сохранятся.
 #
 # GET  -> {"running":true|false} - идёт ли сейчас прогон (проверяется тот
 #         же файл-блокировка $LOCK, что и у cron/--force, см. acquire_lock()
@@ -21,7 +21,7 @@
 #
 # Тот же приём, что и в stats_cgi.sh: подключаем speedtest2.sh с
 # MST_LIB_ONLY=1, чтобы получить DIR/LOCK/... из окружения, которое
-# ensure_stats_httpd() экспортирует дочернему httpd (и его CGI-процессам),
+# stats_service.sh экспортирует дочернему httpd (и его CGI-процессам),
 # без запуска main().
 
 export MST_LIB_ONLY=1

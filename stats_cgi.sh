@@ -2,16 +2,18 @@
 # CGI-скрипт формы настройки статистики speedtest2 (см. README.md, раздел
 # про stats_www/cgi-bin/config). Ставится install.sh в $DIR/stats_cgi.sh;
 # в раздаваемый каталог (STATS_CGI_SCRIPT, обычно $DIR/stats_www/cgi-bin/config)
-# его копирует write_stats_cgi() из speedtest2.sh при каждом прогоне
-# ensure_stats_httpd() - править нужно этот файл, копия перезаписывается
-# автоматически и правки в ней не сохранятся.
+# его копирует write_stats_cgi() из speedtest2.sh при каждом запуске/
+# перезапуске независимой службы (prepare() в stats_service.sh, порция 3 -
+# см. docs/superpowers/specs/2026-09-15-independent-stats-service-design.md) -
+# править нужно этот файл, копия перезаписывается автоматически и правки в
+# ней не сохранятся.
 #
 # Полагается на то, что busybox httpd передаёт CGI-процессу окружение
-# родителя: ensure_stats_httpd() в speedtest2.sh экспортирует DIR и ENV
-# перед запуском веб-сервиса, поэтому сорс "$DIR/speedtest2.sh" ниже
-# подхватывает те же настройки (включая текущий speedtest2.env), что и
-# обычный прогон по cron - в т.ч. пересчитывает все зависящие от DIR пути
-# (HISTORY_RUNS, STATS_HTML и т.д.), а не только те, что перечислены тут.
+# родителя: stats_service.sh экспортирует DIR и ENV перед запуском веб-
+# сервиса, поэтому сорс "$DIR/speedtest2.sh" ниже подхватывает те же
+# настройки (включая текущий speedtest2.env), что и обычный прогон по cron -
+# в т.ч. пересчитывает все зависящие от DIR пути (HISTORY_RUNS, STATS_HTML
+# и т.д.), а не только те, что перечислены тут.
 
 export MST_LIB_ONLY=1
 [ -n "$DIR" ] && [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
@@ -21,7 +23,7 @@ if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
   echo "Content-Type: text/plain; charset=utf-8"
   echo
   echo "Ошибка конфигурации: не удалось подключить speedtest2.sh (DIR=[$DIR])."
-  echo "Обычно это значит, что CGI запущен не через busybox httpd, поднятый ensure_stats_httpd()."
+  echo "Обычно это значит, что CGI запущен не через busybox httpd, поднятый stats_service.sh."
   exit 0
 fi
 
@@ -56,6 +58,12 @@ urldecode() {
 
 html_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
+}
+
+json_escape() {
+  # Для одиночных строковых значений в самодельном JSON ниже (restart_warn) -
+  # полноценный разбор JSON тут ни при чём, только обратный слэш и кавычка.
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 is_uint() {
@@ -246,6 +254,8 @@ print_settings_json() {
           printf "\"%s\":\"%s\"", esc(field), esc(msg)
         }
         END { printf "}}" }'
+    elif [ -n "$restart_warn" ]; then
+      printf '{"ok":true,"warning":"%s"}' "$(json_escape "$restart_warn")"
     else
       printf '{"ok":true}'
     fi
@@ -293,6 +303,7 @@ GEOFILTER_CANDIDATES
 method=${REQUEST_METHOD:-GET}
 msg=""
 err=""
+restart_warn=""
 
 if [ "$method" = "POST" ]; then
   len=${CONTENT_LENGTH:-0}
@@ -334,6 +345,15 @@ if [ "$method" = "POST" ]; then
   validate_settings_fields
 
   if [ -z "$err" ]; then
+    # Логин/пароль (STATS_AUTH_USER/STATS_AUTH_PASS) - единственный
+    # параметр жизненного цикла веб-сервиса, который меняет эта форма (см.
+    # design порции 3: адрес/порт/STATS_HTTP_ENABLE в неё не выведены).
+    # Запоминаем значения ДО перезаписи ниже, чтобы понять после, менялись
+    # ли они - и вызвать reconfigure только в этом случае (порция 3:
+    # "изменение только параметров speedtest его не вызывает").
+    prev_auth_user=$STATS_AUTH_USER
+    prev_auth_pass=$STATS_AUTH_PASS
+
     set_env_var MAX_TESTED "$max_tested"
     set_env_var STATS_NODE_CAP "$node_cap"
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
@@ -360,15 +380,26 @@ if [ "$method" = "POST" ]; then
 
     # перечитываем свежесохранённые значения и применяем сразу, не дожидаясь
     # следующего прогона по cron: перегенерируем stats.html (новый NODE_CAP)
-    # и переподнимаем веб-сервис (новые логин/пароль/защита cgi-bin).
+    # немедленно. render_stats() с порции 2 сама больше не трогает
+    # HTTP-процесс - если поменялись логин/пароль, веб-сервис перезапускает
+    # независимая служба через явный reconfigure (порция 3), а не эта форма
+    # напрямую.
     [ -f "$ENV" ] && . "$ENV"
     WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-cgi.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-cgi.$$
     mkdir -p "$WORK" 2>/dev/null
     RUN_LOG=$WORK/cgi.log
     render_stats
-    ensure_stats_httpd
     rm -rf "$WORK"
     msg="Настройки сохранены."
+
+    if [ "$prev_auth_user" != "$STATS_AUTH_USER" ] || [ "$prev_auth_pass" != "$STATS_AUTH_PASS" ]; then
+      if [ -x "$STATS_INIT_SCRIPT" ]; then
+        "$STATS_INIT_SCRIPT" reconfigure >/dev/null 2>&1 \
+          || restart_warn="Настройки сохранены, но перезапустить веб-сервис для нового логина/пароля не удалось - перезапустите его вручную ($STATS_INIT_SCRIPT restart)."
+      else
+        restart_warn="Настройки сохранены, но $STATS_INIT_SCRIPT не найден - новый логин/пароль подействует только после переустановки и перезапуска веб-сервиса."
+      fi
+    fi
   fi
 fi
 
@@ -431,6 +462,7 @@ input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 
 button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
 .msg-ok{background:#16a34a22;border:1px solid #16a34a;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 .msg-err{background:#dc262622;border:1px solid #dc2626;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
+.msg-warn{background:#d9770622;border:1px solid #d97706;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 </style>
 <div class="wrap">
 <header>
@@ -444,6 +476,7 @@ HTML
 
 [ -n "$msg" ] && printf '<p class="msg-ok">%s</p>\n' "$(html_escape "$msg")"
 [ -n "$err" ] && printf '<p class="msg-err">%s</p>\n' "$err"
+[ -n "$restart_warn" ] && printf '<p class="msg-warn">%s</p>\n' "$(html_escape "$restart_warn")"
 
 cur_auth_user=$(html_escape "$STATS_AUTH_USER")
 

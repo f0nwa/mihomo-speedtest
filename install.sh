@@ -12,6 +12,9 @@ TMPROOT=${TMPROOT:-/tmp}
 SELFDIR=${SELFDIR:-.}
 CONFIG=${CONFIG:-$DIR/config.yaml}
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
+STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
+INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
+INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 
 . "$SELFDIR/version_check.sh"
 
@@ -116,10 +119,10 @@ install_files() {
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
   atomic_install "$SELFDIR/stats_chart.js" "$DIR/stats_chart.js" || return 1
-  # запасной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
-  # запускается ensure_stats_httpd() из speedtest2.sh только если "busybox
-  # httpd" недоступен на роутере; исполняемый бит не нужен, он вызывается
-  # как "python3 stats_httpd.py", а не напрямую.
+  # основной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
+  # запускается start_backend() в stats_service.sh (порция 3, независимая
+  # служба); исполняемый бит не нужен, он вызывается как
+  # "python3 stats_httpd.py", а не напрямую.
   atomic_install "$SELFDIR/stats_httpd.py" "$DIR/stats_httpd.py" || return 1
   # вызывается напрямую через "awk -f", как prep.awk/render_stats.awk -
   # исполняемый бит не нужен.
@@ -130,6 +133,16 @@ install_files() {
   # в speedtest2.sh) - вызывается напрямую через "awk -f", исполняемый бит
   # не нужен.
   atomic_install "$SELFDIR/render_progress.awk" "$DIR/render_progress.awk" || return 1
+  # независимая служба веб-интерфейса статистики (порция 3, см.
+  # docs/superpowers/specs/2026-09-15-independent-stats-service-design.md) -
+  # supervisor ставится рядом с остальными файлами в $DIR, а сам
+  # init-скрипт - прямо в каталог автозапуска Entware, чтобы rc.unslung
+  # подхватил его при следующей загрузке /opt без отдельного шага.
+  atomic_install "$SELFDIR/stats_service.sh" "$STATS_SERVICE_DEST" || return 1
+  chmod +x "$STATS_SERVICE_DEST"
+  mkdir -p "$INITD_DIR" 2>/dev/null || true
+  atomic_install "$SELFDIR/stats_init.sh" "$INITD_SCRIPT" || return 1
+  chmod +x "$INITD_SCRIPT"
 }
 
 write_env() {
@@ -238,17 +251,17 @@ have_opkg() {
 
 ensure_python3() {
   # Роутеру нужен python3 для основного веб-сервиса статистики
-  # (stats_httpd.py, см. ensure_stats_httpd() в speedtest2.sh) - без него
-  # ensure_stats_httpd() тихо откатывается на резервный busybox httpd
-  # (только /stats.html и /cgi-bin/config, без чистых URL /stats и
-  # /settings, см. README). Пытаемся поставить python3 через opkg
-  # (пакетный менеджер Entware) сами, но неудача здесь никогда не
-  # останавливает install.sh - тогда просто предупреждаем и остаёмся на
+  # (stats_httpd.py, см. start_backend() в stats_service.sh - порция 3,
+  # независимая служба) - без него start_backend() тихо откатывается на
+  # резервный busybox httpd (только /stats.html и /cgi-bin/config, без
+  # чистых URL /stats и /settings, см. README). Пытаемся поставить python3
+  # через opkg (пакетный менеджер Entware) сами, но неудача здесь никогда
+  # не останавливает install.sh - тогда просто предупреждаем и остаёмся на
   # резервном варианте.
   have_python3 && return 0
 
   if ! have_opkg; then
-    echo "install.sh: python3 не найден, а opkg недоступен - поставить автоматически не получится. Веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную и перезапустите: sh speedtest2.sh --force" >&2
+    echo "install.sh: python3 не найден, а opkg недоступен - поставить автоматически не получится. Веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную и выполните: $INITD_SCRIPT restart" >&2
     return 0
   fi
 
@@ -262,7 +275,7 @@ ensure_python3() {
   if have_python3; then
     echo "install.sh: python3 успешно установлен через opkg" >&2
   else
-    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную (opkg update && opkg install python3) и перезапустите: sh speedtest2.sh --force" >&2
+    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную (opkg update && opkg install python3) и выполните: $INITD_SCRIPT restart" >&2
   fi
 }
 
@@ -270,7 +283,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk; do
+  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
@@ -322,10 +335,25 @@ main() {
   }
   install_cron
 
-  # Ставим python3 (если получится) ДО пробного запуска, чтобы сам этот
-  # пробный запуск уже поднял основной веб-сервис (stats_httpd.py), а не
-  # резервный busybox httpd, если установка удалась.
+  # Ставим python3 (если получится) ДО запуска веб-службы, чтобы сама
+  # служба сразу подняла основной бэкенд (stats_httpd.py), а не резервный
+  # busybox httpd, если установка удалась.
   ensure_python3
+
+  # Порция 3 (см. design): веб-интерфейс статистики поднимается независимо
+  # от пробного прогона speedtest - "restart", а не "start", чтобы при
+  # переустановке (изменился порт/bind/логин в $CONFIG или окружении)
+  # уже запущенная служба сразу подхватила свежий speedtest2.env, а не
+  # промолчала как "уже запущена" на старых настройках.
+  if [ -x "$INITD_SCRIPT" ]; then
+    if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
+      echo "install.sh: веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
+    else
+      echo "install.sh: WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
+    fi
+  else
+    echo "install.sh: WARN - $INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен" >&2
+  fi
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
     "$DIR/speedtest2.sh" || true

@@ -273,12 +273,14 @@ DIRECT
   `busybox httpd` - тогда доступен только старый `/stats.html`.
   `install.sh` сам пытается поставить `python3` через `opkg` при установке
   (см. ниже); если это не удалось или `python3` появился позже другим
-  путём - `sh speedtest2.sh --force` без переустановки поднимает уже
-  новый интерфейс. Порт настраивается через
+  путём - `sh /opt/etc/init.d/S80speedtest-stats restart` без
+  переустановки поднимает уже новый интерфейс (независимая служба, см.
+  ниже). Порт настраивается через
   `STATS_HTTP_PORT` в `speedtest2.env`, `STATS_HTTP_ENABLE=0` отключает
-  веб-сервис совсем. Автозапуска после перезагрузки роутера пока нет (см.
-  `TODO.md`) - сервис поднимается заново при первом же прогоне по cron
-  после перезагрузки;
+  веб-сервис совсем. Веб-интерфейс - отдельная Entware-служба
+  (`/opt/etc/init.d/S80speedtest-stats`, см. ниже): поднимается сразу
+  после загрузки роутера, не дожидаясь первого прогона по cron, и сама
+  перезапускает упавший HTTP-процесс;
 - по ссылке «Настройки» в шапке страницы (или напрямую
   `http://<IP роутера>:8899/settings` - на резервном `busybox httpd` без
   `python3` тот же адрес будет `.../cgi-bin/config`) открывается форма:
@@ -354,6 +356,58 @@ cat /opt/etc/mihomo/speedtest_last.txt   # полная таблица заме�
 `/tmp/mst.lock`; если прошлый запуск ещё работает, новый (без `--force`)
 просто пишет предупреждение и завершается без измерений.
 
+### Независимая служба веб-интерфейса статистики
+
+Веб-интерфейс статистики (`/`, `/stats`, `/settings`, резервный
+`/stats.html`) работает не как побочный эффект прогона `speedtest2.sh`, а
+как отдельная Entware-служба со своим supervisor'ом. Design:
+[`docs/superpowers/specs/2026-09-15-independent-stats-service-design.md`](../docs/superpowers/specs/2026-09-15-independent-stats-service-design.md).
+
+- `stats_service.sh` (ставится в `/opt/etc/mihomo/stats_service.sh`) -
+  supervisor: готовит раздаваемый каталог, запускает основной (`python3
+  stats_httpd.py`) или резервный (`busybox httpd`) HTTP-бэкенд, ждёт его
+  завершения и перезапускает при неожиданном падении с нарастающей
+  задержкой (2, 5, 15, затем не более 60 секунд; сбрасывается после 60
+  секунд стабильной работы).
+- `/opt/etc/init.d/S80speedtest-stats` (шаблон - `stats_init.sh` в
+  каталоге проекта, ставится `install.sh`) - обычный Entware init-скрипт:
+  `rc.unslung` запускает его автоматически при монтировании `/opt`, то
+  есть при каждой загрузке роутера, без ожидания первого прогона по cron.
+
+Команды (по SSH, от root):
+
+```sh
+/opt/etc/init.d/S80speedtest-stats start        # запустить, если ещё не запущена
+/opt/etc/init.d/S80speedtest-stats stop         # остановить, respawn не срабатывает
+/opt/etc/init.d/S80speedtest-stats restart      # stop + start
+/opt/etc/init.d/S80speedtest-stats reconfigure  # то же самое, что restart -
+                                                 # адрес, порт и Basic Auth
+                                                 # читаются заново при каждом старте
+/opt/etc/init.d/S80speedtest-stats check        # состояние supervisor'а и HTTP-бэкенда, код 0/1
+```
+
+`restart`/`reconfigure` нужны руками после: ручной установки `python3`
+задним числом (см. выше), правки `speedtest2.env` по SSH напрямую (веб-
+форма настроек делает `reconfigure` сама - см. ниже) или включения
+`STATS_HTTP_ENABLE` обратно в `1` - отключённый веб-интерфейс не может
+включить себя сам ни через какую команду, кроме `start`/`restart`.
+
+Runtime-состояние (PID-файлы, журнал HTTP-бэкенда и самого supervisor'а)
+живёт в `/tmp/mihomo-speedtest-stats` и теряется при перезагрузке -
+постоянные данные (`stats_www`, история замеров, `speedtest2.env`)
+остаются в `/opt/etc/mihomo` как и раньше. Диагностика при проблемах:
+
+```sh
+sh /opt/etc/mihomo/stats_service.sh status         # то же, что check, но без обёртки init-скрипта
+cat /tmp/mihomo-speedtest-stats/service.log        # журнал supervisor'а: respawn, backoff, переходы на резервный сервер
+cat /tmp/mihomo-speedtest-stats/httpd.log           # stderr/stdout самого HTTP-бэкенда (python3/busybox httpd)
+```
+
+Обычные прогоны `speedtest2.sh` (по cron, `--force`) не трогают эту
+службу вовсе - они только публикуют `stats.html`/`stats.json`/
+`progress.json`, которые уже поднятый веб-сервис раздаёт как обычные
+файлы.
+
 ### Перенос файлов на роутер и обновление после правок
 
 Три отдельных шага, и все три обязательны - если пропустить любой,
@@ -391,7 +445,15 @@ scp -O -P <порт SSH, если не 22> install.sh speedtest2.sh prep.awk \
     providers.awk render_stats.awk stats_cgi.sh stats_run.sh \
     stats_httpd.py stats_index.html stats_style.css stats_app.js \
     stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk \
+    stats_service.sh \
     root@<IP роутера>:/opt/etc/mihomo/
+
+# stats_init.sh (шаблон init-скрипта независимой службы, см. "Независимая
+# служба веб-интерфейса статистики" выше) ставится не в /opt/etc/mihomo,
+# а прямо в каталог автозапуска Entware - если менялся именно он:
+scp -O -P <порт SSH, если не 22> stats_init.sh \
+    root@<IP роутера>:/opt/etc/init.d/S80speedtest-stats
+ssh -p <порт SSH, если не 22> root@<IP роутера> chmod +x /opt/etc/init.d/S80speedtest-stats
 ```
 
 `config.yaml` и `speedtest2.env` этой командой не трогать - они у
@@ -400,25 +462,36 @@ scp -O -P <порт SSH, если не 22> install.sh speedtest2.sh prep.awk \
 сеть и в Entware стоит git - вместо `scp` можно `git clone`/`git pull`
 прямо на роутере, если так уже настроено.
 
-**Шаг 2 - применение.** Одного копирования недостаточно: новую версию
-роутер подхватит только при следующем запуске speedtest2.sh. Не ждать
-ближайшего cron (до трёх часов), а применить сразу:
+**Шаг 2 - применение.** Копирования недостаточно - какая команда
+применяет новые файлы, зависит от того, что именно поменялось:
 
 ```sh
 ssh -p <порт SSH, если не 22> root@<IP роутера>
 sh /opt/etc/mihomo/speedtest2.sh --force
 ```
 
-`--force` запускает прогон немедленно; в том числе перегенерирует
-`stats.html`, раскладывает статические файлы SPA-shell заново
-(`write_stats_static()`) и переподнимает веб-сервис статистики
-(`ensure_stats_httpd()` в `speedtest2.sh`), если изменились
-`render_stats.awk`, `stats_cgi.sh`, `stats_httpd.py`,
-`stats_index.html`/`stats_style.css`/`stats_app.js`/`stats_chart.js`/`render_progress.awk`
-или настройки в `speedtest2.env`. Полный `sh install.sh` для одного
-только обновления скриптов не нужен - он заново пройдёт калибровку
-порога и, если гео-фильтр почему-то не сохранился, повторно запросит
-его вручную.
+`--force` запускает прогон немедленно и перегенерирует `stats.html`/
+`stats.json` (подхватывает изменения в `render_stats.awk`) - но с порции
+2/3 независимой службы (см. выше) обычные прогоны `speedtest2.sh` больше
+не управляют веб-сервисом и не раскладывают его файлы в раздаваемый
+каталог. Если менялись `stats_cgi.sh`, `stats_run.sh`, `stats_httpd.py`,
+`stats_index.html`/`stats_style.css`/`stats_app.js`/`stats_chart.js`,
+`stats_service.sh`, `stats_init.sh` или настройки в `speedtest2.env`,
+влияющие на сам веб-сервис (`STATS_HTTP_*`, `STATS_AUTH_*`) - применить их
+явным перезапуском независимой службы:
+
+```sh
+sh /opt/etc/init.d/S80speedtest-stats restart
+```
+
+`restart` заново раскладывает статические файлы и CGI-копии в раздаваемый
+каталог (`prepare()` в `stats_service.sh`) и поднимает HTTP-бэкенд с
+чистого листа - применяет сразу оба вида изменений, поэтому при правках
+любых файлов веб-сервиса проще всегда выполнять и `--force`, и `restart`,
+не разбираясь, какой из них в этот раз обязателен. Полный `sh install.sh`
+для одного только обновления скриптов не нужен - он заново пройдёт
+калибровку порога и, если гео-фильтр почему-то не сохранился, повторно
+запросит его вручную.
 
 **Шаг 3 - проверка.** Сверить хэш файла, который реально отдаёт
 веб-сервис статистики, с тем, что лежит на рабочей машине - дешевле,
@@ -460,7 +533,8 @@ sh /opt/etc/mihomo/speedtest2.sh --check-update
   install.sh/setup.sh), а не только файлы самого спидтеста;
 - `stats` - `render_stats.awk`, `stats_cgi.sh`, `stats_run.sh`,
   `stats_httpd.py`, `stats_index.html`, `stats_style.css`,
-  `stats_app.js`, `stats_chart.js`, `render_progress.awk`.
+  `stats_app.js`, `stats_chart.js`, `render_progress.awk`,
+  `stats_service.sh`, `stats_init.sh`.
 
 Печатает "core: установлена версия N, доступна M" (или "... это
 актуально") и завершается - по cron не запускается, только руками.
@@ -486,11 +560,15 @@ py_compile` для `.py`, если `python3` вообще есть на роут
 хэша с доверенным источником нет (см. `TODO.md`).
 
 `--update-stats` применяет изменения немедленно: перегенерирует
-`stats.html` и переподнимает веб-сервис статистики (`stop_stats_httpd`
-+ `ensure_stats_httpd`), не дожидаясь cron - иначе обновлённый
-`stats_httpd.py` продолжил бы молча работать под старым уже запущенным
-процессом. Это единственный постоянно работающий процесс среди всех
-обновляемых файлов, поэтому перезапуск нужен только здесь.
+`stats.html`, затем вызывает `/opt/etc/init.d/S80speedtest-stats restart`
+(независимая служба, см. выше) - не дожидаясь cron и без ручного шага,
+иначе обновлённый `stats_httpd.py` продолжил бы молча работать под
+старым уже запущенным процессом. Это единственный постоянно работающий
+процесс среди всех обновляемых файлов, поэтому перезапуск нужен только
+здесь; неудачный `restart` не откатывает уже установленные файлы -
+`--update-stats` в этом случае завершается ошибкой, но со следующего
+`S80speedtest-stats restart` (или после перезагрузки) веб-сервис поднимется
+уже с новыми файлами.
 
 `--update-core` перезапуска не требует - ни один файл из группы `core`
 не работает как постоянный сервис, каждый читается с диска заново при

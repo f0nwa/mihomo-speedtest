@@ -94,6 +94,8 @@ STATS_APP_SOURCE=${STATS_APP_SOURCE:-$DIR/stats_app.js}             # исход
 STATS_APP_JS=${STATS_APP_JS:-$STATS_HTTP_DIR/app.js}                # его же копия внутри раздаваемого каталога, пишется сама
 STATS_CHARTJS_SOURCE=${STATS_CHARTJS_SOURCE:-$DIR/stats_chart.js}   # вендоренная UMD-сборка Chart.js для графика по нодам, ставится install.sh
 STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его же копия внутри раздаваемого каталога, пишется сама
+STATS_SERVICE=${STATS_SERVICE:-$DIR/stats_service.sh}               # порция 3: независимый supervisor (см. design), ставится install.sh
+STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # порция 3: Entware init-скрипт независимой службы, ставится install.sh
 
 # Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
 # после правок") - только по команде --check-update, без автозапуска по
@@ -102,7 +104,7 @@ STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его ж�
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
 # им быть не следует).
 CORE_VERSION=${CORE_VERSION:-3}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
-STATS_VERSION=${STATS_VERSION:-2}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk
+STATS_VERSION=${STATS_VERSION:-3}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk, stats_service.sh, stats_init.sh
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
@@ -703,14 +705,16 @@ render_stats() {
   # отвечает только за атомарную публикацию stats.html/stats.json - как и
   # write_progress() отдельно отвечает за progress.json.
   #
-  # ensure_stats_httpd() и её вспомогательные функции (write_stats_*(),
-  # cleanup_old_zash_stats(), start_stats_httpd_backend(),
-  # stats_httpd_advertise_host(), stop_stats_httpd()) пока остаются в этом
-  # файле - их всё ещё вызывают stats_cgi.sh (после сохранения настроек) и
-  # update_stats() ниже (после обновления stats-компонента). Перевод этих
-  # мест на "/opt/etc/init.d/S80speedtest-stats reconfigure/restart" -
-  # порция 3; удалять функции раньше переключения всех вызывающих мест
-  # design прямо запрещает.
+  # С порции 3 stats_cgi.sh (после сохранения серверных настроек) и
+  # update_stats() ниже (после --update-stats) тоже переключены - вместо
+  # ensure_stats_httpd() они вызывают "$STATS_INIT_SCRIPT reconfigure"
+  # или "restart" (см. apply_stats_update() ниже). ensure_stats_httpd() и
+  # её вспомогательные функции (write_stats_*(), cleanup_old_zash_stats() -
+  # переиспользуются stats_service.sh; start_stats_httpd_backend(),
+  # stats_httpd_advertise_host(), stop_stats_httpd() - больше не
+  # переиспользуются никем) сейчас не вызываются ни из одного места в
+  # проекте и оставлены только как задел под будущую отдельную чистку,
+  # а не потому что design запрещает их убрать.
   statsdir=${STATS_HTML%/*}
   if [ ! -d "$statsdir" ]; then
     say "WARN: каталог $statsdir не найден, stats.html не записан"
@@ -1409,21 +1413,31 @@ update_core() {
 
 apply_stats_update() {
   # После успешного обновления stats-файлов - перегенерировать stats.html
-  # и переподнять веб-сервис немедленно, не дожидаясь cron. Тот же приём,
-  # что stats_cgi.sh использует после сохранения формы настройки.
-  # stop_stats_httpd() перед ensure_stats_httpd() - обязательно: сама
-  # ensure_stats_httpd() перезапускает процесс только при смене
-  # адреса/порта/пароля (см. её же комментарий), а не при изменении кода -
-  # без явной остановки здесь обновлённый stats_httpd.py просто продолжит
-  # молча работать под старым, уже запущенным процессом до следующего
-  # ручного вмешательства (ровно так и вышло один раз вручную в этом
-  # проекте - см. CHANGELOG.md).
+  # и явно перезапустить независимую службу (stats_service.sh/
+  # stats_init.sh, порция 3 design), не дожидаясь cron: новый
+  # stats_httpd.py и новые статические файлы должны подхватиться сразу,
+  # а не при случайном следующем ensure_stats_httpd() (который теперь и
+  # не вызывается обычными прогонами вовсе - см. порцию 2). Явный restart
+  # нужен именно потому, что supervisor сам перезапускает бэкенд только
+  # при его падении или по команде - не при изменении файлов на диске.
+  #
+  # Неудачный restart - это WARN и ненулевой возврат, но НЕ откат уже
+  # записанных и проверенных файлов (design, "Обновление компонентов"):
+  # update_component_files() выше уже атомарно применил новый набор,
+  # откатывать его из-за отдельно неудавшегося restart не нужно.
   WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-apply.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-apply.$$
   mkdir -p "$WORK" 2>/dev/null
   render_stats
-  stop_stats_httpd
-  ensure_stats_httpd
   rm -rf "$WORK"
+  if [ -x "$STATS_INIT_SCRIPT" ]; then
+    if "$STATS_INIT_SCRIPT" restart >/dev/null 2>&1; then
+      return 0
+    fi
+    say "WARN: stats: файлы обновлены, но $STATS_INIT_SCRIPT restart не удался - перезапустите веб-сервис вручную"
+    return 1
+  fi
+  say "WARN: stats: файлы обновлены, но $STATS_INIT_SCRIPT не найден - переустановите проект (install.sh, порция 3), чтобы веб-сервис подхватил обновление сам"
+  return 1
 }
 
 update_stats() {
@@ -1432,8 +1446,14 @@ update_stats() {
   # update_component_files()) - и старый server-rendered путь
   # (render_stats.awk/stats_cgi.sh), и SPA-shell (stats_index.html/
   # stats_style.css/stats_app.js/stats_chart.js), и сам веб-сервер
-  # (stats_httpd.py/stats_run.sh) - разносить их по отдельным командам
+  # (stats_httpd.py/stats_run.sh), и, с порции 3, независимая служба
+  # (stats_service.sh/stats_init.sh) - разносить их по отдельным командам
   # смысла нет, все меняются вместе при доработке раздела "Статистика".
+  #
+  # $STATS_INIT_SCRIPT (обычно /opt/etc/init.d/S80speedtest-stats) не
+  # оканчивается на ".sh" - автоматический chmod +x внутри
+  # update_component_files() (он смотрит на суффикс ИМЕНИ НАЗНАЧЕНИЯ)
+  # его не затронет, поэтому исполняемый бит здесь выставляется явно.
   if ! update_component_files stats \
       "render_stats.awk:$RENDER_STATS" \
       "stats_cgi.sh:$STATS_CGI_SOURCE" \
@@ -1443,9 +1463,12 @@ update_stats() {
       "stats_style.css:$STATS_STYLE_SOURCE" \
       "stats_app.js:$STATS_APP_SOURCE" \
       "stats_chart.js:$STATS_CHARTJS_SOURCE" \
-      "render_progress.awk:$RENDER_PROGRESS"; then
+      "render_progress.awk:$RENDER_PROGRESS" \
+      "stats_service.sh:$STATS_SERVICE" \
+      "stats_init.sh:$STATS_INIT_SCRIPT"; then
     return 1
   fi
+  chmod +x "$STATS_INIT_SCRIPT" 2>/dev/null || true
   apply_stats_update
 }
 
