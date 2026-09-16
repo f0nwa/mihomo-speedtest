@@ -943,6 +943,8 @@ write_test_config() {
     echo "external-controller: $API"
     echo "log-level: silent"
     echo "mode: rule"
+    # Метка исключает соединения второго ядра из перехвата OUTPUT в XKeen.
+    echo "routing-mark: 255"
     echo "proxies:"
     cat "$WORK/all.yaml"
     echo "proxy-groups:"
