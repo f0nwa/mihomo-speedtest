@@ -98,10 +98,18 @@ atomic_install() {
   dstbase=${dst##*/}
   tmp=$dstdir/.$dstbase.$$
   if ! cp "$src" "$tmp"; then rm -f "$tmp"; return 1; fi
+  case $src in *.sh) mode=0755 ;; *) mode=0644 ;; esac
+  if ! chmod "$mode" "$tmp"; then rm -f "$tmp"; return 1; fi
   if ! mv "$tmp" "$dst"; then rm -f "$tmp"; return 1; fi
 }
 
+# Полные инструменты проекта, нужные для планирования обновления.
+PROJECT_TOOLS="install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk providers.awk"
+
 install_files() {
+  for project_file in $PROJECT_TOOLS; do
+    atomic_install "$SELFDIR/$project_file" "$DIR/$project_file" || return 1
+  done
   atomic_install "$SELFDIR/speedtest2.sh" "$DIR/speedtest2.sh" || return 1
   chmod +x "$DIR/speedtest2.sh"
   atomic_install "$SELFDIR/prep.awk" "$DIR/prep.awk" || return 1
@@ -283,7 +291,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
+  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1

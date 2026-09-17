@@ -3,6 +3,7 @@ set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 PLAN_AWK="$DIR/update_plan.awk"
+UPDATER_VERSION=2
 
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
@@ -110,6 +111,14 @@ MANIFEST_TMP=$(mktemp "$TMPROOT/mst-update-manifest.XXXXXX")
 trap 'rm -f "$MANIFEST_TMP" "${LOCALSTATE_TMP:-}"' EXIT INT TERM
 printf '%s\n' "$MANIFEST_BODY" > "$MANIFEST_TMP"
 
+if [ "$cmd" = plan ] && [ -z "$components" ]; then
+  components=$(awk -F'|' '$1=="COMPONENT"{printf "%s%s", (n++?",":""), $2}' "$MANIFEST_TMP")
+fi
+
+# Один строгий разбор до чтения любых целевых файлов, включая --check.
+awk -v MANIFEST="$MANIFEST_TMP" -v VALIDATE_ONLY=1 \
+    -v SELECTED="$components" -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
+
 case $cmd in
   check)
     release_version=$(manifest_field "$MANIFEST_TMP" RELEASE_VERSION)
@@ -123,17 +132,16 @@ case $cmd in
       say "Установленный релиз не отслеживается update.sh (появится после --apply в следующей порции)"
     fi
     say "Доступна версия релиза: $release_version (формат манифеста $format_version)"
+    release_tag=$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)
+    [ -z "$release_tag" ] || say "Тег релиза: $release_tag"
     ;;
   plan)
     SHA_TOOL=$(sha256_tool) || die "не найден sha256sum/busybox sha256sum/openssl - построить план невозможно"
-    if [ -z "$components" ]; then
-      components=$(awk -F'|' '$1=="COMPONENT"{printf "%s%s", (n++?",":""), $2}' "$MANIFEST_TMP")
-    fi
     LOCALSTATE_TMP=$(mktemp "$TMPROOT/mst-update-local.XXXXXX")
     build_localstate "$MANIFEST_TMP" > "$LOCALSTATE_TMP"
     installed_arg=""
     [ -f "$INSTALLED_MANIFEST_PATH" ] && installed_arg=$INSTALLED_MANIFEST_PATH
     awk -v MANIFEST="$MANIFEST_TMP" -v LOCALSTATE="$LOCALSTATE_TMP" -v INSTALLED="$installed_arg" \
-        -v SELECTED="$components" -v FORMAT="$format" -f "$PLAN_AWK"
+        -v SELECTED="$components" -v FORMAT="$format" -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
     ;;
 esac

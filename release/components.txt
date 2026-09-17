@@ -11,6 +11,12 @@ COMPONENT|web|Веб-интерфейс статистики
 COMPONENT|installer|Установщик
 COMPONENT|config-tools|Инструменты настройки конфига
 
+NOTE|updater|Обновление инструмента без перезапуска служб
+NOTE|speedtest-runtime|Новые файлы используются при следующем прогоне; перезапуск Mihomo не требуется
+NOTE|web|Один перезапуск веб-службы; интерфейс временно недоступен
+NOTE|installer|Инструменты для следующей установки или удаления; не запускаются автоматически
+NOTE|config-tools|Новый шаблон и инструменты; рабочий config.yaml не изменяется
+
 DEPENDS|web|speedtest-runtime
 
 FILE|updater|update.sh|/opt/etc/mihomo/update.sh|0755|sh
@@ -34,6 +40,8 @@ FILE|web|render_progress.awk|/opt/etc/mihomo/render_progress.awk|0644|awk
 FILE|web|stats_service.sh|/opt/etc/mihomo/stats_service.sh|0755|sh
 FILE|web|stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh
 
+FILE|installer|uninstall.sh|/opt/etc/mihomo/uninstall.sh|0755|sh
+FILE|installer|VERSIONS|/opt/etc/mihomo/VERSIONS|0644|none
 FILE|installer|install.sh|/opt/etc/mihomo/install.sh|0755|sh
 FILE|installer|version_check.sh|/opt/etc/mihomo/version_check.sh|0755|sh
 
@@ -44,4 +52,3 @@ FILE|config-tools|existing_config.awk|/opt/etc/mihomo/existing_config.awk|0644|a
 FILE|config-tools|config.example.yaml|/opt/etc/mihomo/config.example.yaml|0644|none
 
 ACTION|web|restart-web
-ACTION|speedtest-runtime|restart-mihomo
