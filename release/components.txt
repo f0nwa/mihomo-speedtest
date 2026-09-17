@@ -1,0 +1,47 @@
+# Декларация компонентов для release/generate_manifest.sh. Формат общий с
+# manifest.txt (см. update_plan.awk), но без size/sha256 - их считает
+# генератор. Границы компонентов - из docs/superpowers/specs/
+# 2026-09-15-managed-project-updates-design.md ("Компонентная модель").
+# active-config (виртуальный, миграция config.yaml) сюда не входит -
+# появится вместе с реализацией миграции (порция 3).
+
+COMPONENT|updater|Обновлятор
+COMPONENT|speedtest-runtime|Ядро спидтеста
+COMPONENT|web|Веб-интерфейс статистики
+COMPONENT|installer|Установщик
+COMPONENT|config-tools|Инструменты настройки конфига
+
+DEPENDS|web|speedtest-runtime
+
+FILE|updater|update.sh|/opt/etc/mihomo/update.sh|0755|sh
+FILE|updater|update_plan.awk|/opt/etc/mihomo/update_plan.awk|0644|awk
+
+FILE|speedtest-runtime|speedtest2.sh|/opt/etc/mihomo/speedtest2.sh|0755|sh
+FILE|speedtest-runtime|prep.awk|/opt/etc/mihomo/prep.awk|0644|awk
+FILE|speedtest-runtime|providers.awk|/opt/etc/mihomo/providers.awk|0644|awk
+FILE|speedtest-runtime|node_stats_update.awk|/opt/etc/mihomo/node_stats_update.awk|0644|awk
+FILE|speedtest-runtime|sub_convert.awk|/opt/etc/mihomo/sub_convert.awk|0644|awk
+
+FILE|web|render_stats.awk|/opt/etc/mihomo/render_stats.awk|0644|awk
+FILE|web|stats_cgi.sh|/opt/etc/mihomo/stats_cgi.sh|0755|sh
+FILE|web|stats_run.sh|/opt/etc/mihomo/stats_run.sh|0755|sh
+FILE|web|stats_httpd.py|/opt/etc/mihomo/stats_httpd.py|0644|py
+FILE|web|stats_index.html|/opt/etc/mihomo/stats_index.html|0644|none
+FILE|web|stats_style.css|/opt/etc/mihomo/stats_style.css|0644|none
+FILE|web|stats_app.js|/opt/etc/mihomo/stats_app.js|0644|none
+FILE|web|stats_chart.js|/opt/etc/mihomo/stats_chart.js|0644|none
+FILE|web|render_progress.awk|/opt/etc/mihomo/render_progress.awk|0644|awk
+FILE|web|stats_service.sh|/opt/etc/mihomo/stats_service.sh|0755|sh
+FILE|web|stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh
+
+FILE|installer|install.sh|/opt/etc/mihomo/install.sh|0755|sh
+FILE|installer|version_check.sh|/opt/etc/mihomo/version_check.sh|0755|sh
+
+FILE|config-tools|setup.sh|/opt/etc/mihomo/setup.sh|0755|sh
+FILE|config-tools|detect_ua.sh|/opt/etc/mihomo/detect_ua.sh|0755|sh
+FILE|config-tools|render_config.awk|/opt/etc/mihomo/render_config.awk|0644|awk
+FILE|config-tools|existing_config.awk|/opt/etc/mihomo/existing_config.awk|0644|awk
+FILE|config-tools|config.example.yaml|/opt/etc/mihomo/config.example.yaml|0644|none
+
+ACTION|web|restart-web
+ACTION|speedtest-runtime|restart-mihomo
