@@ -19,6 +19,7 @@ NOTE|config-tools|Новый шаблон и инструменты; рабоч�
 
 DEPENDS|web|speedtest-runtime
 
+FILE|updater|update_transaction.sh|/opt/etc/mihomo/update_transaction.sh|0755|sh
 FILE|updater|update_prepare.sh|/opt/etc/mihomo/update_prepare.sh|0755|sh
 FILE|updater|update.sh|/opt/etc/mihomo/update.sh|0755|sh
 FILE|updater|update_plan.awk|/opt/etc/mihomo/update_plan.awk|0644|awk

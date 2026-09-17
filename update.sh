@@ -6,7 +6,7 @@ export LC_ALL
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
-UPDATER_VERSION=3
+UPDATER_VERSION=4
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
@@ -44,7 +44,37 @@ safe_path() {
 }
 mode_of() {
   if mode_value=$(stat -c '%a' "$1" 2>/dev/null); then :
-  else mode_value=$(stat -f '%Lp' "$1" 2>/dev/null) || die 'не удалось прочитать режим файла'; fi
+  elif mode_value=$(stat -f '%Lp' "$1" 2>/dev/null); then :
+  else
+    # Минимальный BusyBox stat не имеет форматирования; POSIX ls даёт rwx.
+    mode_listing=$(ls -ld "$1") || die 'не удалось прочитать режим файла'
+    mode_value=$(printf '%s\n' "$mode_listing" | awk '
+      function bit(ch, kind) {
+        if (ch=="-") return 0
+        if (kind==1 && ch=="r") return 4
+        if (kind==2 && ch=="w") return 2
+        if (kind==3 && ch ~ /^[xst]$/) return 1
+        if (kind==3 && ch ~ /^[ST]$/) return 0
+        bad=1; return 0
+      }
+      NR==1 {
+        bits=substr($1,2,9)
+        if (length(bits)!=9 || substr($1,1,1)!="-") bad=1
+        for (i=1;i<=3;i++) {
+          group=0
+          for (j=1;j<=3;j++) group+=bit(substr(bits,(i-1)*3+j,1),j)
+          value=value*10+group
+        }
+        u=substr(bits,3,1); g=substr(bits,6,1); o=substr(bits,9,1)
+        if (u ~ /^[sS]$/) special+=4
+        if (g ~ /^[sS]$/) special+=2
+        if (o ~ /^[tT]$/) special+=1
+        if (u ~ /^[tT]$/ || g ~ /^[tT]$/ || o ~ /^[sS]$/) bad=1
+        if (!bad) {printf "%d\n", special*1000+value; ok=1}
+      }
+      END {exit !ok}
+    ') || die 'не удалось разобрать режим файла'
+  fi
   case $mode_value in *[!0-7]*|'') die 'неверный режим файла' ;; esac
   printf '%s\n' "$mode_value"
 }
@@ -94,14 +124,14 @@ bootstrap_header() {
     }
     $1=="FILE" && $2=="updater" {
       if (NF!=8 || used[$3]++ || $4!="/opt/etc/mihomo/" $3) bad()
-      if ($3!="update.sh" && $3!="update_plan.awk" && $3!="update_prepare.sh") bad()
+      if ($3!="update.sh" && $3!="update_plan.awk" && $3!="update_prepare.sh" && $3!="update_transaction.sh") bad()
       if ($5 !~ /^[0-9]+$/ || $5+0<1 || $5+0>1048576 || $6 !~ /^[0-9a-f]{64}$/) bad()
       if ($3=="update_plan.awk") {if ($7!="0644" || $8!="awk") bad()}
       else if ($7!="0755" || $8!="sh") bad()
       row[++n]=$0
     }
     END {
-      if (fmt!="2" || tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || tag ~ /\.\./ || n!=3 ||
+      if (fmt!="2" || tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || tag ~ /\.\./ || (n!=3 && n!=4) ||
           !seen["RELEASE_VERSION"] || !seen["MIN_UPDATER_VERSION"] || !seen["CONFIG_SCHEMA_VERSION"]) exit 1
       for (i=1;i<=n;i++) print row[i]
     }
@@ -160,11 +190,106 @@ bootstrap_verify() {
   done < "$WORK/bootstrap-files"
   if [ "$confirm_local" = 1 ]; then
     UPDATE_VERIFIED_ENGINE_DIR="$WORK/bootstrap" UPDATE_VERIFIED_PLAN_ID="$plan_id" \
-      sh "$WORK/bootstrap/update.sh" --verify-plan "$plan_id" "--format=$format" --confirm-local
+      sh "$WORK/bootstrap/update.sh" "--$cmd" "$plan_id" "--format=$format" --confirm-local
   else
     UPDATE_VERIFIED_ENGINE_DIR="$WORK/bootstrap" UPDATE_VERIFIED_PLAN_ID="$plan_id" \
-      sh "$WORK/bootstrap/update.sh" --verify-plan "$plan_id" "--format=$format"
+      sh "$WORK/bootstrap/update.sh" "--$cmd" "$plan_id" "--format=$format"
   fi
+}
+lock_plans() {
+  mkdir -p "$PLANS" || die 'не удалось создать каталог планов'
+  chmod 0700 "$PLANS" || die 'не удалось защитить каталог планов'
+  safe_path "$PLANS/.lock"
+  if ! mkdir "$PLANS/.lock" 2>/dev/null; then
+    lock_pid=$(cat "$PLANS/.lock/pid" 2>/dev/null) || die 'операция уже выполняется'
+    case $lock_pid in *[!0-9]*|''|0) die 'неверная блокировка операции' ;; esac
+    if kill -0 "$lock_pid" 2>/dev/null; then die 'операция уже выполняется'; fi
+    # Только один процесс может удалять устаревшую блокировку.
+    safe_path "$PLANS/.lock.reap"
+    mkdir "$PLANS/.lock.reap" 2>/dev/null || die 'очистка блокировки уже выполняется; проверьте .lock.reap'
+    REAP_LOCK=$PLANS/.lock.reap
+    printf '%s\n' "$$" > "$REAP_LOCK/pid" || die 'не удалось записать владельца очистки'
+    lock_pid=$(cat "$PLANS/.lock/pid" 2>/dev/null) || die 'блокировка изменилась; повторите команду'
+    case $lock_pid in *[!0-9]*|''|0) die 'неверная блокировка операции' ;; esac
+    if kill -0 "$lock_pid" 2>/dev/null; then die 'операция уже выполняется'; fi
+    rm -rf "$PLANS/.lock" || die 'не удалось удалить устаревшую блокировку'
+    mkdir "$PLANS/.lock" || die 'операция уже выполняется'
+  fi
+  OWN_LOCK=$PLANS/.lock
+  printf '%s\n' "$$" > "$OWN_LOCK/pid" || die 'не удалось записать владельца операции'
+  if [ -n "$REAP_LOCK" ]; then
+    rm -rf "$REAP_LOCK" || die 'не удалось завершить очистку блокировки'
+    REAP_LOCK=
+  fi
+}
+transaction_result() {
+  case $cmd in apply) result_status=applied ;; rollback-last) result_status=rolled-back ;; recover) result_status=recovered ;; esac
+  if [ "$format" = json ]; then printf '{"status":"%s"}\n' "$result_status"
+  else say "Операция завершена: $result_status"; fi
+}
+bootstrap_recovery() {
+  recovery_state=$UPDATE_STATE_DIR
+  if [ -n "${UPDATE_TARGET_ROOT:-}" ]; then
+    recovery_root=$(CDPATH= cd -- "$UPDATE_TARGET_ROOT" && pwd -P) || die 'корень установки недоступен'
+    case $recovery_state in /opt/*) recovery_state=$recovery_root$recovery_state ;; esac
+  fi
+  safe_path "$recovery_state/transaction.txt"
+  if [ "$cmd" = recover ] && [ ! -e "$recovery_state/transaction.txt" ]; then
+    PLANS=$TMPROOT/mst-update-plans
+    safe_path "$PLANS"
+    lock_plans
+    [ ! -e "$recovery_state/transaction.txt" ] || die 'состояние восстановления изменилось'
+    safe_path "$recovery_state/rollback.pending"
+    safe_path "$recovery_state/transaction.new"
+    # До публикации первого журнала назначения ещё не менялись.
+    # Прерванное создание комплекта можно явно очистить без движка и сети.
+    rm -rf "$recovery_state/rollback.pending" || die 'не удалось очистить незавершённый комплект'
+    rm -f "$recovery_state/transaction.new" || die 'не удалось очистить временный журнал'
+    transaction_result
+    return
+  fi
+  recovery_bundle=$recovery_state/rollback
+  if [ -e "$recovery_state/transaction.txt" ]; then
+    [ -f "$recovery_state/transaction.txt" ] || die 'неверный журнал транзакции'
+    case $(cat "$recovery_state/transaction.txt") in
+      CLEANUP_PENDING)
+        [ "$cmd" = recover ] || die 'сначала выполните --recover'
+        PLANS=$TMPROOT/mst-update-plans
+        safe_path "$PLANS"
+        lock_plans
+        [ "$(cat "$recovery_state/transaction.txt")" = CLEANUP_PENDING ] || die 'состояние восстановления изменилось'
+        safe_path "$recovery_state/rollback.pending"
+        # Старые файлы уже восстановлены; engine может быть частично удалён.
+        rm -rf "$recovery_state/rollback.pending" || die 'не удалось завершить очистку комплекта'
+        sync || die 'не удалось сохранить очистку комплекта'
+        rm -f "$recovery_state/transaction.txt" || die 'не удалось завершить очистку журнала'
+        sync || die 'не удалось сохранить очистку журнала'
+        transaction_result
+        return ;;
+      APPLY_PENDING) recovery_bundle=$recovery_state/rollback.pending ;;
+      COMMIT) if [ -d "$recovery_state/rollback.pending" ]; then recovery_bundle=$recovery_state/rollback.pending; fi ;;
+      ROLLBACK_SAVED) : ;;
+      *) die 'неизвестный журнал транзакции; восстановление заблокировано' ;;
+    esac
+  fi
+  safe_path "$recovery_bundle/engine-manifest.txt"
+  [ -f "$recovery_bundle/engine-manifest.txt" ] || die 'комплект восстановления не найден'
+  [ "$(wc -c < "$recovery_bundle/engine-manifest.txt" | tr -d ' ')" -le 262144 ] || die 'повреждён манифест восстановления'
+  cp "$recovery_bundle/engine-manifest.txt" "$MANIFEST_TMP"
+  bootstrap_header
+  mkdir "$WORK/recovery-engine"
+  while IFS='|' read -r kind cid src dest bytes sum mode check; do
+    safe_path "$recovery_bundle/engine/$src"
+    [ -f "$recovery_bundle/engine/$src" ] || die 'неполный движок восстановления'
+    [ "$(mode_of "$recovery_bundle/engine/$src")" = "${mode#0}" ] || die 'изменён режим движка восстановления'
+    cp "$recovery_bundle/engine/$src" "$WORK/recovery-engine/$src" || die 'не удалось прочитать движок восстановления'
+    check_download "$WORK/recovery-engine/$src" "$bytes" "$sum"
+    case $check in sh) sh -n "$WORK/recovery-engine/$src" || die 'неверный синтаксис recovery-engine' ;; awk) awk_syntax "$WORK/recovery-engine/$src" ;; esac
+    chmod "$mode" "$WORK/recovery-engine/$src"
+  done < "$WORK/bootstrap-files"
+  [ -f "$WORK/recovery-engine/update_transaction.sh" ] || die 'движок не поддерживает транзакции'
+  UPDATE_RECOVERY_ENGINE_DIR="$WORK/recovery-engine" \
+    sh "$WORK/recovery-engine/update.sh" "--$cmd" "--format=$format"
 }
 usage() {
   cat <<'HELP'
@@ -174,7 +299,9 @@ usage() {
   update.sh --prepare [--components=id1,id2,...] [--format=text|json]
   update.sh --verify-plan <plan-id> [--confirm-local] [--format=text|json]
   update.sh --discard-plan <plan-id>
-Применение и откат добавляются в части 2.3.
+  update.sh --apply <plan-id> [--confirm-local] [--format=text|json]
+  update.sh --rollback-last [--format=text|json]
+  update.sh --recover [--format=text|json]
 HELP
 }
 cmd=plan
@@ -185,10 +312,10 @@ confirm_local=0
 command_seen=0
 while [ $# -gt 0 ]; do
   case $1 in
-    --check|--plan|--prepare|--verify-plan|--discard-plan)
+    --check|--plan|--prepare|--verify-plan|--discard-plan|--apply|--rollback-last|--recover)
       [ "$command_seen" = 0 ] || die 'задайте один режим'
       command_seen=1; cmd=${1#--}
-      case $cmd in verify-plan|discard-plan) shift; [ $# -gt 0 ] || die 'не задан plan-id'; plan_id=$1 ;; esac ;;
+      case $cmd in verify-plan|discard-plan|apply) shift; [ $# -gt 0 ] || die 'не задан plan-id'; plan_id=$1 ;; esac ;;
     --format=text|--format=json) format=${1#--format=} ;;
     --components=*) components=${1#--components=} ;;
     --confirm-local) confirm_local=1 ;;
@@ -198,9 +325,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 case $cmd in
-  verify-plan|discard-plan) [ -z "$components" ] || die 'выбор компонентов уже закреплён в plan-id' ;;
+  verify-plan|discard-plan|apply|rollback-last|recover) [ -z "$components" ] || die 'выбор компонентов уже закреплён в plan-id' ;;
 esac
-if [ "$confirm_local" = 1 ] && [ "$cmd" != verify-plan ]; then die '--confirm-local применяется только при --verify-plan'; fi
+if [ "$confirm_local" = 1 ] && [ "$cmd" != verify-plan ] && [ "$cmd" != apply ]; then die '--confirm-local применяется только при --verify-plan/--apply'; fi
 case $UPDATE_HTTP_TIMEOUT in *[!0-9]*|'') die 'неверный таймаут загрузки' ;; esac
 [ "$UPDATE_HTTP_TIMEOUT" -gt 0 ] || die 'неверный таймаут загрузки'
 case $UPDATE_RELEASE_BASE in *'@'*|*'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'неверный URL источника' ;; esac
@@ -220,9 +347,11 @@ case $TMPROOT in /opt|/opt/*|/) die 'рабочий каталог должен 
 WORK=$(mktemp -d "$TMPROOT/mst-update-work.XXXXXX")
 KEEP_WORK=0
 OWN_LOCK=
+REAP_LOCK=
 cleanup() {
   [ "$KEEP_WORK" = 1 ] || rm -rf "$WORK"
   [ -z "$OWN_LOCK" ] || rm -rf "$OWN_LOCK"
+  [ -z "$REAP_LOCK" ] || rm -rf "$REAP_LOCK"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -234,7 +363,18 @@ case $cmd in
     prepare_init
     discard_plan
     exit 0 ;;
-  verify-plan)
+  rollback-last|recover)
+    SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
+    if [ -z "${UPDATE_RECOVERY_ENGINE_DIR:-}" ]; then bootstrap_recovery; exit 0; fi
+    [ "$UPDATE_RECOVERY_ENGINE_DIR" = "$DIR" ] || die 'неверный recovery-engine'
+    . "$DIR/update_prepare.sh"
+    prepare_init
+    lock_plans
+    . "$DIR/update_transaction.sh"
+    if [ "$cmd" = recover ]; then transaction_recover; else transaction_rollback; fi
+    transaction_result
+    exit 0 ;;
+  verify-plan|apply)
     SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
     if [ -z "${UPDATE_VERIFIED_ENGINE_DIR:-}" ]; then bootstrap_verify; exit 0; fi
     [ "$UPDATE_VERIFIED_ENGINE_DIR" = "$DIR" ] && [ "${UPDATE_VERIFIED_PLAN_ID:-}" = "$plan_id" ] || die 'неверный движок проверки'
@@ -246,6 +386,11 @@ case $cmd in
     . "$DIR/update_prepare.sh"
     prepare_init
     verify_plan
+    if [ "$cmd" = apply ]; then
+      . "$DIR/update_transaction.sh"
+      transaction_apply
+      transaction_result
+    fi
     exit 0 ;;
   *)
     if [ "$cmd" = prepare ] && [ -n "${UPDATE_BOOTSTRAP_DIR:-}" ]; then
@@ -288,6 +433,7 @@ fi
 SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
 . "$DIR/update_prepare.sh"
 prepare_init
+assert_no_transaction
 build_snapshot
 if [ "$cmd" = prepare ]; then prepare_files; fi
 print_plan

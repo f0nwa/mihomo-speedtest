@@ -15,19 +15,9 @@ prepare_init() {
   PLANS=$TMPROOT/mst-update-plans
   safe_path "$PLANS"
 }
-lock_plans() {
-  mkdir -p "$PLANS" || die 'не удалось создать каталог планов'
-  chmod 0700 "$PLANS" || die 'не удалось защитить каталог планов'
-  safe_path "$PLANS/.lock"
-  if ! mkdir "$PLANS/.lock" 2>/dev/null; then
-    lock_pid=$(cat "$PLANS/.lock/pid" 2>/dev/null) || die 'подготовка плана уже выполняется'
-    case $lock_pid in *[!0-9]*|''|0) die 'неверная блокировка подготовки' ;; esac
-    if kill -0 "$lock_pid" 2>/dev/null; then die 'подготовка плана уже выполняется'; fi
-    rm -rf "$PLANS/.lock"
-    mkdir "$PLANS/.lock" || die 'подготовка плана уже выполняется'
-  fi
-  OWN_LOCK=$PLANS/.lock
-  printf '%s\n' "$$" > "$OWN_LOCK/pid"
+assert_no_transaction() {
+  safe_path "$UPDATE_STATE_DIR/transaction.txt"
+  [ ! -e "$UPDATE_STATE_DIR/transaction.txt" ] || die 'незавершённая транзакция; выполните --recover'
 }
 validate_plan_id() {
   [ "${#plan_id}" = 64 ] || die 'неверный plan-id'
@@ -144,13 +134,14 @@ prepare_files() {
   pinned_base
   total=$(file_budget) || exit 1
   old_bytes=$(awk -F'|' '$2=="regular"{sum+=$4} END{printf "%.0f\n",sum}' "$WORK/snapshot.tsv")
-  check_space "$TMPROOT" "$((total + 3145728 + 32768))"
+  check_space "$TMPROOT" "$((total + 4194304 + 32768))"
   check_space "$(target_file /opt)" "$((total + old_bytes + 32768))"
   lock_plans
+  assert_no_transaction
   prune_plans
   initial_id=$plan_id
   mkdir "$WORK/files" "$WORK/engine"
-  for engine_file in update.sh update_plan.awk update_prepare.sh; do
+  for engine_file in update.sh update_plan.awk update_prepare.sh update_transaction.sh; do
     cp "$DIR/$engine_file" "$WORK/engine/$engine_file" || die 'не удалось сохранить движок плана'
     case $engine_file in *.sh) chmod 0755 "$WORK/engine/$engine_file" ;; *) chmod 0644 "$WORK/engine/$engine_file" ;; esac
   done
@@ -194,6 +185,7 @@ verify_plan() {
   safe_path "$saved"
   [ -d "$saved" ] || die 'подготовленный план не найден'
   lock_plans
+  if [ "$cmd" = apply ]; then assert_no_transaction; fi
   for saved_file in identity.txt manifest.txt request.txt created-at; do
     safe_path "$saved/$saved_file"
     [ -f "$saved/$saved_file" ] || die 'неполный подготовленный план'
@@ -233,5 +225,5 @@ verify_plan() {
   overwrite=$(run_parser json | awk '/"overwrite_required":true/{print "yes"}')
   if [ -n "$overwrite" ] && [ "$confirm_local" != 1 ]; then die 'локальные изменения требуют отдельного подтверждения --confirm-local'; fi
   prepared=1
-  print_plan
+  if [ "$cmd" != apply ]; then print_plan; fi
 }
