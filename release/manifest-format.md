@@ -2,7 +2,7 @@
 
 ## Версии и заголовок
 
-Генератор выпускает формат 2. Обновлятор версии 2 также читает формат 1
+Генератор выпускает формат 2. Обновлятор версии 3 также читает формат 1
 локального прототипа; первый опубликованный управляемый релиз должен иметь
 формат 2. Неизвестный формат отклоняется целиком. Версия обновлятора задана
 константой UPDATER_VERSION в update.sh, отдельно от версии релиза.
@@ -13,7 +13,7 @@
 FORMAT_VERSION=2
 RELEASE_VERSION=9
 RELEASE_TAG=v9
-MIN_UPDATER_VERSION=2
+MIN_UPDATER_VERSION=3
 CONFIG_SCHEMA_VERSION=1
 ```
 
@@ -22,9 +22,12 @@ CONFIG_SCHEMA_VERSION=1
 буквы ASCII, цифры, точку, дефис и подчёркивание; последовательность `..`
 запрещена. Это точное имя неизменяемого GitHub-тега, а не ветка main.
 
-Если MIN_UPDATER_VERSION выше версии update.sh, оба режима CLI останавливаются
-до чтения управляемых файлов. Автоматический запуск свежего обновлятора
-относится к части 2.2; сейчас используется ручное обновление, описанное ниже.
+В --check и --plan минимальная версия проверяется установленным CLI.
+--prepare получает три файла свежего обновлятора из точного RELEASE_TAG,
+проверяет размер, SHA256 и синтаксис, затем запускает его из /tmp.
+Минимальная версия проверяется уже свежим CLI. --verify-plan запускается
+через сохранённый проверенный движок плана, поэтому обновление установленного
+CLI для этой проверки не требуется.
 
 ## Строки каталога
 
@@ -57,7 +60,7 @@ ACTION|web|restart-web
   `_`, `.`, `/`, `-`; пустые сегменты, `.`/`..` и завершающий `/` запрещены.
 - Разрешены назначения внутри /opt/etc/mihomo, кроме config.yaml и .update
   с её содержимым; вне него только /opt/etc/init.d/S80speedtest-stats.
-  Проверки символических ссылок файловой системы добавляются в части 2.2.
+  Подготовка отвергает символические ссылки назначения и родителей.
 - ACTION допускает только restart-web/migrate-config/restart-mihomo.
   Замена файлов speedtest-runtime не требует restart-mihomo. Это действие
   предназначено для будущей миграции рабочего конфига.
@@ -73,7 +76,7 @@ release/components.txt содержит те же COMPONENT/NOTE/DEPENDS/CONFLIC
 Пустые строки и комментарии, начинающиеся с `#`, допускаются только здесь.
 
 ```sh
-sh release/generate_manifest.sh 9 2 1 v9 > /tmp/manifest.txt
+sh release/generate_manifest.sh 9 3 1 v9 > /tmp/manifest.txt
 ```
 
 Четвёртый аргумент необязателен; по умолчанию тег равен `v<release_version>`.
@@ -87,36 +90,75 @@ uninstall.sh и переходный VERSIONS в installer. Рабочий confi
 перезаписывается этими компонентами. Генератор и декларация остаются на
 компьютере разработчика.
 
-## Ручное обновление несовместимого обновлятора
+## Подготовка и повторная проверка
 
-До реализации части 2.2 возьмите проверенные владельцем файлы новой версии
-из локального репозитория. Обновлятор состоит из update.sh и update_plan.awk;
-переносить нужно оба файла. Эти команды выполняются на компьютере владельца:
+```sh
+sh /opt/etc/mihomo/update.sh --prepare --components=web --format=json
+sh /opt/etc/mihomo/update.sh --verify-plan "$plan_id" --format=json
+sh /opt/etc/mihomo/update.sh --discard-plan "$plan_id"
+```
+
+Перед проверкой задайте переменную `plan_id` равной 64-значному идентификатору
+из результата подготовки.
+--plan показывает предварительный идентификатор без загрузки файлов.
+--check загружает только манифест. Подготовка сохраняет выбранные файлы,
+зависимости и свежий движок в /tmp/mst-update-plans/<plan_id> с правами 0700.
+План действует 24 часа, исчезает при перезагрузке; просроченные планы удаляются
+при следующей подготовке. --discard-plan удаляет только указанный план.
+Незавершённые рабочие каталоги очищаются при выходе.
+
+Идентификатор связывает источник и сумму манифеста, канонический набор
+компонентов, корень установки, содержимое и права управляемых файлов,
+config.yaml, установленный манифест и метаданные схемы. Проверка повторно
+получает latest: изменение релиза или локального снимка требует нового плана.
+Также проверяются размер, SHA256, режим и синтаксис каждого сохранённого файла.
+Содержимое конфига не выводится. Для локально изменённых файлов проверка
+требует --confirm-local; это подтверждение не сохраняется как разрешение
+на дальнейшую запись.
+
+Манифест ограничен 256 КиБ, каждый файл bootstrap - 1 МиБ, файл полезной
+нагрузки - 8 МиБ, выбранный набор - 32 МиБ. До загрузки проверяется свободное
+место. Shell проверяется через sh -n, AWK разбирается с защитой от исполнения
+BEGIN/END, Python через compile без создания pycache.
+Штатная загрузка требует curl с поддержкой HTTPS и исправные сертификаты.
+Перенаправление с HTTPS на HTTP запрещено. HTTP допускается только для
+localhost/127.0.0.1 с явным портом и без перенаправлений; userinfo, параметры
+запроса и фрагменты URL запрещены. UPDATE_HTTP_CMD задаёт доверенный внешний
+транспорт для офлайн-проверок. UPDATE_TARGET_ROOT позволяет подготовить
+альтернативную установку: /opt/... отображается в <root>/opt/...; корень
+включён в идентификатор. На роутере эти переменные обычно не задаются.
+
+Подготовка не пишет в /opt и не перезапускает службы. Понижение версии,
+изменение схемы, migrate-config и restart-mihomo блокируются. Применение,
+транзакция, откат и восстановление относятся к части 2.3.
+
+## Ручное обновление несовместимого bootstrap
+
+Если стабильный bootstrap не может прочитать релиз, возьмите проверенные
+владельцем update.sh, update_plan.awk и update_prepare.sh из локального
+репозитория. На компьютере владельца:
 
 ```sh
 cd /Volumes/SAMSUNG/SynologyDrive/mihomo/mihomo_fonwa
-sh release/generate_manifest.sh 9 2 1 v9 > /tmp/mihomo-updater-manifest.txt &&
 ssh -p 222 root@192.168.10.1 'mkdir -p /tmp/mihomo-updater-manual' &&
-scp -O -P 222 update.sh update_plan.awk /tmp/mihomo-updater-manifest.txt root@192.168.10.1:/tmp/mihomo-updater-manual/ &&
+scp -O -P 222 update.sh update_plan.awk update_prepare.sh root@192.168.10.1:/tmp/mihomo-updater-manual/ &&
 ssh -p 222 root@192.168.10.1 'set -eu
 stage=/tmp/mihomo-updater-manual
-trap '\''rm -rf "$stage"; rm -f /opt/etc/mihomo/.update.sh.manual /opt/etc/mihomo/.update_plan.awk.manual'\'' EXIT
+trap '\''rm -rf "$stage"; rm -f /opt/etc/mihomo/.update.sh.manual /opt/etc/mihomo/.update_plan.awk.manual /opt/etc/mihomo/.update_prepare.sh.manual'\'' EXIT
 sh -n "$stage/update.sh"
-awk -v MANIFEST="$stage/mihomo-updater-manifest.txt" -v VALIDATE_ONLY=1 -f "$stage/update_plan.awk"
-cp "$stage/update_plan.awk" /opt/etc/mihomo/.update_plan.awk.manual
-chmod 0644 /opt/etc/mihomo/.update_plan.awk.manual
-mv /opt/etc/mihomo/.update_plan.awk.manual /opt/etc/mihomo/update_plan.awk
-cp "$stage/update.sh" /opt/etc/mihomo/.update.sh.manual
-chmod 0755 /opt/etc/mihomo/.update.sh.manual
-mv /opt/etc/mihomo/.update.sh.manual /opt/etc/mihomo/update.sh'
-rm -f /tmp/mihomo-updater-manifest.txt
+sh -n "$stage/update_prepare.sh"
+printf "BEGIN { exit 0 } END { exit 0 }\n" > "$stage/guard.awk"
+awk -f "$stage/guard.awk" -f "$stage/update_plan.awk" </dev/null
+for name in update_plan.awk update_prepare.sh update.sh; do
+  cp "$stage/$name" "/opt/etc/mihomo/.$name.manual"
+  case "$name" in *.sh) chmod 0755 "/opt/etc/mihomo/.$name.manual" ;; *) chmod 0644 "/opt/etc/mihomo/.$name.manual" ;; esac
+  mv "/opt/etc/mihomo/.$name.manual" "/opt/etc/mihomo/$name"
+done'
 ```
 
-Числа 9/2/1 и v9 в примере формируют только проверочный манифест; он не
-записывается как установленный релиз. Для обновлятора другой версии используйте
-его генератор и совместимые значения. Команды проверяют структуру и синтаксис,
-но не заменяют аудит исходников. Пофайловая атомарная замена здесь не является
-транзакцией двух файлов; после прерывания повторите перенос обоих файлов.
+Команды проверяют синтаксис, но не заменяют аудит исходников. Пофайловая
+атомарная замена здесь не является транзакцией трёх файлов; после прерывания
+повторите перенос всех трёх файлов.
 
 Официальные релизы должны быть доступны по HTTPS без токена. Проверка
 SHA256 подтверждает соответствие манифесту; цифровой подписи пока нет.

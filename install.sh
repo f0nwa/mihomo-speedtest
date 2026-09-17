@@ -104,7 +104,7 @@ atomic_install() {
 }
 
 # Полные инструменты проекта, нужные для планирования обновления.
-PROJECT_TOOLS="install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk providers.awk"
+PROJECT_TOOLS="install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh providers.awk"
 
 install_files() {
   for project_file in $PROJECT_TOOLS; do

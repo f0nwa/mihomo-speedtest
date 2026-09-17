@@ -46,7 +46,7 @@ BEGIN {
   FS = "|"
   if (MANIFEST == "") fail("не задан MANIFEST")
   if (FORMAT == "") FORMAT = "text"
-  if (FORMAT != "text" && FORMAT != "json") fail("неизвестный FORMAT: " FORMAT)
+  if (FORMAT != "text" && FORMAT != "json" && FORMAT != "records") fail("неизвестный FORMAT: " FORMAT)
 
   n = split(SELECTED, sel_arr, ",")
   for (i = 1; i <= n; i++) {
@@ -234,6 +234,7 @@ BEGIN {
       if (line == "") continue
       split(line, lp, "\t")
       local_sha[lp[1]] = lp[2]
+      local_mode[lp[1]] = lp[3]
     }
     close(LOCALSTATE)
     have_localstate = 1
@@ -247,6 +248,8 @@ BEGIN {
       if (f[1] == "FILE" && nf == 8) {
         installed_sha[f[4]] = f[6]
         installed_comp[f[4]] = f[2]
+        installed_mode[f[4]] = f[7]
+        sub(/^0/, "", installed_mode[f[4]])
       }
     }
     close(INSTALLED)
@@ -258,7 +261,7 @@ BEGIN {
     cid = file_comp[i]
     if (!(cid in resolved)) continue
     dest = file_dest[i]
-    st = compute_state(dest, file_sha[i])
+    st = compute_state(dest, file_sha[i], file_mode[i])
     plan_file_count++
     plan_dest[plan_file_count] = dest
     plan_comp[plan_file_count] = cid
@@ -270,6 +273,7 @@ BEGIN {
   if (have_installed) {
     for (dest in installed_sha) {
       if (dest in dest_seen) continue
+      if (!(installed_comp[dest] in resolved)) continue
       # Переносимая сортировка вставками: порядок обхода awk-массива
       # не должен менять план. Список старых файлов обычно небольшой.
       j = ++removed_count
@@ -299,7 +303,8 @@ BEGIN {
     }
   }
 
-  if (FORMAT == "json") print_json()
+  if (FORMAT == "records") print_records()
+  else if (FORMAT == "json") print_json()
   else print_text()
 
   exit 0
@@ -325,14 +330,15 @@ function resolve(cid,   list, n, i, part, arr) {
   resolved[cid] = 1
 }
 
-function compute_state(dest, release_sha,   cur, base) {
+function compute_state(dest, release_sha, mode,   cur, base) {
   cur = local_sha[dest]
   if (cur == "") return "missing"
-  if (cur == release_sha) return "current"
+  sub(/^0/, "", mode)
+  if (cur == release_sha && (local_mode[dest]=="" || local_mode[dest]==mode)) return "current"
   if (have_installed) {
     base = installed_sha[dest]
     if (base == "" ) return "new"
-    if (base == cur) return "new"
+    if (base == cur && (local_mode[dest]=="" || local_mode[dest]==installed_mode[dest])) return "new"
     return "modified"
   }
   return "changed"
@@ -348,7 +354,31 @@ function state_label(st) {
   return "неизвестно"
 }
 
+function overwrite_needed(   j, d) {
+  for (j=1; j<=plan_file_count; j++) {
+    if (plan_file_state[j]=="modified" || plan_file_state[j]=="changed") return 1
+    d=plan_dest[j]
+    if (plan_file_state[j]=="removed" && local_sha[d]!="" &&
+        (local_sha[d]!=installed_sha[d] || (local_mode[d]!="" && local_mode[d]!=installed_mode[d]))) return 1
+  }
+  return 0
+}
+
+function print_records(   j, c) {
+  for (j=1; j<=comp_count; j++) {
+    c=comp_order[j]
+    if (c in resolved) print "COMPONENT|" c "|" ((c in selected) ? "selected" : "dependency")
+  }
+  for (j=1; j<=file_count; j++) if (file_comp[j] in resolved)
+    print "FILE|" file_comp[j] "|" file_src[j] "|" file_dest[j] "|" file_size[j] "|" file_sha[j] "|" file_mode[j] "|" file_check[j]
+  for (j=1; j<=removed_count; j++) print "REMOVE|" installed_comp[removed_dest[j]] "|" removed_dest[j]
+  for (j=1; j<=plan_action_count; j++) print "ACTION|" plan_action[j]
+}
+
 function print_text(   i, cid, comp_label) {
+  if (PLAN_ID!="") print "Идентификатор плана: " PLAN_ID
+  if (PREPARED==1) print "Файлы подготовлены в /tmp; установка ещё не выполнялась"
+  if (overwrite_needed()) print "Локальные изменения требуют отдельного подтверждения"
   print "Релиз " release_version " (формат манифеста " format_version ", минимальная версия update.sh " min_updater ")"
   if (release_tag != "") print "Тег релиза: " release_tag
   print "Версия схемы config.yaml в релизе: " config_schema
@@ -379,6 +409,8 @@ function print_text(   i, cid, comp_label) {
 
 function print_json(   i, cid, first) {
   printf "{\"release_version\":\"%s\",\"format_version\":\"%s\",\"min_updater_version\":\"%s\",\"config_schema_version\":\"%s\",", json_escape(release_version), json_escape(format_version), json_escape(min_updater), json_escape(config_schema)
+  if (PLAN_ID!="") printf "\"plan_id\":\"%s\",", json_escape(PLAN_ID)
+  printf "\"prepared\":%s,\"overwrite_required\":%s,", (PREPARED==1 ? "true" : "false"), (overwrite_needed() ? "true" : "false")
   printf "\"release_tag\":\"%s\",", json_escape(release_tag)
   printf "\"components\":["
   first = 1
