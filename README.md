@@ -143,3 +143,5 @@ start/stop/restart/check и диагностика - в
 блокирует новый план. Для загрузки нужны curl, сертификаты и опубликованный публичный
 HTTPS-релиз. Формат, ограничения и ручное обновление bootstrap описаны
 в [спецификации манифеста](release/manifest-format.md).
+
+Первый публичный комплект обновлений: [релиз v1](https://github.com/f0nwa/mihomo-speedtest/releases/tag/v1).
