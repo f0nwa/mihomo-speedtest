@@ -218,6 +218,17 @@ BEGIN {
   }
   # Каталог проверяется целиком, но конфликтующие независимые компоненты
   # не обязаны быть выбранными одновременно при генерации релиза.
+  # Виртуальный компонент задаётся движком только при повышении схемы.
+  if (MIGRATE_CONFIG==1 && VALIDATE_ONLY!=1) {
+    if ("active-config" in comp_title) fail("active-config зарезервирован движком")
+    if (!("config-tools" in comp_title)) fail("миграция требует config-tools")
+    comp_title["active-config"]="Миграция рабочего конфига"
+    comp_note["active-config"]="Проверенный RAM-кандидат; применение появится в 3.3"
+    comp_order[++comp_count]="active-config"
+    dep_list["active-config"]="config-tools"
+    auto_included["active-config"]=1
+    resolve("active-config")
+  }
   # --- разрешение зависимостей выбранных компонентов ---
   for (cid in selected) resolve(cid)
   for (i = 1; i <= conflict_count; i++) {
@@ -303,6 +314,10 @@ BEGIN {
     }
   }
 
+  if (MIGRATE_CONFIG==1) {
+    if (!("migrate-config" in action_seen)) plan_action[++plan_action_count]="migrate-config"
+    if (!("restart-mihomo" in action_seen)) plan_action[++plan_action_count]="restart-mihomo"
+  }
   if (FORMAT == "records") print_records()
   else if (FORMAT == "json") print_json()
   else print_text()
@@ -383,6 +398,11 @@ function print_text(   i, cid, comp_label) {
   if (release_tag != "") print "Тег релиза: " release_tag
   print "Версия схемы config.yaml в релизе: " config_schema
   print ""
+  if (MIGRATE_CONFIG==1) {
+    print "Миграция config.yaml: " OLD_SCHEMA " -> " config_schema
+    if(CONFIG_CONFIRM==1) print "Требуется отдельное подтверждение --confirm-config"
+    if(CONFIG_HASH!="") print "SHA256 кандидата: " CONFIG_HASH
+  }
   print "Выбранные компоненты:"
   for (i = 1; i <= comp_count; i++) {
     cid = comp_order[i]
@@ -411,6 +431,7 @@ function print_json(   i, cid, first) {
   printf "{\"release_version\":\"%s\",\"format_version\":\"%s\",\"min_updater_version\":\"%s\",\"config_schema_version\":\"%s\",", json_escape(release_version), json_escape(format_version), json_escape(min_updater), json_escape(config_schema)
   if (PLAN_ID!="") printf "\"plan_id\":\"%s\",", json_escape(PLAN_ID)
   printf "\"prepared\":%s,\"overwrite_required\":%s,", (PREPARED==1 ? "true" : "false"), (overwrite_needed() ? "true" : "false")
+  printf "\"config_migration\":{\"required\":%s,\"prepared\":%s,\"confirmation_required\":%s,\"old_schema\":\"%s\",\"candidate_sha256\":\"%s\"},", (MIGRATE_CONFIG==1 ? "true":"false"), (CONFIG_HASH!="" ? "true":"false"), (CONFIG_CONFIRM==1 ? "true":"false"), json_escape(OLD_SCHEMA), json_escape(CONFIG_HASH)
   printf "\"release_tag\":\"%s\",", json_escape(release_tag)
   printf "\"components\":["
   first = 1

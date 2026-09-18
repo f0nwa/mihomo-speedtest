@@ -3,7 +3,7 @@
 # генератор. Границы компонентов - из docs/superpowers/specs/
 # 2026-09-15-managed-project-updates-design.md ("Компонентная модель").
 # active-config (виртуальный, миграция config.yaml) сюда не входит -
-# появится вместе с реализацией миграции (порция 3).
+# добавляется обновлятором при росте схемы (часть 3.2).
 
 COMPONENT|updater|Обновлятор
 COMPONENT|speedtest-runtime|Ядро спидтеста
@@ -47,6 +47,9 @@ FILE|installer|VERSIONS|/opt/etc/mihomo/VERSIONS|0644|none
 FILE|installer|install.sh|/opt/etc/mihomo/install.sh|0755|sh
 FILE|installer|version_check.sh|/opt/etc/mihomo/version_check.sh|0755|sh
 
+FILE|config-tools|migrate_config.sh|/opt/etc/mihomo/migrate_config.sh|0755|sh
+FILE|config-tools|migrate_config.awk|/opt/etc/mihomo/migrate_config.awk|0644|awk
+FILE|config-tools|config_diff.awk|/opt/etc/mihomo/config_diff.awk|0644|awk
 FILE|config-tools|setup.sh|/opt/etc/mihomo/setup.sh|0755|sh
 FILE|config-tools|detect_ua.sh|/opt/etc/mihomo/detect_ua.sh|0755|sh
 FILE|config-tools|render_config.awk|/opt/etc/mihomo/render_config.awk|0644|awk

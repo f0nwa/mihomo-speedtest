@@ -6,7 +6,7 @@ export LC_ALL
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
-UPDATER_VERSION=4
+UPDATER_VERSION=5
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
@@ -188,13 +188,12 @@ bootstrap_verify() {
     case $check in sh) sh -n "$WORK/bootstrap/$src" || die 'неверный синтаксис движка плана' ;; awk) awk_syntax "$WORK/bootstrap/$src" ;; esac
     chmod "$mode" "$WORK/bootstrap/$src"
   done < "$WORK/bootstrap-files"
-  if [ "$confirm_local" = 1 ]; then
-    UPDATE_VERIFIED_ENGINE_DIR="$WORK/bootstrap" UPDATE_VERIFIED_PLAN_ID="$plan_id" \
-      sh "$WORK/bootstrap/update.sh" "--$cmd" "$plan_id" "--format=$format" --confirm-local
-  else
-    UPDATE_VERIFIED_ENGINE_DIR="$WORK/bootstrap" UPDATE_VERIFIED_PLAN_ID="$plan_id" \
-      sh "$WORK/bootstrap/update.sh" "--$cmd" "$plan_id" "--format=$format"
-  fi
+  set -- "--$cmd" "$plan_id" "--format=$format"
+  [ "$confirm_local" != 1 ] || set -- "$@" --confirm-local
+  [ "$confirm_config" != 1 ] || set -- "$@" --confirm-config
+  [ "$full_config_diff" != 1 ] || set -- "$@" --full-config-diff
+  UPDATE_VERIFIED_ENGINE_DIR="$WORK/bootstrap" UPDATE_VERIFIED_PLAN_ID="$plan_id" \
+    sh "$WORK/bootstrap/update.sh" "$@"
 }
 lock_plans() {
   mkdir -p "$PLANS" || die 'не удалось создать каталог планов'
@@ -297,9 +296,10 @@ usage() {
   update.sh --check
   update.sh --plan [--components=id1,id2,...] [--format=text|json]
   update.sh --prepare [--components=id1,id2,...] [--format=text|json]
-  update.sh --verify-plan <plan-id> [--confirm-local] [--format=text|json]
+  update.sh --verify-plan <plan-id> [--confirm-local] [--confirm-config] [--format=text|json]
+  update.sh --show-config-diff <plan-id> [--full-config-diff] [--format=text|json]
   update.sh --discard-plan <plan-id>
-  update.sh --apply <plan-id> [--confirm-local] [--format=text|json]
+  update.sh --apply <plan-id> [--confirm-local] [--confirm-config] [--format=text|json]
   update.sh --rollback-last [--format=text|json]
   update.sh --recover [--format=text|json]
 HELP
@@ -309,25 +309,32 @@ format=text
 components=
 plan_id=
 confirm_local=0
+confirm_config=0
+full_config_diff=0
 command_seen=0
 while [ $# -gt 0 ]; do
   case $1 in
-    --check|--plan|--prepare|--verify-plan|--discard-plan|--apply|--rollback-last|--recover)
+    --check|--plan|--prepare|--verify-plan|--discard-plan|--show-config-diff|--apply|--rollback-last|--recover)
       [ "$command_seen" = 0 ] || die 'задайте один режим'
       command_seen=1; cmd=${1#--}
-      case $cmd in verify-plan|discard-plan|apply) shift; [ $# -gt 0 ] || die 'не задан plan-id'; plan_id=$1 ;; esac ;;
+      case $cmd in verify-plan|discard-plan|show-config-diff|apply) shift; [ $# -gt 0 ] || die 'не задан plan-id'; plan_id=$1 ;; esac ;;
     --format=text|--format=json) format=${1#--format=} ;;
     --components=*) components=${1#--components=} ;;
     --confirm-local) confirm_local=1 ;;
+    --confirm-config) confirm_config=1 ;;
+    --full-config-diff) full_config_diff=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die 'неизвестный аргумент' ;;
   esac
   shift
 done
 case $cmd in
-  verify-plan|discard-plan|apply|rollback-last|recover) [ -z "$components" ] || die 'выбор компонентов уже закреплён в plan-id' ;;
+  verify-plan|discard-plan|show-config-diff|apply|rollback-last|recover) [ -z "$components" ] || die 'выбор компонентов уже закреплён в plan-id' ;;
 esac
 if [ "$confirm_local" = 1 ] && [ "$cmd" != verify-plan ] && [ "$cmd" != apply ]; then die '--confirm-local применяется только при --verify-plan/--apply'; fi
+if [ "$confirm_config" = 1 ] && [ "$cmd" != verify-plan ] && [ "$cmd" != apply ]; then die '--confirm-config применяется только при --verify-plan/--apply'; fi
+if [ "$full_config_diff" = 1 ] && [ "$format" = json ]; then die 'полный diff допускается только в текстовом формате'; fi
+if [ "$full_config_diff" = 1 ] && [ "$cmd" != show-config-diff ]; then die '--full-config-diff применяется только при --show-config-diff'; fi
 case $UPDATE_HTTP_TIMEOUT in *[!0-9]*|'') die 'неверный таймаут загрузки' ;; esac
 [ "$UPDATE_HTTP_TIMEOUT" -gt 0 ] || die 'неверный таймаут загрузки'
 case $UPDATE_RELEASE_BASE in *'@'*|*'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'неверный URL источника' ;; esac
@@ -349,6 +356,8 @@ KEEP_WORK=0
 OWN_LOCK=
 REAP_LOCK=
 cleanup() {
+  [ -z "${CONFIG_CHECK_PID:-}" ] || kill "$CONFIG_CHECK_PID" 2>/dev/null || :
+  [ -z "${CONFIG_WATCHDOG_PID:-}" ] || kill "$CONFIG_WATCHDOG_PID" 2>/dev/null || :
   [ "$KEEP_WORK" = 1 ] || rm -rf "$WORK"
   [ -z "$OWN_LOCK" ] || rm -rf "$OWN_LOCK"
   [ -z "$REAP_LOCK" ] || rm -rf "$REAP_LOCK"
@@ -374,7 +383,7 @@ case $cmd in
     if [ "$cmd" = recover ]; then transaction_recover; else transaction_rollback; fi
     transaction_result
     exit 0 ;;
-  verify-plan|apply)
+  verify-plan|show-config-diff|apply)
     SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
     if [ -z "${UPDATE_VERIFIED_ENGINE_DIR:-}" ]; then bootstrap_verify; exit 0; fi
     [ "$UPDATE_VERIFIED_ENGINE_DIR" = "$DIR" ] && [ "${UPDATE_VERIFIED_PLAN_ID:-}" = "$plan_id" ] || die 'неверный движок проверки'
@@ -386,7 +395,9 @@ case $cmd in
     . "$DIR/update_prepare.sh"
     prepare_init
     verify_plan
+    if [ "$cmd" = show-config-diff ]; then show_config_diff; fi
     if [ "$cmd" = apply ]; then
+      [ "$migration_required" != 1 ] || die 'применение миграции появится в 3.3'
       . "$DIR/update_transaction.sh"
       transaction_apply
       transaction_result

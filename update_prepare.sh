@@ -37,6 +37,8 @@ run_parser() {
   awk -v MANIFEST="$MANIFEST_TMP" -v INSTALLED="$installed_arg" \
       -v LOCALSTATE="$WORK/local.tsv" -v SELECTED="$components" \
       -v UPDATER_VERSION="$UPDATER_VERSION" -v FORMAT="$1" \
+      -v MIGRATE_CONFIG="${migration_required:-0}" -v OLD_SCHEMA="${old_schema:-1}" \
+      -v CONFIG_CONFIRM="${config_confirm_required:-0}" -v CONFIG_HASH="${config_candidate_hash:-}" \
       -v PLAN_ID="${plan_id:-}" -v PREPARED="${prepared:-0}" -f "$PLAN_AWK"
 }
 build_snapshot() {
@@ -47,6 +49,7 @@ build_snapshot() {
     awk -v MANIFEST="$INSTALLED_MANIFEST_PATH" -v VALIDATE_ONLY=1 -f "$PLAN_AWK" || die 'невалидный установленный манифест'
     installed_arg=$INSTALLED_MANIFEST_PATH
   fi
+  detect_config_schema
   : > "$WORK/local.tsv"
   run_parser records > "$WORK/records"
   : > "$WORK/snapshot.tsv"
@@ -92,9 +95,8 @@ check_schema_release() {
     old_schema=$(cat "$UPDATE_STATE_DIR/config-schema-version")
     case $old_schema in *[!0-9]*|'') die 'неверная установленная версия схемы' ;; esac
   fi
-  awk -v n="$new_schema" -v o="$old_schema" 'BEGIN{sub(/^0+/,"",n);sub(/^0+/,"",o);exit !(n "x" == o "x")}' || die 'релиз требует миграции config.yaml - она добавляется в порции 3'
-  if awk -F'|' '$1=="ACTION"&&($2=="migrate-config"||$2=="restart-mihomo"){found=1} END{exit !found}' "$WORK/records"; then
-    die 'действия рабочего конфига добавляются в порции 3'
+  if [ "$migration_required" != 1 ] && awk -F'|' '$1=="ACTION"&&($2=="migrate-config"||$2=="restart-mihomo"){found=1} END{exit !found}' "$WORK/records"; then
+    die 'действия рабочего конфига требуют повышения схемы'
   fi
 }
 check_space() {
@@ -134,7 +136,7 @@ prepare_files() {
   pinned_base
   total=$(file_budget) || exit 1
   old_bytes=$(awk -F'|' '$2=="regular"{sum+=$4} END{printf "%.0f\n",sum}' "$WORK/snapshot.tsv")
-  check_space "$TMPROOT" "$((total + 4194304 + 32768))"
+  check_space "$TMPROOT" "$((total + 8388608 + 32768))"
   check_space "$(target_file /opt)" "$((total + old_bytes + 32768))"
   lock_plans
   assert_no_transaction
@@ -158,6 +160,13 @@ prepare_files() {
   # После загрузки не должен сохраниться план уже изменившегося состояния.
   build_snapshot
   [ "$plan_id" = "$initial_id" ] || die 'локальное состояние изменилось при подготовке; постройте новый план'
+  if [ "$migration_required" = 1 ]; then
+    prepare_config_candidate
+    build_snapshot
+    [ "$plan_id" = "$initial_id" ] || die 'локальное состояние изменилось при проверке конфига'
+    config_confirm_required=$(manifest_field "$WORK/config-info.txt" CONFIRM)
+    bind_config_identity
+  fi
   printf '%s\n' "$(date +%s)" > "$WORK/created-at"
   safe_path "$PLANS/$plan_id"
   if [ -e "$PLANS/$plan_id" ]; then
@@ -202,7 +211,9 @@ verify_plan() {
   components=$(cat "$saved/request.txt")
   awk -v MANIFEST="$MANIFEST_TMP" -v VALIDATE_ONLY=1 -v SELECTED="$components" -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
   build_snapshot
-  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+  if [ "$migration_required" != 1 ]; then
+    [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+  fi
   check_schema_release
   total=$(file_budget) || exit 1
   file_number=0
@@ -222,8 +233,145 @@ verify_plan() {
     check_download "$saved/engine/$src" "$bytes" "$sum"
     [ "$(mode_of "$saved/engine/$src")" = "${mode#0}" ] || die 'изменён режим движка плана'
   done < "$WORK/bootstrap-files"
+  if [ "$migration_required" = 1 ]; then verify_config_candidate; fi
+  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
   overwrite=$(run_parser json | awk '/"overwrite_required":true/{print "yes"}')
-  if [ -n "$overwrite" ] && [ "$confirm_local" != 1 ]; then die 'локальные изменения требуют отдельного подтверждения --confirm-local'; fi
+  if [ -n "$overwrite" ] && [ "$confirm_local" != 1 ] && [ "$cmd" != show-config-diff ]; then die 'локальные изменения требуют отдельного подтверждения --confirm-local'; fi
   prepared=1
-  if [ "$cmd" != apply ]; then print_plan; fi
+  if [ "$cmd" != apply ] && [ "$cmd" != show-config-diff ]; then print_plan; fi
+}
+
+# 3.2: кандидат конфига остаётся только частью проверяемого RAM-плана.
+detect_config_schema() {
+  new_schema=$(manifest_field "$MANIFEST_TMP" CONFIG_SCHEMA_VERSION)
+  old_schema=1
+  [ -z "$installed_arg" ] || old_schema=$(manifest_field "$installed_arg" CONFIG_SCHEMA_VERSION)
+  safe_path "$UPDATE_STATE_DIR/config-schema-version"
+  if [ -f "$UPDATE_STATE_DIR/config-schema-version" ]; then old_schema=$(cat "$UPDATE_STATE_DIR/config-schema-version"); fi
+  case $old_schema:$new_schema in *[!0-9:]*|:*|*:) die 'неверная версия схемы конфига' ;; esac
+  schema_relation=$(awk -v n="$new_schema" -v o="$old_schema" 'BEGIN{sub(/^0+/,"",n);sub(/^0+/,"",o);if(length(n)!=length(o)) print (length(n)>length(o)?"upgrade":"downgrade");else print (n "x"==o "x"?"same":(n "x">o "x"?"upgrade":"downgrade"))}')
+  [ "$schema_relation" != downgrade ] || die 'понижение схемы конфига запрещено'
+  migration_required=0
+  config_confirm_required=0
+  if [ "$schema_relation" = upgrade ]; then migration_required=1; config_confirm_required=1; fi
+}
+config_tools() {
+  mkdir "$WORK/migration-tools" || die 'не удалось подготовить инструменты миграции'
+  for config_tool in migrate_config.sh migrate_config.awk config_diff.awk config.example.yaml; do
+    config_number=$(awk -F'|' -v name="$config_tool" '$1=="FILE"{n++;if($2=="config-tools"&&$3==name&&$4=="/opt/etc/mihomo/" name) {number=n;count++}} END{if(count!=1)exit 1;print number}' "$WORK/records") || die 'релиз не содержит обязательный инструмент миграции'
+    safe_path "$CONFIG_PAYLOAD/files/$config_number"
+    cp "$CONFIG_PAYLOAD/files/$config_number" "$WORK/migration-tools/$config_tool" || die 'не удалось скопировать проверенный инструмент'
+  done
+}
+run_config_test() {
+  config_binary=${UPDATE_MIHOMO_BIN:-$(target_file /opt/sbin/mihomo)}
+  [ -x "$config_binary" ] || die 'не найден исполняемый Mihomo для проверки конфига'
+  config_timeout=${UPDATE_CONFIG_TEST_TIMEOUT:-30}
+  case $config_timeout in *[!0-9]*|'') die 'неверный таймаут проверки конфига' ;; esac
+  [ "$config_timeout" -ge 1 ] && [ "$config_timeout" -le 120 ] || die 'таймаут проверки конфига должен быть 1-120 секунд'
+  mkdir "$WORK/mihomo-test" || die 'не удалось создать RAM-каталог проверки'
+  # Для GEO-правил нужны существующие базы. В RAM копируем ограниченный набор,
+  # никогда не даём тестовому процессу путь записи в /opt.
+  geo_total=0
+  for geo_name in GeoSite.dat GeoIP.dat Country.mmdb geoip.metadb geoip.db ASN.mmdb BundleMRS.7z; do
+    geo_source=$(target_file /opt/etc/mihomo)/$geo_name
+    safe_path "$geo_source"
+    [ -f "$geo_source" ] || continue
+    geo_bytes=$(wc -c < "$geo_source" | tr -d ' ')
+    geo_total=$((geo_total + geo_bytes))
+    [ "$geo_bytes" -le 33554432 ] && [ "$geo_total" -le 67108864 ] || die 'базы GEO превышают RAM-лимит проверки'
+    check_space "$TMPROOT" "$((geo_bytes + 8388608))"
+    cp "$geo_source" "$WORK/mihomo-test/$geo_name" || die 'не удалось скопировать базу GEO в RAM'
+  done
+  config_before_test=$(sha256_of "$WORK/candidate.yaml")
+  (
+    unset SAFE_PATHS SKIP_SAFE_PATH_CHECK CLASH_CONFIG_STRING CLASH_CONFIG_FILE CLASH_HOME_DIR CLASH_AGE_SECRET_KEY CLASH_POST_UP CLASH_POST_DOWN
+    cd "$WORK/mihomo-test" || exit 1
+    ulimit -f 4096
+    exec "$config_binary" -t -d "$WORK/mihomo-test" -f "$WORK/candidate.yaml"
+  ) > "$WORK/mihomo-test.log" 2>&1 &
+  CONFIG_CHECK_PID=$!
+  (sleep "$config_timeout"; if kill -0 "$CONFIG_CHECK_PID" 2>/dev/null; then touch "$WORK/config-test-timeout"; kill -KILL "$CONFIG_CHECK_PID" 2>/dev/null || :; fi) >/dev/null 2>&1 &
+  CONFIG_WATCHDOG_PID=$!
+  config_status=0
+  wait "$CONFIG_CHECK_PID" || config_status=$?
+  CONFIG_CHECK_PID=
+  kill "$CONFIG_WATCHDOG_PID" 2>/dev/null || :
+  wait "$CONFIG_WATCHDOG_PID" 2>/dev/null || :
+  CONFIG_WATCHDOG_PID=
+  rm -rf "$WORK/mihomo-test" || die 'не удалось очистить RAM-каталог проверки'
+  [ "$config_before_test" = "$(sha256_of "$WORK/candidate.yaml")" ] || die 'кандидат изменился во время mihomo -t'
+  [ "$config_status" = 0 ] && [ ! -e "$WORK/config-test-timeout" ] || die 'кандидат не прошёл mihomo -t или истёк таймаут; подробный вывод скрыт для защиты секретов'
+}
+check_config_source_snapshot() {
+  config_snapshot_hash=$(awk -F'|' '$1=="config"&&$2=="regular"{print $3}' "$WORK/snapshot.tsv")
+  [ -n "$config_snapshot_hash" ] && [ "$config_snapshot_hash" = "$(sha256_of "$WORK/config-source.yaml")" ] || die 'копия исходного конфига не соответствует снимку плана'
+}
+prepare_config_candidate() {
+  CONFIG_PAYLOAD=$WORK
+  config_tools
+  cp "$(target_file /opt/etc/mihomo/config.yaml)" "$WORK/config-source.yaml" || die 'не удалось прочитать рабочий конфиг'
+  check_config_source_snapshot
+  sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
+    --output "$WORK/candidate.yaml" --report "$WORK/migration-report.txt" > "$WORK/migration.log" 2>&1 || die 'не удалось собрать кандидат конфига; подробный вывод скрыт'
+  awk -v OLD="$WORK/config-source.yaml" -v NEW="$WORK/candidate.yaml" -f "$WORK/migration-tools/config_diff.awk" > "$WORK/config-diff.json" || die 'не удалось построить структурный diff'
+  run_config_test
+  config_confirm_required=0
+  config_baseline=missing
+  if [ -f "$UPDATE_STATE_DIR/config-sha256" ]; then
+    config_baseline=$(cat "$UPDATE_STATE_DIR/config-sha256")
+    [ "${#config_baseline}" = 64 ] || die 'неверная исходная сумма конфига'
+    case $config_baseline in *[!0-9a-f]*) die 'неверная исходная сумма конфига' ;; esac
+  fi
+  config_manual_changed=0
+  [ "$config_baseline" = "$(sha256_of "$WORK/config-source.yaml")" ] || config_manual_changed=1
+  config_review=0
+  if awk -F'|' '$1=="REVIEW"{found=1}END{exit !found}' "$WORK/migration-report.txt"; then config_review=1; fi
+  if [ "$config_manual_changed" = 1 ] || [ "$config_review" = 1 ]; then config_confirm_required=1; fi
+  printf 'CONFIRM=%s\nMANUAL_CHANGED=%s\nREVIEW=%s\nOLD_SCHEMA=%s\nNEW_SCHEMA=%s\n' "$config_confirm_required" "$config_manual_changed" "$config_review" "$old_schema" "$new_schema" > "$WORK/config-info.txt"
+  chmod 0600 "$WORK/config-source.yaml" "$WORK/candidate.yaml" "$WORK/migration-report.txt" "$WORK/config-diff.json" "$WORK/config-info.txt" || die 'не удалось защитить RAM-кандидат'
+  rm -rf "$WORK/migration-tools" || die 'не удалось очистить инструменты миграции'
+}
+bind_config_identity() {
+  for config_artifact in candidate.yaml migration-report.txt config-diff.json config-source.yaml config-info.txt; do
+    printf 'CONFIG_%s=%s\n' "$config_artifact" "$(sha256_of "$WORK/$config_artifact")" >> "$WORK/identity.txt"
+  done
+  config_candidate_hash=$(sha256_of "$WORK/candidate.yaml")
+  plan_id=$(sha256_of "$WORK/identity.txt")
+}
+verify_config_candidate() {
+  for config_artifact in candidate.yaml migration-report.txt config-diff.json config-source.yaml config-info.txt; do
+    safe_path "$saved/$config_artifact"
+    [ -f "$saved/$config_artifact" ] && [ "$(mode_of "$saved/$config_artifact")" = 600 ] || die 'неполный или незащищённый кандидат конфига'
+    [ "$(sha256_of "$saved/$config_artifact")" = "$(manifest_field "$saved/identity.txt" "CONFIG_$config_artifact")" ] || die 'повреждён кандидат, отчёт или diff конфига'
+    cp "$saved/$config_artifact" "$WORK/$config_artifact" || die 'не удалось прочитать проверенный кандидат'
+  done
+  check_config_source_snapshot
+  bind_config_identity
+  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+  config_confirm_required=$(manifest_field "$WORK/config-info.txt" CONFIRM)
+  CONFIG_PAYLOAD=$saved
+  config_tools
+  # Повторная сборка гарантирует связь результата с проверенными инструментами.
+  sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
+    --output "$WORK/config-rebuilt.yaml" --report "$WORK/config-rebuilt-report.txt" > "$WORK/migration.log" 2>&1 || die 'повторная сборка конфига не прошла'
+  cmp -s "$WORK/config-rebuilt.yaml" "$WORK/candidate.yaml" && cmp -s "$WORK/config-rebuilt-report.txt" "$WORK/migration-report.txt" || die 'результат миграции изменился; постройте новый план'
+  awk -v OLD="$WORK/config-source.yaml" -v NEW="$WORK/candidate.yaml" -f "$WORK/migration-tools/config_diff.awk" > "$WORK/config-rebuilt-diff.json" || die 'повторная проверка diff не прошла'
+  cmp -s "$WORK/config-rebuilt-diff.json" "$WORK/config-diff.json" || die 'diff изменился; постройте новый план'
+  run_config_test
+  verified_confirm=$config_confirm_required
+  build_snapshot
+  check_config_source_snapshot
+  bind_config_identity
+  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось при проверке конфига'
+  config_confirm_required=$verified_confirm
+  if [ "$config_confirm_required" = 1 ] && [ "$confirm_config" != 1 ] && [ "$cmd" != show-config-diff ]; then die 'миграция требует отдельного подтверждения --confirm-config'; fi
+}
+show_config_diff() {
+  [ "$migration_required" = 1 ] || die 'этот план не содержит миграции конфига'
+  if [ "$full_config_diff" = 1 ]; then
+    config_diff_status=0
+    diff -u "$WORK/config-source.yaml" "$WORK/candidate.yaml" || config_diff_status=$?
+    [ "$config_diff_status" -le 1 ] || die 'не удалось построить полный diff'
+  else cat "$WORK/config-diff.json"; fi
 }
