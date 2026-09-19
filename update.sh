@@ -6,7 +6,7 @@ export LC_ALL
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
-UPDATER_VERSION=5
+UPDATER_VERSION=6
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
@@ -397,7 +397,6 @@ case $cmd in
     verify_plan
     if [ "$cmd" = show-config-diff ]; then show_config_diff; fi
     if [ "$cmd" = apply ]; then
-      [ "$migration_required" != 1 ] || die 'применение миграции появится в 3.3'
       . "$DIR/update_transaction.sh"
       transaction_apply
       transaction_result

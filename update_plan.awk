@@ -223,7 +223,7 @@ BEGIN {
     if ("active-config" in comp_title) fail("active-config зарезервирован движком")
     if (!("config-tools" in comp_title)) fail("миграция требует config-tools")
     comp_title["active-config"]="Миграция рабочего конфига"
-    comp_note["active-config"]="Проверенный RAM-кандидат; применение появится в 3.3"
+    comp_note["active-config"]="Проверенный кандидат; общий откат и один перезапуск XKeen"
     comp_order[++comp_count]="active-config"
     dep_list["active-config"]="config-tools"
     auto_included["active-config"]=1
