@@ -190,6 +190,28 @@ manifest.txt и SHA256SUMS. Репозиторий открыт для загр�
 файла актуальны, действий над службами нет. Проверочный план удалён из RAM.
 Боевые файлы и службы изолированным прогоном не изменялись.
 
+Релиз v2 опубликован 2026-09-19 из коммита
+229e8456b871c1d7bbb08a893dedf2cf3666b4ad: RELEASE_VERSION=2,
+MIN_UPDATER_VERSION=4, CONFIG_SCHEMA_VERSION=2. В нём 32 файла проекта,
+manifest.txt и SHA256SUMS. Рост схемы включает active-config и требует
+отдельного --confirm-config.
+
+Установленный обновлятор версии 4 умеет подготовить v2, но его внешний CLI
+ещё не распознаёт --confirm-config. После --prepare возьмите plan_id из
+результата и один раз запустите сохранённый проверенный движок:
+
+```sh
+plan_id='<64-символьный plan_id из --prepare>'
+engine="/tmp/mst-update-plans/$plan_id/engine/update.sh"
+sh "$engine" --verify-plan "$plan_id" --confirm-local --confirm-config
+sh "$engine" --apply "$plan_id" --confirm-local --confirm-config
+```
+
+После успешного применения устанавливается CLI версии 6; следующие операции
+выполняются обычным /opt/etc/mihomo/update.sh. До боевого применения на
+Keenetic проверены реальный HTTPS, подготовка, Mihomo -t, оба подтверждения,
+структурный diff, неизменность рабочего config.yaml и удаление RAM-плана.
+
 ## Ручное обновление несовместимого bootstrap
 
 Версия 4 добавляет update_transaction.sh в bootstrap. Установленный bootstrap
