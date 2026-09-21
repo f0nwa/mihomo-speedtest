@@ -16,9 +16,8 @@ start_backend() переходит на него автоматически, е�
 Поддерживает ту часть CLI busybox httpd, которой пользуется этот проект:
   -p BIND:PORT   адрес и порт
   -h DIR         раздаваемый каталог (docroot)
-  -c CONFFILE    файл Basic Auth в формате "/путь:логин:пароль" на строку
-                 (пишет write_stats_httpd_conf() в speedtest2.sh) - защищает
-                 только запросы к путям с этим префиксом, остальное открыто
+  -c CONFFILE    принят для совместимости со старым запуском, но не
+                 используется: весь интерфейс защищён сессией
   -f             без демонизации, для совместимости (этот сервер и так
                  всегда работает на переднем плане - в фон его уводит "&"
                  в speedtest2.sh, как и busybox httpd)
@@ -42,10 +41,8 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
 шаг 1 из плана миграции, дальше в шагах 2-6):
   - "/api/run" - внутренний алиас на "cgi-bin/run": дальше запрос идёт по
     тому же пути, что и раньше "/cgi-bin/run" (сам stats_run.sh не менялся)
-    - в т.ч. под тем же правилом Basic Auth, если он настроен на "/cgi-bin"
-    в конфиге write_stats_httpd_conf().
-  - "/api/settings" - внутренний алиас на "cgi-bin/config" (та же защита
-    Basic Auth, что и у "/cgi-bin", тот же stats_cgi.sh) с добавленной
+    и под общей сессионной защитой.
+  - "/api/settings" - внутренний алиас на "cgi-bin/config" с добавленной
     переменной окружения API_JSON=1 - по ней stats_cgi.sh печатает JSON
     вместо HTML-формы (см. шаг 3 design-дока и его же "Статус выполнения
     шага 4"): GET отдаёт текущие значения полей, POST - результат
@@ -60,7 +57,7 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     задачи "видно по нодам при прогоне" - см. CHANGELOG.md), который
     write_progress() в speedtest2.sh пишет после каждой протестированной
     ноды. Тоже не CGI, обычная раздача файла - как и "/api/stats", без
-    Basic Auth (не под "/cgi-bin"). Файла может не быть вовсе, если ещё
+    отдельного CGI-процесса. Файла может не быть вовсе, если ещё
     ни разу не было прогона с этой версией speedtest2.sh - тогда ТА ЖЕ
     особенность, что и у "/api/stats": SPA-фоллбек (_spa_fallback) не
     отличает "путь из API_ALIASES без файла-цели" от обычной навигации и
@@ -81,7 +78,6 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     остальных путей - обычный 404. Ничего не ломает для тех, у кого этих
     новых файлов ещё нет.
 """
-import base64
 import http.server
 import json
 import os
@@ -89,6 +85,14 @@ import socketserver
 import subprocess
 import sys
 import urllib.parse
+from http.cookies import SimpleCookie
+
+import stats_auth
+
+
+AUTH_COOKIE = "mst_session"
+AUTH_BODY_LIMIT = 16 * 1024
+PUBLIC_ASSETS = {"index.html", "style.css", "app.js", "chart.js", "favicon.ico"}
 
 
 def parse_args(argv):
@@ -120,23 +124,6 @@ def parse_args(argv):
     return opts
 
 
-def load_auth_conf(path):
-    # Формат "/путь:логин:пароль" на строку. Пустой/отсутствующий файл -
-    # без ограничений (как пустой конфиг у busybox httpd).
-    rules = []
-    if not path or not os.path.isfile(path):
-        return rules
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            parts = line.split(":", 2)
-            if len(parts) == 3:
-                rules.append((parts[0], parts[1], parts[2]))
-    return rules
-
-
 def guess_content_type(path):
     if path.endswith(".html") or path.endswith(".htm"):
         return "text/html; charset=utf-8"
@@ -158,7 +145,7 @@ def guess_content_type(path):
 # по коду (тот же формат, без ведущего "/"), extra_env - дополнительные
 # переменные окружения, которые нужно добавить, если target_rel окажется
 # CGI (для обычного файла extra_env просто не используется). Раскрывать
-# такие алиасы нужно ДО проверки Basic Auth и ДО решения "это /api/*, без
+# такие алиасы нужно раскрывать до решения "это /api/*, без
 # алиаса" - только тогда, например, запрос к "/api/run" пройдёт по тем же
 # правилам защиты и исполнения, что и "/cgi-bin/run" сегодня.
 API_ALIASES = {
@@ -169,8 +156,14 @@ API_ALIASES = {
 }
 
 
-def make_handler(docroot, auth_rules):
+def make_handler(docroot, state_dir=None, runtime_dir=None):
     docroot = os.path.normpath(docroot)
+    state_dir = state_dir or os.environ.get(
+        "STATS_AUTH_STATE_DIR", os.path.join(os.environ.get("DIR", os.path.dirname(__file__)), ".stats-auth")
+    )
+    runtime_dir = runtime_dir or os.environ.get(
+        "STATS_AUTH_RUNTIME_DIR", "/tmp/mihomo-speedtest-auth"
+    )
 
     class Handler(http.server.BaseHTTPRequestHandler):
         server_version = "stats_httpd.py/1"
@@ -218,33 +211,12 @@ def make_handler(docroot, auth_rules):
                         return p
                 # Ни одного из двух нет - подставляем index.html: он не
                 # существует, но по нему дальше корректно посчитается
-                # url_path для Basic Auth и решится 404 в общем порядке.
+                # url_path и решится 404 в общем порядке.
                 return os.path.join(docroot, "index.html")
             full = os.path.normpath(os.path.join(docroot, rel))
             if full != docroot and not full.startswith(docroot + os.sep):
                 return None
             return full
-
-        def _url_path_of(self, full_path):
-            rel = os.path.relpath(full_path, docroot).replace(os.sep, "/")
-            return "/" + rel
-
-        def _auth_required_for(self, url_path):
-            for prefix, user, pw in auth_rules:
-                prefix_slash = prefix.rstrip("/") + "/"
-                if url_path == prefix or url_path.startswith(prefix_slash):
-                    return (user, pw)
-            return None
-
-        def _has_valid_auth(self, user, pw):
-            hdr = self.headers.get("Authorization", "")
-            if not hdr.startswith("Basic "):
-                return False
-            try:
-                decoded = base64.b64decode(hdr[6:].strip()).decode("utf-8", "replace")
-            except Exception:
-                return False
-            return decoded == "%s:%s" % (user, pw)
 
         def _send_simple(self, status, content_type, body_bytes):
             self.send_response(status)
@@ -271,11 +243,227 @@ def make_handler(docroot, auth_rules):
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self._send_simple(status, "application/json; charset=utf-8", body)
 
-        def _send_auth_challenge(self):
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="stats"')
-            self.send_header("Content-Length", "0")
+        def _send_json_with_headers(self, status, obj, headers=()):
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in headers:
+                self.send_header(name, value)
             self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def _redirect(self, location):
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
+        def _auth_mode(self):
+            credentials = stats_auth.load_credentials(state_dir)
+            if credentials is not None:
+                return "login", credentials
+            if stats_auth.is_setup_pending(state_dir):
+                return "setup", None
+            return "uninitialized", None
+
+        def _session_token(self):
+            raw = self.headers.get("Cookie", "")
+            try:
+                cookie = SimpleCookie()
+                cookie.load(raw)
+                morsel = cookie.get(AUTH_COOKIE)
+                return morsel.value if morsel is not None else None
+            except Exception:
+                return None
+
+        def _session(self):
+            token = self._session_token()
+            if token is None:
+                return None
+            return stats_auth.load_session(runtime_dir, token)
+
+        def _cookie_header(self, token, clear=False):
+            value = "%s=%s; Path=/; HttpOnly; SameSite=Strict" % (AUTH_COOKIE, token)
+            if clear:
+                value += "; Max-Age=0"
+            return value
+
+        def _read_json(self):
+            raw_length = self.headers.get("Content-Length", "0") or "0"
+            try:
+                length = int(raw_length)
+            except ValueError:
+                self._send_json(400, {"error": "invalid_request"})
+                return None
+            if length < 0:
+                self._send_json(400, {"error": "invalid_request"})
+                return None
+            if length > AUTH_BODY_LIMIT:
+                self._send_json(413, {"error": "request_too_large"})
+                return None
+            try:
+                payload = self.rfile.read(length)
+                value = json.loads(payload.decode("utf-8"))
+            except (OSError, UnicodeError, ValueError):
+                self._send_json(400, {"error": "invalid_json"})
+                return None
+            if not isinstance(value, dict):
+                self._send_json(400, {"error": "invalid_request"})
+                return None
+            return value
+
+        def _rate_limit(self, bucket, limit, window):
+            allowed, retry_after = stats_auth.consume_rate_limit(
+                runtime_dir, bucket, self.client_address[0], limit, window
+            )
+            if not allowed:
+                self._send_json_with_headers(
+                    429, {"error": "rate_limited"}, (("Retry-After", str(retry_after)),)
+                )
+                return False
+            return True
+
+        def _handle_auth_api(self, rel):
+            mode, credentials = self._auth_mode()
+            session = self._session() if mode == "login" else None
+
+            if rel == "api/auth/status" and self.command in ("GET", "HEAD"):
+                if mode == "uninitialized":
+                    self._send_json(503, {"mode": "uninitialized", "error": "auth_not_initialized"})
+                elif session is not None:
+                    self._send_json(200, {
+                        "mode": "authenticated", "username": session["username"],
+                        "csrf": session["csrf"],
+                    })
+                else:
+                    self._send_json(200, {"mode": mode})
+                return True
+
+            if rel == "api/auth/setup" and self.command == "POST":
+                if mode != "setup":
+                    self._send_json(409, {"error": "setup_unavailable"})
+                    return True
+                if not self._rate_limit("setup", 5, 600):
+                    return True
+                value = self._read_json()
+                if value is None:
+                    return True
+                code = value.get("code")
+                username = value.get("username")
+                password = value.get("password")
+                confirmation = value.get("password_confirm")
+                if not all(isinstance(item, str) for item in (code, username, password, confirmation)):
+                    self._send_json(400, {"error": "invalid_request"})
+                    return True
+                if password != confirmation:
+                    self._send_json(400, {"error": "password_mismatch"})
+                    return True
+                try:
+                    created = stats_auth.complete_setup_and_create_session(
+                        state_dir, runtime_dir, code, username, password
+                    )
+                except ValueError:
+                    self._send_json(401, {"error": "invalid_setup"})
+                    return True
+                self._send_json_with_headers(
+                    200, {"mode": "authenticated", "username": username, "csrf": created["csrf"]},
+                    (("Set-Cookie", self._cookie_header(created["id"])),),
+                )
+                return True
+
+            if rel == "api/auth/login" and self.command == "POST":
+                if mode != "login":
+                    self._send_json(409, {"error": "login_unavailable"})
+                    return True
+                if not self._rate_limit("login", 5, 300):
+                    return True
+                value = self._read_json()
+                if value is None:
+                    return True
+                created = stats_auth.authenticate_and_create_session(
+                    state_dir, runtime_dir, value.get("username"), value.get("password")
+                )
+                if created is None:
+                    self._send_json(401, {"error": "invalid_credentials"})
+                    return True
+                self._send_json_with_headers(
+                    200, {"mode": "authenticated", "username": credentials["username"], "csrf": created["csrf"]},
+                    (("Set-Cookie", self._cookie_header(created["id"])),),
+                )
+                return True
+
+            if rel == "api/auth/logout" and self.command == "POST":
+                if session is None:
+                    self._send_json(401, {"error": "authentication_required"})
+                    return True
+                if not stats_auth.verify_csrf(session, self.headers.get("X-CSRF-Token", "")):
+                    self._send_json(403, {"error": "invalid_csrf"})
+                    return True
+                token = self._session_token()
+                stats_auth.destroy_session(runtime_dir, token)
+                self._send_json_with_headers(
+                    200, {"ok": True},
+                    (("Set-Cookie", self._cookie_header("", clear=True)),),
+                )
+                return True
+
+            if rel.startswith("api/auth/"):
+                self._send_json(404, {"error": "not_found"})
+                return True
+            return False
+
+        def _authorize(self, rel):
+            mode, _ = self._auth_mode()
+            session = self._session() if mode == "login" else None
+            is_api = rel is not None and rel.startswith("api/")
+            is_asset = rel in PUBLIC_ASSETS
+            page = rel or ""
+            is_mutating = self.command in ("POST", "PUT", "PATCH", "DELETE")
+
+            if is_asset or page in ("setup", "login"):
+                if is_mutating:
+                    if session is None:
+                        self._send_json(401, {"error": "authentication_required"})
+                    elif not stats_auth.verify_csrf(
+                        session, self.headers.get("X-CSRF-Token", "")
+                    ):
+                        self._send_json(403, {"error": "invalid_csrf"})
+                    else:
+                        self._send_json(405, {"error": "method_not_allowed"})
+                    return None
+                if session is not None and page in ("setup", "login"):
+                    self._redirect("/")
+                    return None
+                if mode == "setup" and page == "login":
+                    self._redirect("/setup")
+                    return None
+                if mode == "login" and page == "setup":
+                    self._redirect("/login")
+                    return None
+                return session or False
+
+            if mode == "uninitialized":
+                if is_api:
+                    self._send_json(503, {"error": "auth_not_initialized"})
+                else:
+                    self._send_simple(503, "text/plain; charset=utf-8", b"Authorization is not initialized. Run stats_auth.sh reset.\n")
+                return None
+            if session is None:
+                if is_api:
+                    self._send_json(401, {"error": "authentication_required"})
+                else:
+                    self._redirect("/setup" if mode == "setup" else "/login")
+                return None
+            if self.command in ("POST", "PUT", "PATCH", "DELETE") and not stats_auth.verify_csrf(
+                session, self.headers.get("X-CSRF-Token", "")
+            ):
+                self._send_json(403, {"error": "invalid_csrf"})
+                return None
+            return session
 
         def _is_cgi(self, full_path):
             rel_parts = os.path.relpath(full_path, docroot).split(os.sep)
@@ -386,6 +574,19 @@ def make_handler(docroot, auth_rules):
                 self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
                 return
 
+            if rel is not None and self._handle_auth_api(rel):
+                return
+
+            if self._authorize(rel) is None:
+                return
+
+            if rel == "cgi-bin/config":
+                if self.command in ("GET", "HEAD"):
+                    self._redirect("/settings")
+                else:
+                    self._send_json(410, {"error": "legacy_settings_removed"})
+                return
+
             alias_env = None
             if rel is not None and rel in API_ALIASES:
                 rel, alias_env = API_ALIASES[rel]
@@ -401,12 +602,6 @@ def make_handler(docroot, auth_rules):
             full_path = self._full_path_for(rel)
             if full_path is None:
                 self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
-                return
-
-            url_path = self._url_path_of(full_path)
-            required = self._auth_required_for(url_path)
-            if required and not self._has_valid_auth(*required):
-                self._send_auth_challenge()
                 return
 
             if self._is_cgi(full_path):
@@ -429,6 +624,15 @@ def make_handler(docroot, auth_rules):
             self._handle()
 
         def do_HEAD(self):
+            self._handle()
+
+        def do_PUT(self):
+            self._handle()
+
+        def do_PATCH(self):
+            self._handle()
+
+        def do_DELETE(self):
             self._handle()
 
     return Handler
@@ -507,8 +711,7 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
 
 def main(argv):
     opts = parse_args(argv)
-    auth_rules = load_auth_conf(opts["conf"])
-    handler = make_handler(opts["docroot"], auth_rules)
+    handler = make_handler(opts["docroot"])
     server = ForkingHTTPServer((opts["bind"], opts["port"]), handler)
     try:
         server.serve_forever()

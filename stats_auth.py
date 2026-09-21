@@ -357,6 +357,44 @@ def complete_setup(state_dir, code, username, password, iterations=None):
         return credentials
 
 
+def complete_setup_and_create_session(
+    state_dir, runtime_dir, code, username, password, iterations=None
+):
+    """Завершить setup и создать сессию без окна для параллельного reset."""
+    with _exclusive_lock(state_dir, "auth.lock"):
+        if not verify_setup_code(state_dir, code):
+            raise ValueError("invalid setup code")
+        _write_credentials_unlocked(
+            state_dir, username, password, iterations=iterations
+        )
+        try:
+            os.unlink(_setup_code_path(state_dir))
+        except FileNotFoundError:
+            pass
+        _fsync_dir(state_dir)
+        return create_session(runtime_dir, username)
+
+
+def authenticate_and_create_session(state_dir, runtime_dir, username, password):
+    """Проверить credentials и создать сессию атомарно относительно reset."""
+    if not isinstance(username, str) or not isinstance(password, str):
+        return None
+    with _exclusive_lock(state_dir, "auth.lock"):
+        credentials = load_credentials(state_dir)
+        if credentials is None:
+            return None
+        try:
+            valid_user = hmac.compare_digest(
+                username.encode("utf-8"), credentials["username"].encode("utf-8")
+            )
+        except UnicodeError:
+            valid_user = False
+        valid_password = verify_password(password, credentials["password"])
+        if not (valid_user and valid_password):
+            return None
+        return create_session(runtime_dir, credentials["username"])
+
+
 def _session_path(runtime_dir, session_id):
     if not isinstance(session_id, str) or not TOKEN_RE.match(session_id):
         return None

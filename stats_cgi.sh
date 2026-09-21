@@ -60,12 +60,6 @@ html_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
 
-json_escape() {
-  # Для одиночных строковых значений в самодельном JSON ниже (restart_warn) -
-  # полноценный разбор JSON тут ни при чём, только обратный слэш и кавычка.
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
-}
-
 is_uint() {
   case $1 in
     ''|*[!0-9]*) return 1 ;;
@@ -137,8 +131,8 @@ set_env_var() {
 }
 
 _add_err() {
-  # $1=условное имя поля (для err_fields - задел под будущий JSON-путь
-  # /api/settings, шаг 4), $2=текст сообщения без HTML-разметки. Пишет
+  # $1=условное имя поля для JSON-пути /api/settings, $2=текст сообщения
+  # без HTML-разметки. Пишет
   # сразу в обе глобальные переменные - err (HTML, с <br> между
   # сообщениями, как было раньше) и err_fields (по строке
   # "поле|сообщение" на ошибку, без HTML-разметки) - у обеих один и тот
@@ -150,15 +144,13 @@ _add_err() {
 }
 
 validate_settings_fields() {
-  # Проверяет уже раскодированные значения полей формы настройки (19
+  # Проверяет уже раскодированные значения полей формы настройки (16
   # штук: node_cap, keep_runs, keep_days, geo_filter, extype, size_mb,
   # dl_timeout, min_speed_mb, min_ratio, min_floor_mb, topn, enough,
-  # min_winners, stability_window, stability_drop_after, no_auth,
-  # auth_user, auth_pass и max_tested - берутся из одноимённых shell-переменных,
+  # min_winners, stability_window, stability_drop_after и max_tested -
+  # берутся из одноимённых shell-переменных,
   # устанавливаемых ДО вызова этой функции: сегодня - urldecode() из тела
-  # POST HTML-формы ниже, в будущем (шаг 4, см.
-  # docs/plans/2026-09-12-web-spa-migration-design.md) - разбором
-  # JSON-тела POST /api/settings). Ни $ENV, ни другие файлы не трогает -
+  # POST HTML-формы и API /api/settings). Ни $ENV, ни другие файлы не трогает -
   # только заполняет err/err_fields (см. _add_err()) и возвращает 0, если
   # ошибок нет, иначе 1. Один набор правил на оба вызывающих пути - при
   # подключении JSON API в шаге 4 их не дублировать, а звать эту же
@@ -215,14 +207,6 @@ validate_settings_fields() {
   if ! is_uint "$stability_drop_after"; then
     _add_err stability_drop_after "«Удалять ноду после» должно быть целым числом (0 = не удалять)."
   fi
-  if [ -z "$no_auth" ]; then
-    if [ -n "$auth_user" ] && [ -z "$auth_pass" ]; then
-      _add_err auth_pass "Для смены пароля укажите и логин, и пароль."
-    elif [ -z "$auth_user" ] && [ -n "$auth_pass" ]; then
-      _add_err auth_user "Для смены пароля укажите и логин, и пароль."
-    fi
-  fi
-
   [ -z "$err" ]
 }
 
@@ -254,21 +238,19 @@ print_settings_json() {
           printf "\"%s\":\"%s\"", esc(field), esc(msg)
         }
         END { printf "}}" }'
-    elif [ -n "$restart_warn" ]; then
-      printf '{"ok":true,"warning":"%s"}' "$(json_escape "$restart_warn")"
     else
       printf '{"ok":true}'
     fi
     return 0
   fi
 
-  # geo_filter/extype/auth_user - через окружение процесса (ENVIRON[] в
+  # geo_filter/extype - через окружение процесса (ENVIRON[] в
   # awk), а не "-v": awk сам разбирает escape-последовательности внутри
   # значений "-v" (POSIX) - буквальный "\\" в регулярном выражении
   # гео-фильтра мог бы незаметно потеряться. Числовые поля ниже такому
   # риску не подвержены (уже провалидированы как целые/десятичные) -
   # для них "-v" как и везде в проекте.
-  MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" MST_API_AUTHUSER="$STATS_AUTH_USER" \
+  MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" \
   awk -v node_cap="$STATS_NODE_CAP" -v keep_runs="$HISTORY_KEEP_RUNS" \
       -v keep_days="$HISTORY_KEEP_DAYS" \
       -v max_tested="$MAX_TESTED" \
@@ -281,7 +263,6 @@ print_settings_json() {
     BEGIN {
       geo_filter = ENVIRON["MST_API_GEO"]
       extype = ENVIRON["MST_API_EXTYPE"]
-      auth_user = ENVIRON["MST_API_AUTHUSER"]
       printf "{\"ok\":true,\"values\":{"
       printf "\"max_tested\":%d,", max_tested + 0
       printf "\"node_cap\":%d,\"keep_runs\":%d,\"keep_days\":%d,", node_cap + 0, keep_runs + 0, keep_days + 0
@@ -290,7 +271,6 @@ print_settings_json() {
       printf "\"min_speed_mb\":%s,\"min_ratio\":%s,\"min_floor_mb\":%s,", min_speed_mb + 0, min_ratio + 0, min_floor_mb + 0
       printf "\"topn\":%d,\"enough\":%d,\"min_winners\":%d,", topn + 0, enough + 0, min_winners + 0
       printf "\"stability_window\":%d,\"stability_drop_after\":%d,", stability_window + 0, stability_drop_after + 0
-      printf "\"has_auth\":%s,\"auth_user\":\"%s\",", (auth_user == "" ? "false" : "true"), esc(auth_user)
       printf "\"geo_filter_candidates\":["
       gf_first = 1
     }
@@ -303,7 +283,6 @@ GEOFILTER_CANDIDATES
 method=${REQUEST_METHOD:-GET}
 msg=""
 err=""
-restart_warn=""
 
 if [ "$method" = "POST" ]; then
   len=${CONTENT_LENGTH:-0}
@@ -314,8 +293,7 @@ if [ "$method" = "POST" ]; then
     body=""
   fi
 
-  RAW_node_cap=""; RAW_keep_runs=""; RAW_keep_days=""; RAW_auth_user=""
-  RAW_auth_pass=""; RAW_no_auth=""; RAW_geo_filter=""; RAW_extype=""
+  RAW_node_cap=""; RAW_keep_runs=""; RAW_keep_days=""; RAW_geo_filter=""; RAW_extype=""
   RAW_size_mb=""; RAW_dl_timeout=""; RAW_min_speed_mb=""; RAW_min_ratio=""
   RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
   RAW_stability_window=""; RAW_stability_drop_after=""
@@ -326,9 +304,6 @@ if [ "$method" = "POST" ]; then
   max_tested=$(urldecode "$RAW_max_tested")
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
-  auth_user=$(urldecode "$RAW_auth_user")
-  auth_pass=$(urldecode "$RAW_auth_pass")
-  no_auth=$(urldecode "$RAW_no_auth")
   geo_filter=$(urldecode "$RAW_geo_filter")
   extype=$(urldecode "$RAW_extype")
   size_mb=$(urldecode "$RAW_size_mb")
@@ -345,15 +320,6 @@ if [ "$method" = "POST" ]; then
   validate_settings_fields
 
   if [ -z "$err" ]; then
-    # Логин/пароль (STATS_AUTH_USER/STATS_AUTH_PASS) - единственный
-    # параметр жизненного цикла веб-сервиса, который меняет эта форма (см.
-    # design порции 3: адрес/порт/STATS_HTTP_ENABLE в неё не выведены).
-    # Запоминаем значения ДО перезаписи ниже, чтобы понять после, менялись
-    # ли они - и вызвать reconfigure только в этом случае (порция 3:
-    # "изменение только параметров speedtest его не вызывает").
-    prev_auth_user=$STATS_AUTH_USER
-    prev_auth_pass=$STATS_AUTH_PASS
-
     set_env_var MAX_TESTED "$max_tested"
     set_env_var STATS_NODE_CAP "$node_cap"
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
@@ -370,14 +336,6 @@ if [ "$method" = "POST" ]; then
     set_env_var MIN_WINNERS "$min_winners"
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
-    if [ -n "$no_auth" ]; then
-      set_env_var STATS_AUTH_USER ""
-      set_env_var STATS_AUTH_PASS ""
-    elif [ -n "$auth_user" ] && [ -n "$auth_pass" ]; then
-      set_env_var STATS_AUTH_USER "$auth_user"
-      set_env_var STATS_AUTH_PASS "$auth_pass"
-    fi
-
     # перечитываем свежесохранённые значения и применяем сразу, не дожидаясь
     # следующего прогона по cron: перегенерируем stats.html (новый NODE_CAP)
     # немедленно. render_stats() с порции 2 сама больше не трогает
@@ -392,14 +350,6 @@ if [ "$method" = "POST" ]; then
     rm -rf "$WORK"
     msg="Настройки сохранены."
 
-    if [ "$prev_auth_user" != "$STATS_AUTH_USER" ] || [ "$prev_auth_pass" != "$STATS_AUTH_PASS" ]; then
-      if [ -x "$STATS_INIT_SCRIPT" ]; then
-        "$STATS_INIT_SCRIPT" reconfigure >/dev/null 2>&1 \
-          || restart_warn="Настройки сохранены, но перезапустить веб-сервис для нового логина/пароля не удалось - перезапустите его вручную ($STATS_INIT_SCRIPT restart)."
-      else
-        restart_warn="Настройки сохранены, но $STATS_INIT_SCRIPT не найден - новый логин/пароль подействует только после переустановки и перезапуска веб-сервиса."
-      fi
-    fi
   fi
 fi
 
@@ -462,7 +412,6 @@ input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 
 button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
 .msg-ok{background:#16a34a22;border:1px solid #16a34a;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 .msg-err{background:#dc262622;border:1px solid #dc2626;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
-.msg-warn{background:#d9770622;border:1px solid #d97706;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:13px}
 </style>
 <div class="wrap">
 <header>
@@ -476,9 +425,6 @@ HTML
 
 [ -n "$msg" ] && printf '<p class="msg-ok">%s</p>\n' "$(html_escape "$msg")"
 [ -n "$err" ] && printf '<p class="msg-err">%s</p>\n' "$err"
-[ -n "$restart_warn" ] && printf '<p class="msg-warn">%s</p>\n' "$(html_escape "$restart_warn")"
-
-cur_auth_user=$(html_escape "$STATS_AUTH_USER")
 
 cat <<HTML
 <form method="post">
@@ -541,18 +487,6 @@ $geo_filter_options</datalist>
 <label for="keep_days">Хранить дней (0 = не ограничивать)</label>
 <input type="number" min="0" id="keep_days" name="keep_days" value="$(html_escape "$HISTORY_KEEP_DAYS")">
 <p class="hint">Нельзя занулить оба сразу.</p>
-</div>
-<div class="card">
-<h2>Защита формы настройки</h2>
-<p class="hint">Страница статистики (stats.html) всегда открыта без пароля. Этой формой можно закрыть только саму настройку.</p>
-<label for="auth_user">Логин</label>
-<input type="text" id="auth_user" name="auth_user" placeholder="$([ -n "$cur_auth_user" ] && echo "текущий: $cur_auth_user" || echo "не задан")" autocomplete="off">
-<label for="auth_pass">Новый пароль</label>
-<input type="password" id="auth_pass" name="auth_pass" placeholder="оставьте пустым, если не меняете" autocomplete="new-password">
-<div class="row-checkbox">
-<input type="checkbox" id="no_auth" name="no_auth" value="1">
-<label for="no_auth">Отключить защиту (доступ без пароля)</label>
-</div>
 </div>
 <button class="submit" type="submit">Сохранить</button>
 </form>

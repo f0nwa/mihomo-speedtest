@@ -22,6 +22,9 @@
   var root = document.documentElement;
   var app = document.getElementById('app');
   var themeBtn = document.getElementById('themeBtn');
+  var mainNav = document.getElementById('mainNav');
+  var logoutBtn = document.getElementById('logoutBtn');
+  var authState = null;
 
   function applyTheme(t) {
     if (t) { root.setAttribute('data-theme', t); } else { root.removeAttribute('data-theme'); }
@@ -66,8 +69,12 @@
   });
 
   window.addEventListener('popstate', function () {
-    render(location.pathname);
-    updateActiveNav(location.pathname);
+    if (authState) {
+      render(location.pathname);
+      updateActiveNav(location.pathname);
+    } else {
+      loadAuth();
+    }
   });
 
   function clearApp() {
@@ -100,10 +107,28 @@
   }
 
   function fetchJson(url, opts) {
-    return fetch(url, opts).then(function (r) {
+    opts = opts || {};
+    var method = (opts.method || 'GET').toUpperCase();
+    var headers = new Headers(opts.headers || {});
+    if (authState && authState.csrf && method !== 'GET' && method !== 'HEAD') {
+      headers.set('X-CSRF-Token', authState.csrf);
+    }
+    var requestOpts = {};
+    Object.keys(opts).forEach(function (key) { requestOpts[key] = opts[key]; });
+    requestOpts.headers = headers;
+    requestOpts.credentials = 'same-origin';
+    return fetch(url, requestOpts).then(function (r) {
       return r.json()['catch'](function () { return {}; }).then(function (data) {
         if (!r.ok) {
-          throw new Error(data && data.error ? data.error : ('HTTP ' + r.status));
+          var error = new Error(data && data.error ? data.error : ('HTTP ' + r.status));
+          error.status = r.status;
+          if (r.status === 401 && url.indexOf('/api/auth/') !== 0) {
+            authState = null;
+            history.replaceState(null, '', '/login');
+            renderAuthForm('login');
+            return new Promise(function () {});
+          }
+          throw error;
         }
         return data;
       });
@@ -600,34 +625,6 @@
       form.appendChild(c);
     });
 
-    var authCard = card('Защита формы настройки');
-    authCard.appendChild(el('p', 'hint', 'Страница статистики всегда открыта без пароля. Этой формой можно закрыть только саму настройку.'));
-    var userLabel = el('label', null, 'Логин');
-    userLabel.setAttribute('for', 'auth_user');
-    authCard.appendChild(userLabel);
-    var userInput = el('input');
-    userInput.type = 'text'; userInput.id = 'auth_user'; userInput.name = 'auth_user';
-    userInput.autocomplete = 'off';
-    userInput.placeholder = values.has_auth && values.auth_user ? 'текущий: ' + values.auth_user : 'не задан';
-    authCard.appendChild(userInput);
-    var passLabel = el('label', null, 'Новый пароль');
-    passLabel.setAttribute('for', 'auth_pass');
-    authCard.appendChild(passLabel);
-    var passInput = el('input');
-    passInput.type = 'password'; passInput.id = 'auth_pass'; passInput.name = 'auth_pass';
-    passInput.autocomplete = 'new-password';
-    passInput.placeholder = 'оставьте пустым, если не меняете';
-    authCard.appendChild(passInput);
-    var rc = el('div', 'row-checkbox');
-    var noAuthInput = el('input');
-    noAuthInput.type = 'checkbox'; noAuthInput.id = 'no_auth'; noAuthInput.name = 'no_auth'; noAuthInput.value = '1';
-    rc.appendChild(noAuthInput);
-    var noAuthLabel = el('label', null, 'Отключить защиту (доступ без пароля)');
-    noAuthLabel.setAttribute('for', 'no_auth');
-    rc.appendChild(noAuthLabel);
-    authCard.appendChild(rc);
-    form.appendChild(authCard);
-
     var btnRow = el('div', 'btn-row');
     var saveBtn = el('button', 'submit', 'Сохранить');
     saveBtn.type = 'submit';
@@ -709,6 +706,136 @@
     if (path === '/settings') { renderSettings(); } else { renderStats(); }
   }
 
-  render(location.pathname);
-  updateActiveNav(location.pathname);
+  function setAuthenticatedUi(authenticated) {
+    mainNav.hidden = !authenticated;
+    logoutBtn.hidden = !authenticated;
+  }
+
+  function authInput(form, name, labelText, type, autocomplete) {
+    var label = el('label', null, labelText);
+    label.setAttribute('for', name);
+    form.appendChild(label);
+    var input = el('input');
+    input.id = name;
+    input.name = name;
+    input.type = type || 'text';
+    if (autocomplete) { input.autocomplete = autocomplete; }
+    input.required = true;
+    form.appendChild(input);
+    return input;
+  }
+
+  function renderAuthForm(mode) {
+    stopProgressPolling();
+    setAuthenticatedUi(false);
+    clearApp();
+    var c = card(mode === 'setup' ? 'Первичная настройка' : 'Вход');
+    var form = el('form', 'auth-form');
+    if (mode === 'setup') {
+      form.appendChild(el('p', 'hint', 'Введите одноразовый код из терминала роутера и создайте учётную запись.'));
+      authInput(form, 'setup_code', 'Одноразовый код', 'text', 'one-time-code');
+    }
+    authInput(form, 'login_username', 'Логин', 'text', 'username');
+    authInput(form, 'login_password', 'Пароль', 'password', mode === 'setup' ? 'new-password' : 'current-password');
+    if (mode === 'setup') {
+      authInput(form, 'login_password_confirm', 'Повторите пароль', 'password', 'new-password');
+    }
+    var submit = el('button', 'submit', mode === 'setup' ? 'Создать учётную запись' : 'Войти');
+    submit.type = 'submit';
+    form.appendChild(submit);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      submit.disabled = true;
+      showFormMessage(form, null);
+      var payload = {
+        username: form.elements.login_username.value,
+        password: form.elements.login_password.value
+      };
+      if (mode === 'setup') {
+        payload.code = form.elements.setup_code.value;
+        payload.password_confirm = form.elements.login_password_confirm.value;
+      }
+      fetchJson('/api/auth/' + mode, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (data) {
+        authState = data;
+        setAuthenticatedUi(true);
+        history.replaceState(null, '', '/stats');
+        render('/stats');
+        updateActiveNav('/stats');
+      })['catch'](function (error) {
+        var message = error.message === 'invalid_credentials' ? 'Неверный логин или пароль.' :
+          error.message === 'invalid_setup' ? 'Неверный или устаревший одноразовый код.' :
+          error.message === 'password_mismatch' ? 'Пароли не совпадают.' :
+          error.message === 'rate_limited' ? 'Слишком много попыток. Повторите позже.' :
+          'Не удалось выполнить запрос: ' + error.message;
+        showFormMessage(form, message, 'err');
+        submit.disabled = false;
+      });
+    });
+    c.appendChild(form);
+    app.appendChild(c);
+  }
+
+  function renderUninitialized() {
+    stopProgressPolling();
+    setAuthenticatedUi(false);
+    clearApp();
+    var c = card('Авторизация не настроена');
+    c.appendChild(el('p', 'msg-err', 'Выполните stats_auth.sh reset в терминале роутера, затем откройте эту страницу снова.'));
+    app.appendChild(c);
+  }
+
+  function loadAuth() {
+    setLoading();
+    return fetch('/api/auth/status', { credentials: 'same-origin' }).then(function (response) {
+      return response.json()['catch'](function () { return { mode: 'uninitialized' }; });
+    }).then(function (data) {
+      if (data.mode === 'authenticated') {
+        authState = data;
+        setAuthenticatedUi(true);
+        var path = location.pathname;
+        if (path === '/login' || path === '/setup') {
+          history.replaceState(null, '', '/stats');
+          path = '/stats';
+        }
+        render(path);
+        updateActiveNav(path);
+      } else if (data.mode === 'setup') {
+        authState = null;
+        if (location.pathname !== '/setup') { history.replaceState(null, '', '/setup'); }
+        renderAuthForm('setup');
+      } else if (data.mode === 'login') {
+        authState = null;
+        if (location.pathname !== '/login') { history.replaceState(null, '', '/login'); }
+        renderAuthForm('login');
+      } else {
+        authState = null;
+        renderUninitialized();
+      }
+    })['catch'](function (error) {
+      showError('Не удалось проверить авторизацию: ', error);
+    });
+  }
+
+  logoutBtn.addEventListener('click', function () {
+    logoutBtn.disabled = true;
+    fetchJson('/api/auth/logout', { method: 'POST' }).then(function () {
+      authState = null;
+      history.replaceState(null, '', '/login');
+      renderAuthForm('login');
+    })['catch'](function (error) {
+      if (error.status === 401) {
+        authState = null;
+        history.replaceState(null, '', '/login');
+        renderAuthForm('login');
+      } else {
+        showError('Не удалось выйти: ', error);
+      }
+    }).then(function () { logoutBtn.disabled = false; });
+  });
+
+  loadAuth();
 })();
