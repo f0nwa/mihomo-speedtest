@@ -34,6 +34,8 @@ FILE|web|render_stats.awk|/opt/etc/mihomo/render_stats.awk|0644|awk
 FILE|web|stats_cgi.sh|/opt/etc/mihomo/stats_cgi.sh|0755|sh
 FILE|web|stats_run.sh|/opt/etc/mihomo/stats_run.sh|0755|sh
 FILE|web|stats_httpd.py|/opt/etc/mihomo/stats_httpd.py|0644|py
+FILE|web|stats_auth.py|/opt/etc/mihomo/stats_auth.py|0644|py
+FILE|web|stats_auth.sh|/opt/etc/mihomo/stats_auth.sh|0755|sh
 FILE|web|stats_index.html|/opt/etc/mihomo/stats_index.html|0644|none
 FILE|web|stats_style.css|/opt/etc/mihomo/stats_style.css|0644|none
 FILE|web|stats_app.js|/opt/etc/mihomo/stats_app.js|0644|none

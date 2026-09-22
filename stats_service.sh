@@ -11,15 +11,15 @@
 # stats.html/stats.json - этим занимается speedtest2.sh (render_stats()).
 #
 # Переиспользует функции speedtest2.sh (say(), publish_file(),
-# write_stats_httpd_conf(), write_stats_cgi(), write_stats_run(),
+# write_stats_cgi(), write_stats_run(),
 # write_stats_static(), cleanup_old_zash_stats(), start_stats_httpd_backend(),
 # stats_httpd_advertise_host()) тем же приёмом, что и stats_cgi.sh/stats_run.sh:
 # подключение с MST_LIB_ONLY=1, без запуска main(). Поэтому DIR должен
 # указывать на каталог, где рядом лежит сам speedtest2.sh (обычная
 # установка - /opt/etc/mihomo, ставится install.sh).
 #
-# Важно про порядок переменных ниже: STATS_HTTP_PIDFILE/STATS_HTTP_LOG/
-# STATS_HTTP_CONF получают новые значения по умолчанию (внутри
+# Важно про порядок переменных ниже: STATS_HTTP_PIDFILE/STATS_HTTP_LOG
+# получают новые значения по умолчанию (внутри
 # $STATS_SERVICE_RUNTIME_DIR, обычно /tmp/mihomo-speedtest-stats) ДО
 # подключения speedtest2.sh. Внутри speedtest2.sh эти же переменные
 # определяются как "${VAR:-старое_значение_в_DIR}" - раз переменная уже
@@ -36,7 +36,6 @@ STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-sta
 SUPERVISOR_PIDFILE=${SUPERVISOR_PIDFILE:-$STATS_SERVICE_RUNTIME_DIR/supervisor.pid}
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$STATS_SERVICE_RUNTIME_DIR/httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$STATS_SERVICE_RUNTIME_DIR/httpd.log}
-STATS_HTTP_CONF=${STATS_HTTP_CONF:-$STATS_SERVICE_RUNTIME_DIR/httpd.conf}
 RUN_LOG=${RUN_LOG:-$STATS_SERVICE_RUNTIME_DIR/service.log}   # свой журнал supervisor'а - см. say() в speedtest2.sh
 
 # Последовательность задержек перед повторным запуском упавшего бэкенда
@@ -47,7 +46,7 @@ RUN_LOG=${RUN_LOG:-$STATS_SERVICE_RUNTIME_DIR/service.log}   # свой журн
 STATS_SERVICE_BACKOFF=${STATS_SERVICE_BACKOFF:-"2 5 15 60"}
 STATS_SERVICE_STABLE_SECONDS=${STATS_SERVICE_STABLE_SECONDS:-60}
 
-export DIR STATS_HTTP_PIDFILE STATS_HTTP_LOG STATS_HTTP_CONF RUN_LOG
+export DIR STATS_HTTP_PIDFILE STATS_HTTP_LOG RUN_LOG
 
 if [ ! -f "$SPEEDTEST_SCRIPT" ]; then
   echo "stats_service.sh: $SPEEDTEST_SCRIPT не найден - переустановите проект" >&2
@@ -73,7 +72,7 @@ pid_from_file() {
 }
 
 prepare() {
-  # Готовит раздаваемый каталог: конфиг Basic Auth, копии CGI-скриптов и
+  # Готовит раздаваемый каталог: копии CGI-скриптов и
   # статические файлы SPA-shell. Те же шаги, что в начале
   # ensure_stats_httpd() в speedtest2.sh (до выбора и запуска бэкенда) -
   # см. design, порция 2 переносит этот код сюда окончательно и убирает
@@ -84,7 +83,6 @@ prepare() {
     say "WARN: не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
     return 1
   fi
-  write_stats_httpd_conf
   write_stats_cgi
   write_stats_run
   write_stats_static
@@ -92,8 +90,8 @@ prepare() {
 }
 
 try_backend() {
-  # $1 = команда сервера ("busybox httpd" или "$STATS_HTTPD_PY_CMD
-  # $STATS_HTTPD_PY"), тот же формат, что у start_stats_httpd_backend()
+  # $1 = команда сервера ("$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY" -
+  # единственный поддерживаемый бэкенд), тот же формат, что у start_stats_httpd_backend()
   # в speedtest2.sh - но, в отличие от неё, не через "$(...)".
   # Оригинальная start_stats_httpd_backend() возвращает pid через
   # command substitution ("newpid=$(start_stats_httpd_backend ...)"), что
@@ -112,7 +110,7 @@ try_backend() {
     say "WARN: $bin не найден"
     return 1
   fi
-  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" -c "$STATS_HTTP_CONF" \
+  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" \
     > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
   BACKEND_PID=$!
   sleep 1
@@ -125,31 +123,19 @@ try_backend() {
 }
 
 start_backend() {
-  # Выбирает python3 stats_httpd.py (если доступен) или резервный
-  # busybox httpd - та же логика выбора, что в ensure_stats_httpd(), но
+  # Запускает единственный поддерживаемый бэкенд stats_httpd.py. Только он
+  # реализует общую авторизацию для UI и API.
   # без управления pid-файлом (это решает supervise()) и без подшелла
   # (см. try_backend() выше). При успехе кладёт pid в $BACKEND_PID и
   # возвращает 0; при неудаче обоих вариантов - $BACKEND_PID пуст,
   # возврат 1 (WARN уже написан через say()).
   BACKEND_PID=
-  py_available=0
-  if [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
-    py_available=1
+  if [ ! -f "$STATS_HTTPD_PY" ] || ! command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
+    say "WARN: Python 3 или $STATS_HTTPD_PY не найден - веб-интерфейс не запущен"
+    return 1
   fi
-
-  if [ "$py_available" = 1 ]; then
-    if try_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY"; then
-      return 0
-    fi
-    say "веб-сервис статистики: $STATS_HTTPD_PY_CMD $STATS_HTTPD_PY не запустился, пробую резервный сервер ($STATS_HTTPD_CMD)"
-  else
-    say "веб-сервис статистики: $STATS_HTTPD_PY_CMD не найден - используется резервный сервер ($STATS_HTTPD_CMD), доступны только /stats.html и /cgi-bin/*; для чистых URL поставьте python3 (см. README)"
-  fi
-
-  if try_backend "$STATS_HTTPD_CMD"; then
-    return 0
-  fi
-  say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT ни основным сервером, ни резервным - подробности в $STATS_HTTP_LOG"
+  try_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY" && return 0
+  say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
   return 1
 }
 
@@ -191,6 +177,11 @@ supervise() {
     echo "stats_service.sh: не удалось создать $STATS_SERVICE_RUNTIME_DIR" >&2
     return 1
   }
+
+  if [ ! -f "$STATS_HTTPD_PY" ] || ! command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
+    say "WARN: Python 3 или $STATS_HTTPD_PY не найден - веб-интерфейс не запущен"
+    return 1
+  fi
 
   existing=$(pid_from_file "$SUPERVISOR_PIDFILE")
   if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then

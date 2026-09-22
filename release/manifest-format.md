@@ -404,3 +404,44 @@ UPDATE_ACTION_TIMEOUT ограничивает каждый внешний за�
 Приёмка с заменой боевого конфига, реальным перезапуском и отключением питания
 требует отдельного согласования. Фиктивная RAM-установка эту приёмку не заменяет;
 сам коммит не обновляет опубликованный релиз или роутер.
+
+## Обязательная веб-авторизация в компоненте web: часть 4.3
+
+Компонент web в release/components.txt теперь включает stats_auth.py и
+stats_auth.sh - ядро постоянных credentials/одноразового setup-кода и его
+SSH-сброс (часть 4.1), плюс общий access gate для всего UI и API в
+stats_httpd.py (часть 4.2). Старый BusyBox-резерв и его Basic Auth только
+на /cgi-bin (STATS_AUTH_USER/STATS_AUTH_PASS, stats_httpd.conf) убраны из
+активного пути: Python 3 обязателен для веб-службы, без него speedtest/CLI
+продолжают работать, а stats_httpd.py просто не запускается (WARN в лог,
+см. README/guide.md).
+
+update.sh вызывает initialize_web_auth() один раз - в ветке apply команды
+verify-plan|show-config-diff|apply, сразу после успешных transaction_apply()
+и transaction_result(), то есть только после публикации COMMIT уже применённой
+транзакции. При verify-plan/show-config-diff, а также при неудачном apply
+(die/rollback до COMMIT - скрипт работает под set -eu и не доходит до этой
+строки) initialize_web_auth() не вызывается и setup-код не создаётся.
+$DIR внутри update.sh - каталог проверенного движка обновления (bootstrap-
+копия update.sh/update_plan.awk/update_prepare.sh/update_transaction.sh), а
+не каталог установки, поэтому фактический stats_auth.py разрешается через
+target_file(/opt/etc/mihomo) - вызов сделан именно после prepare_init(),
+когда target_file() уже доступна (более ранняя версия ошибочно опиралась
+на $DIR и искала stats_auth.py не в том каталоге).
+
+Если в установленном каталоге нет stats_auth.py (старая установка без
+web-компонента), функция тихо завершается без ошибки. Если python3
+недоступен, печатается WARN и апдейт всё равно считается успешным - CLI и
+speedtest продолжают работать, веб-интерфейс просто не поднимается. Сам
+вызов `python3 stats_auth.py initialize --state-dir .../.stats-auth
+--runtime-dir /tmp/mihomo-speedtest-auth` идемпотентен (часть 4.1): при уже
+существующих credentials или незавершённом pending-setup код повторно не
+создаётся и ничего не печатается; печатается только свежесозданный
+одноразовый код вместе с адресом /setup. Неудача самой инициализации -
+тоже WARN с подсказкой выполнить `sh stats_auth.sh reset` вручную, а не
+падение всего обновления.
+
+update.sh и его движок версионируются отдельно через собственную константу
+UPDATER_VERSION (см. "Версии и заголовок" выше) - в этой части она не
+менялась, затронуты только VERSIONS/CORE_VERSION/STATS_VERSION проекта
+(см. VERSIONS в корне репозитория и комментарий в speedtest2.sh).

@@ -327,11 +327,26 @@ def clear_sessions(runtime_dir):
             pass
 
 
-def reset_auth(state_dir, runtime_dir):
+def _write_new_setup_code_unlocked(state_dir):
     code = "".join(secrets.choice(SETUP_CODE_ALPHABET) for _ in range(SETUP_CODE_LENGTH))
     digest = hashlib.sha256(code.encode("ascii")).hexdigest()
+    _atomic_write_text(_setup_code_path(state_dir), digest + "\n")
+    return code
+
+
+def initialize_auth(state_dir, runtime_dir):
+    """Создать первый setup-код, не меняя существующее auth-состояние."""
     with _exclusive_lock(state_dir, "auth.lock"):
-        _atomic_write_text(_setup_code_path(state_dir), digest + "\n")
+        if load_credentials(state_dir) is not None or is_setup_pending(state_dir):
+            return None
+        code = _write_new_setup_code_unlocked(state_dir)
+        clear_sessions(runtime_dir)
+        return code
+
+
+def reset_auth(state_dir, runtime_dir):
+    with _exclusive_lock(state_dir, "auth.lock"):
+        code = _write_new_setup_code_unlocked(state_dir)
         credentials_path = _credentials_path(state_dir)
         try:
             os.unlink(credentials_path)
@@ -556,13 +571,22 @@ def consume_rate_limit(runtime_dir, bucket, key, limit, window_seconds, now=None
 
 
 def cli_main(argv):
-    if len(argv) != 5 or argv[0] != "reset" or argv[1] != "--state-dir" or argv[3] != "--runtime-dir":
+    if (
+        len(argv) != 5
+        or argv[0] not in ("initialize", "reset")
+        or argv[1] != "--state-dir"
+        or argv[3] != "--runtime-dir"
+    ):
         sys.stderr.write(
-            "usage: stats_auth.py reset --state-dir PATH --runtime-dir PATH\n"
+            "usage: stats_auth.py {initialize|reset} --state-dir PATH --runtime-dir PATH\n"
         )
         return 2
-    code = reset_auth(argv[2], argv[4])
-    sys.stdout.write(code + "\n")
+    if argv[0] == "initialize":
+        code = initialize_auth(argv[2], argv[4])
+    else:
+        code = reset_auth(argv[2], argv[4])
+    if code is not None:
+        sys.stdout.write(code + "\n")
     return 0
 
 

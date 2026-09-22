@@ -26,6 +26,7 @@ STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}
+STATS_AUTH_RUNTIME_DIR=${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}
 # 1 - не спрашивать подтверждения (для запуска по SSH одной командой).
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
@@ -39,7 +40,7 @@ PURGE_DATA=${PURGE_DATA:-0}
 # install_files() в install.sh (см. соответствующий список там).
 CORE_FILES="speedtest2.sh prep.awk render_stats.awk stats_cgi.sh
 stats_run.sh stats_index.html stats_style.css stats_app.js stats_chart.js
-stats_httpd.py node_stats_update.awk sub_convert.awk render_progress.awk"
+stats_httpd.py stats_auth.py stats_auth.sh node_stats_update.awk sub_convert.awk render_progress.awk"
 
 atomic_install() {
   src=$1
@@ -67,7 +68,7 @@ confirm() {
     echo "uninstall.sh: если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
   fi
   if [ "$PURGE_DATA" = 1 ]; then
-    echo "uninstall.sh: PURGE_DATA=1 - также будут удалены журналы, история замеров и веб-статика статистики." >&2
+    echo "uninstall.sh: PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
   fi
   printf 'uninstall.sh: продолжить? [y/N] ' >&2
   read -r ans || ans=""
@@ -158,6 +159,7 @@ remove_files() {
   rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env"
   rm -f "$INITD_SCRIPT"
   rm -rf "$STATS_SERVICE_RUNTIME_DIR"
+  rm -rf "$STATS_AUTH_RUNTIME_DIR"
   rm -rf "$DIR/__pycache__"
 }
 
@@ -165,7 +167,8 @@ purge_data() {
   [ "$PURGE_DATA" = 1 ] || return 0
   rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv"
   rm -rf "$STATS_HTTP_DIR"
-  echo "uninstall.sh: PURGE_DATA=1 - журналы, история замеров и веб-статика статистики удалены" >&2
+  rm -rf "$DIR/.stats-auth"
+  echo "uninstall.sh: PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2
 }
 
 main() {

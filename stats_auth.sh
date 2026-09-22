@@ -9,10 +9,10 @@ STATS_AUTH_RUNTIME_DIR=${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}
 INITD_SCRIPT=${INITD_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}
 
 usage() {
-  echo "использование: sh $0 reset" >&2
+  echo "использование: sh $0 {initialize|reset}" >&2
 }
 
-[ "${1:-}" = reset ] && [ "$#" -eq 1 ] || {
+case ${1:-} in initialize|reset) [ "$#" -eq 1 ] ;; *) false ;; esac || {
   usage
   exit 2
 }
@@ -28,13 +28,17 @@ command -v "$STATS_AUTH_PYTHON" >/dev/null 2>&1 || {
 }
 
 code=$(
-  "$STATS_AUTH_PYTHON" "$STATS_AUTH_PY" reset \
+  "$STATS_AUTH_PYTHON" "$STATS_AUTH_PY" "$1" \
     --state-dir "$STATS_AUTH_STATE_DIR" \
     --runtime-dir "$STATS_AUTH_RUNTIME_DIR"
 )
 
-printf 'Одноразовый код: %s\n' "$code"
-printf 'Откройте /setup в веб-интерфейсе и задайте логин и пароль.\n'
+if [ -n "$code" ]; then
+  printf 'Одноразовый код: %s\n' "$code"
+  printf 'Откройте /setup в веб-интерфейсе и задайте логин и пароль.\n'
+fi
+
+[ "$1" = reset ] || exit 0
 
 [ -x "$INITD_SCRIPT" ] || {
   echo "stats_auth.sh: init-скрипт веб-службы не найден: $INITD_SCRIPT" >&2

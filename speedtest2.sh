@@ -74,14 +74,10 @@ STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-серви�
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # каталог, который раздаётся; создаётся сам, с zashboard не связан
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
-STATS_HTTPD_CMD=${STATS_HTTPD_CMD:-"busybox httpd"} # резервный сервер (шаг 5 SPA-миграции - см. design-док) - только старые адреса /stats.html и /cgi-bin/*, без чистых URL; используется, если недоступен python3 (см. STATS_HTTPD_PY ниже); -f -p BIND:PORT -h DIR -c CONF добавляются автоматически
-STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # основной сервер (нужен python3) - чистые URL (/, /stats, /settings) и /api/*, см. README; если python3 недоступен - используется резервный STATS_HTTPD_CMD выше
+STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # обязательный сервер на Python 3: чистые URL, API и общая авторизация
 STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для основного сервера
 STATS_HTTPD_IP_CMD=${STATS_HTTPD_IP_CMD:-ip}            # чем определять LAN-адрес роутера для адреса в консоли, см. stats_httpd_advertise_host()
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод показывать на графике по нодам, 1..8 (см. render_stats.awk)
-STATS_AUTH_USER=${STATS_AUTH_USER:-}                # логин для формы настройки /cgi-bin/config; пусто = без пароля
-STATS_AUTH_PASS=${STATS_AUTH_PASS:-}                # пароль для формы настройки; сама статистика (stats.html) паролем не защищается
-STATS_HTTP_CONF=${STATS_HTTP_CONF:-$DIR/stats_httpd.conf}          # конфиг busybox httpd (Basic Auth только на /cgi-bin), пишется сам
 STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
 STATS_RUN_SOURCE=${STATS_RUN_SOURCE:-$DIR/stats_run.sh}              # исходник CGI-скрипта кнопки force-прогона, ставится install.sh
@@ -102,9 +98,16 @@ STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # п
 # cron. CORE_VERSION/STATS_VERSION - версии этого файла и связанных с ним
 # частей; меняются вручную при подготовке релиза и сверяются с файлом
 # VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
-# им быть не следует).
-CORE_VERSION=${CORE_VERSION:-3}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
-STATS_VERSION=${STATS_VERSION:-3}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk, stats_service.sh, stats_init.sh
+# им быть не следует). Список файлов при каждой версии ниже - ровно тот
+# набор, что реально скачивают update_core()/update_stats() (--update-core/
+# --update-stats, см. ниже); uninstall.sh, update.sh и его движок
+# (update_plan.awk/update_prepare.sh/update_transaction.sh), а также
+# stats_auth.py/stats_auth.sh в этот старый механизм не входят - они
+# ставятся/обновляются через install.sh и новый релизный обновлятор
+# (release/components.txt, update.sh, версионируется отдельно через
+# UPDATER_VERSION - см. release/manifest-format.md).
+CORE_VERSION=${CORE_VERSION:-4}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
+STATS_VERSION=${STATS_VERSION:-4}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk, stats_service.sh, stats_init.sh
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
 UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
@@ -389,30 +392,6 @@ stop_stats_httpd() {
   rm -f "$STATS_HTTP_PIDFILE" "$STATS_HTTP_PIDFILE.addr"
 }
 
-write_stats_httpd_conf() {
-  # Пишет конфиг busybox httpd для веб-сервиса статистики: если заданы
-  # STATS_AUTH_USER/STATS_AUTH_PASS, Basic Auth защищает только каталог
-  # /cgi-bin (форму настройки) - саму статистику (stats.html) можно
-  # смотреть без пароля. Пустой файл конфига = вообще без ограничений.
-  # свой tmp+mv рядом с конфигом (а не в $WORK), т.к. ensure_stats_httpd()
-  # может вызываться и без $WORK - например, из CGI-скрипта формы настройки.
-  conf_dir=${STATS_HTTP_CONF%/*}
-  if [ ! -d "$conf_dir" ]; then
-    say "WARN: каталог $conf_dir не найден, конфиг Basic Auth не обновлён"
-    return 0
-  fi
-  conf_tmp=$STATS_HTTP_CONF.$$.tmp
-  if [ -n "$STATS_AUTH_USER" ]; then
-    printf '/cgi-bin:%s:%s\n' "$STATS_AUTH_USER" "$STATS_AUTH_PASS" > "$conf_tmp"
-  else
-    : > "$conf_tmp"
-  fi
-  if ! publish_file "$conf_tmp" "$STATS_HTTP_CONF"; then
-    say "WARN: не удалось записать $STATS_HTTP_CONF, конфиг Basic Auth не обновлён"
-  fi
-  rm -f "$conf_tmp"
-}
-
 write_stats_cgi() {
   # Копирует CGI-скрипт формы настройки статистики ($STATS_CGI_SOURCE,
   # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
@@ -544,10 +523,7 @@ ensure_stats_httpd() {
   # (stats_cgi.sh) видели те же настройки, что и текущий прогон - см.
   # комментарий в начале stats_cgi.sh.
   #
-  # Выбор сервера (шаг 5 SPA-миграции, см.
-  # docs/plans/2026-09-12-web-spa-migration-design.md - решение по
-  # python3-зависимости: вариант 2, деградация, а не жёсткая зависимость) -
-  # ниже, перед выбором backend.
+  # Python 3 обязателен: stats_httpd.py реализует общую авторизацию UI/API.
   export DIR ENV
 
   cleanup_old_zash_stats
@@ -562,52 +538,29 @@ ensure_stats_httpd() {
     return 0
   fi
 
-  write_stats_httpd_conf
   write_stats_cgi
   write_stats_run
   write_stats_static
 
-  # отпечаток адреса и защиты - смена любого из них требует перезапуска
-  # httpd (логин/пароль читает только при старте из -c конфига); md5sum -
-  # не для безопасности, а просто чтобы не хранить пароль вторым открытым
-  # текстом в .addr-файле (он и так есть в speedtest2.env).
-  authsig=$(printf '%s:%s' "$STATS_AUTH_USER" "$STATS_AUTH_PASS" | md5sum 2>/dev/null) || authsig="$STATS_AUTH_USER:$STATS_AUTH_PASS"
-  want="$STATS_HTTP_BIND:$STATS_HTTP_PORT:$authsig"
+  want="$STATS_HTTP_BIND:$STATS_HTTP_PORT"
   pid=$(cat "$STATS_HTTP_PIDFILE" 2>/dev/null) || true
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     have=$(cat "$STATS_HTTP_PIDFILE.addr" 2>/dev/null) || true
     if [ "$have" = "$want" ]; then
       return 0
     fi
-    say "веб-сервис статистики: адрес или защита изменились, перезапускаю"
+    say "веб-сервис статистики: адрес изменился, перезапускаю"
     stop_stats_httpd
   fi
 
-  # Основной сервер - stats_httpd.py (python3): только он умеет чистые URL
-  # (/, /stats, /settings) и /api/* - см. docs/plans/2026-09-12-web-spa-migration-design.md.
-  # Если python3 недоступен (файла нет или сам интерпретатор не найден в
-  # PATH) - молча переходим к резервному "busybox httpd" ниже: старые
-  # адреса /stats.html и /cgi-bin/* при этом продолжают работать, просто
-  # без чистых URL и /api/*.
-  py_available=0
-  if [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
-    py_available=1
-  fi
-
   backend=""
-  if [ "$py_available" = 1 ]; then
+  if [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
     newpid=$(start_stats_httpd_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY") && backend="$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY"
+  else
+    say "WARN: Python 3 или $STATS_HTTPD_PY не найден - веб-интерфейс не запущен"
   fi
   if [ -z "$backend" ]; then
-    if [ "$py_available" = 1 ]; then
-      say "веб-сервис статистики: $STATS_HTTPD_PY_CMD $STATS_HTTPD_PY не запустился, пробую резервный сервер ($STATS_HTTPD_CMD)"
-    else
-      say "веб-сервис статистики: $STATS_HTTPD_PY_CMD не найден - используется резервный сервер ($STATS_HTTPD_CMD), доступны только /stats.html и /cgi-bin/*; для чистых URL поставьте python3 (см. README)"
-    fi
-    newpid=$(start_stats_httpd_backend "$STATS_HTTPD_CMD") && backend=$STATS_HTTPD_CMD
-  fi
-  if [ -z "$backend" ]; then
-    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT ни основным сервером, ни резервным - подробности в $STATS_HTTP_LOG"
+    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
     return 0
   fi
   if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
@@ -621,9 +574,7 @@ ensure_stats_httpd() {
 }
 
 start_stats_httpd_backend() {
-  # $1 = команда сервера ("busybox httpd" или "$STATS_HTTPD_PY_CMD
-  # $STATS_HTTPD_PY") - оба принимают один и тот же набор флагов
-  # (-f -p BIND:PORT -h DIR -c CONF), см. шапку stats_httpd.py. При успехе
+  # $1 = команда "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY". При успехе
   # печатает pid в stdout и возвращает 0; при неудаче - WARN в лог через
   # say() и возврат 1. Не трогает $STATS_HTTP_PIDFILE - это решает вызывающий
   # код (ensure_stats_httpd), он же выбирает, пробовать ли запасной вариант.
@@ -633,7 +584,7 @@ start_stats_httpd_backend() {
     say "WARN: $bin не найден"
     return 1
   fi
-  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" -c "$STATS_HTTP_CONF" \
+  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" \
     > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
   newpid=$!
   sleep 1

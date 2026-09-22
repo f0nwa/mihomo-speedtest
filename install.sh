@@ -127,11 +127,15 @@ install_files() {
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
   atomic_install "$SELFDIR/stats_chart.js" "$DIR/stats_chart.js" || return 1
-  # основной веб-сервер на python3 (см. README, "Запасной веб-сервер") -
-  # запускается start_backend() в stats_service.sh (порция 3, независимая
-  # служба); исполняемый бит не нужен, он вызывается как
-  # "python3 stats_httpd.py", а не напрямую.
+  # обязательный веб-сервер на python3 (см. docs/guide.md, "Обязательная
+  # авторизация веб-интерфейса") - запускается start_backend() в
+  # stats_service.sh (порция 3, независимая служба); исполняемый бит не
+  # нужен, он вызывается как "python3 stats_httpd.py", а не напрямую.
+  # stats_auth.py - ядро авторизации (импортируется stats_httpd.py),
+  # stats_auth.sh - сброс логина и пароля по SSH (sh stats_auth.sh reset).
   atomic_install "$SELFDIR/stats_httpd.py" "$DIR/stats_httpd.py" || return 1
+  atomic_install "$SELFDIR/stats_auth.py" "$DIR/stats_auth.py" || return 1
+  atomic_install "$SELFDIR/stats_auth.sh" "$DIR/stats_auth.sh" || return 1
   # вызывается напрямую через "awk -f", как prep.awk/render_stats.awk -
   # исполняемый бит не нужен.
   atomic_install "$SELFDIR/node_stats_update.awk" "$DIR/node_stats_update.awk" || return 1
@@ -258,19 +262,14 @@ have_opkg() {
 }
 
 ensure_python3() {
-  # Роутеру нужен python3 для основного веб-сервиса статистики
-  # (stats_httpd.py, см. start_backend() в stats_service.sh - порция 3,
-  # независимая служба) - без него start_backend() тихо откатывается на
-  # резервный busybox httpd (только /stats.html и /cgi-bin/config, без
-  # чистых URL /stats и /settings, см. README). Пытаемся поставить python3
-  # через opkg (пакетный менеджер Entware) сами, но неудача здесь никогда
-  # не останавливает install.sh - тогда просто предупреждаем и остаёмся на
-  # резервном варианте.
+  # Полная авторизация реализована в stats_httpd.py, поэтому незащищённого
+  # BusyBox fallback больше нет. Неудача не отменяет CLI и speedtest, но
+  # веб-службу после такой установки запускать нельзя.
   have_python3 && return 0
 
   if ! have_opkg; then
-    echo "install.sh: python3 не найден, а opkg недоступен - поставить автоматически не получится. Веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную и выполните: $INITD_SCRIPT restart" >&2
-    return 0
+    echo "install.sh: python3 не найден, а opkg недоступен - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    return 1
   fi
 
   echo "install.sh: python3 не найден, пробую поставить через opkg install python3..." >&2
@@ -282,8 +281,20 @@ ensure_python3() {
 
   if have_python3; then
     echo "install.sh: python3 успешно установлен через opkg" >&2
+    return 0
   else
-    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-сервис статистики поднимется на резервном busybox httpd (только адреса /stats.html и /cgi-bin/config, без чистых URL /stats и /settings). Поставьте python3 вручную (opkg update && opkg install python3) и выполните: $INITD_SCRIPT restart" >&2
+    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    return 1
+  fi
+}
+
+initialize_web_auth() {
+  code=$(python3 "$DIR/stats_auth.py" initialize \
+    --state-dir "$DIR/.stats-auth" \
+    --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}") || return 1
+  if [ -n "$code" ]; then
+    echo "install.sh: одноразовый код первичной настройки: $code" >&2
+    echo "install.sh: откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
   fi
 }
 
@@ -291,7 +302,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
+  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
@@ -343,24 +354,32 @@ main() {
   }
   install_cron
 
-  # Ставим python3 (если получится) ДО запуска веб-службы, чтобы сама
-  # служба сразу подняла основной бэкенд (stats_httpd.py), а не резервный
-  # busybox httpd, если установка удалась.
-  ensure_python3
+  # Ставим python3 (если получится) ДО запуска веб-службы: без него
+  # stats_httpd.py не запустится, а резервного сервера без пароля больше
+  # нет - веб-интерфейс тогда просто не поднимается (см. ensure_python3).
+  web_ready=1
+  ensure_python3 || web_ready=0
 
   # Порция 3 (см. design): веб-интерфейс статистики поднимается независимо
   # от пробного прогона speedtest - "restart", а не "start", чтобы при
   # переустановке (изменился порт/bind/логин в $CONFIG или окружении)
   # уже запущенная служба сразу подхватила свежий speedtest2.env, а не
   # промолчала как "уже запущена" на старых настройках.
-  if [ -x "$INITD_SCRIPT" ]; then
+  if [ "$web_ready" = 1 ] && ! initialize_web_auth; then
+    web_ready=0
+    echo "install.sh: WARN - не удалось инициализировать авторизацию, веб-интерфейс не запущен" >&2
+  fi
+  if [ "$web_ready" = 1 ] && [ -x "$INITD_SCRIPT" ]; then
     if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
       echo "install.sh: веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
     else
       echo "install.sh: WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
     fi
-  else
+  elif [ "$web_ready" = 1 ]; then
     echo "install.sh: WARN - $INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен" >&2
+  else
+    [ ! -x "$INITD_SCRIPT" ] || "$INITD_SCRIPT" stop >/dev/null 2>&1 || true
+    echo "install.sh: CLI, speedtest и обновлятор установлены; веб-интерфейс отключён до установки Python 3" >&2
   fi
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then

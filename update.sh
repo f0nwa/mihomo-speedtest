@@ -16,6 +16,30 @@ TMPROOT=${TMPROOT:-/tmp}
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+initialize_web_auth() {
+  # $DIR здесь - каталог проверенного движка обновления (bootstrap-копия
+  # update.sh/update_plan.awk/update_prepare.sh/update_transaction.sh), а не
+  # каталог установки: компонент web (stats_auth.py) в bootstrap не входит
+  # (bootstrap_header пропускает только FILE|updater|...). Реальный
+  # установленный stats_auth.py нужно искать через target_file(), которая
+  # уже доступна - update_prepare.sh подключён и prepare_init выполнен до
+  # вызова initialize_web_auth() в единственной точке вызова (ветка apply).
+  auth_dir=$(target_file /opt/etc/mihomo)
+  auth_py=$auth_dir/stats_auth.py
+  [ -f "$auth_py" ] || return 0
+  if ! command -v python3 >/dev/null 2>&1; then
+    say 'WARN: обновление применено, но Python 3 отсутствует; веб-интерфейс не запущен'
+    return 0
+  fi
+  if ! setup_code=$(python3 "$auth_py" initialize --state-dir "$auth_dir/.stats-auth" --runtime-dir /tmp/mihomo-speedtest-auth); then
+    say "WARN: обновление применено, но авторизация не инициализирована; выполните sh $auth_dir/stats_auth.sh reset"
+    return 0
+  fi
+  if [ -n "$setup_code" ]; then
+    say "Одноразовый код первичной настройки: $setup_code"
+    say "Откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль"
+  fi
+}
 manifest_field() { awk -F= -v k="$2" '$1==k{print $2; exit}' "$1"; }
 sha256_tool() {
   if command -v sha256sum >/dev/null 2>&1; then echo sha256sum
@@ -400,6 +424,7 @@ case $cmd in
       . "$DIR/update_transaction.sh"
       transaction_apply
       transaction_result
+      initialize_web_auth
     fi
     exit 0 ;;
   *)
