@@ -15,6 +15,7 @@ INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
+UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
 
 . "$SELFDIR/version_check.sh"
 
@@ -91,6 +92,22 @@ install_cron() {
   { [ -n "$current" ] && printf '%s\n' "$current"; echo "$cron_line"; } | crontab -
 }
 
+install_update_check_cron() {
+  # Ежедневная фоновая проверка обновлений (см. docs/superpowers/specs/
+  # 2026-09-15-managed-project-updates-design.md, "Веб-флоу") - отдельная
+  # от install_cron() cron-строка и отдельный бэкап-файл (cron-update.bak,
+  # не cron.bak), чтобы обе функции не затирали бэкап друг друга при
+  # последовательном вызове из main(). Время (5:17) - не критично, выбрано
+  # так, чтобы не совпадать с минутой "0" cron-строки speedtest2.sh.
+  cron_line="17 5 * * * $UPDATE_CHECK_SCRIPT check"
+  current=$(crontab -l 2>/dev/null || true)
+  if printf '%s\n' "$current" | grep -qF "$UPDATE_CHECK_SCRIPT"; then
+    return 0
+  fi
+  printf '%s\n' "$current" > "$TMPROOT/cron-update.bak"
+  { [ -n "$current" ] && printf '%s\n' "$current"; echo "$cron_line"; } | crontab -
+}
+
 atomic_install() {
   src=$1
   dst=$2
@@ -118,6 +135,8 @@ install_files() {
   chmod +x "$DIR/stats_cgi.sh"
   atomic_install "$SELFDIR/stats_run.sh" "$DIR/stats_run.sh" || return 1
   chmod +x "$DIR/stats_run.sh"
+  atomic_install "$SELFDIR/stats_update.sh" "$DIR/stats_update.sh" || return 1
+  chmod +x "$DIR/stats_update.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
   # веб-сервиса статистики - копируются в раздаваемый каталог сами,
   # write_stats_static() из speedtest2.sh; исполняемый бит не нужен.
@@ -302,7 +321,7 @@ main() {
   check_mihomo_process && check_versions || return 1
 
   [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
-  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
+  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
@@ -353,6 +372,7 @@ main() {
     return 1
   }
   install_cron
+  install_update_check_cron
 
   # Ставим python3 (если получится) ДО запуска веб-службы: без него
   # stats_httpd.py не запустится, а резервного сервера без пароля больше

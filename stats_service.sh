@@ -11,7 +11,7 @@
 # stats.html/stats.json - этим занимается speedtest2.sh (render_stats()).
 #
 # Переиспользует функции speedtest2.sh (say(), publish_file(),
-# write_stats_cgi(), write_stats_run(),
+# write_stats_cgi(), write_stats_run(), write_stats_update(),
 # write_stats_static(), cleanup_old_zash_stats(), start_stats_httpd_backend(),
 # stats_httpd_advertise_host()) тем же приёмом, что и stats_cgi.sh/stats_run.sh:
 # подключение с MST_LIB_ONLY=1, без запуска main(). Поэтому DIR должен
@@ -85,6 +85,7 @@ prepare() {
   fi
   write_stats_cgi
   write_stats_run
+  write_stats_update
   write_stats_static
   return 0
 }

@@ -62,3 +62,14 @@ th{color:var(--muted);font-weight:600}
 .input-err{border-color:#dc2626 !important}
 .auth-form{max-width:360px;margin:0 auto}
 .auth-form .submit{width:100%}
+
+/* Раздел "Обновления" (порция 5, /api/updates/*): бейдж на вкладке,
+   строки состояния файлов плана, блок структурного diff конфига. */
+.nav-badge{display:inline-block;min-width:8px;height:8px;margin-left:5px;border-radius:50%;background:#dc2626;vertical-align:middle}
+.file-state-current{color:var(--muted)}
+.file-state-new{color:#2a78d6}
+.file-state-missing{color:#dc2626}
+.file-state-modified{color:#dc2626}
+.file-state-changed{color:#dc2626}
+.file-state-removed{color:var(--muted)}
+.diff-block{max-height:320px;overflow:auto}

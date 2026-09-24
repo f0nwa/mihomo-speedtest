@@ -701,9 +701,192 @@
     });
   }
 
+  // ----- раздел "Обновления" (/api/updates/*) -----
+
+  var FILE_STATE_LABEL = {
+    current: 'актуален', new: 'доступна новая версия', missing: 'отсутствует',
+    modified: 'локально изменён', changed: 'отличается', removed: 'больше не используется'
+  };
+
+  function updatesBadgeEl() { return document.getElementById('updatesBadge'); }
+
+  function refreshUpdatesBadge() {
+    fetchJson('/api/updates/status').then(function (data) {
+      var badge = updatesBadgeEl();
+      if (!badge) { return; }
+      var lc = data && data.last_check;
+      var available = !!(lc && lc.ok && lc.plan && lc.plan.files &&
+        lc.plan.files.some(function (f) { return f.state === 'new' || f.state === 'modified' || f.state === 'changed'; }));
+      badge.hidden = !available;
+    })['catch'](function () { /* бейдж - необязательная подсказка, сетевая ошибка не должна ломать страницу */ });
+  }
+
+  function buildFilesTable(files) {
+    var table = el('table');
+    var tbody = el('tbody');
+    (files || []).forEach(function (f) {
+      var tr = el('tr');
+      tr.appendChild(el('td', null, f.dest));
+      tr.appendChild(el('td', 'file-state-' + f.state, FILE_STATE_LABEL[f.state] || f.state));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  var UPDATE_JOB_POLL_MS = 2000;
+  var updateJobPollTimer = null;
+
+  function stopUpdateJobPolling() {
+    if (updateJobPollTimer) { clearInterval(updateJobPollTimer); updateJobPollTimer = null; }
+  }
+
+  function startUpdateJobPolling(onUpdate) {
+    stopUpdateJobPolling();
+    function tick() {
+      fetchJson('/api/updates/status').then(function (data) {
+        onUpdate(data && data.job ? data.job : null);
+      })['catch'](function () { /* временная заминка - опрос продолжится следующим тиком */ });
+    }
+    tick();
+    updateJobPollTimer = setInterval(tick, UPDATE_JOB_POLL_MS);
+  }
+
+  function buildUpdatesConfirmScreen(job, container) {
+    var c = card('Подтверждение обновления');
+    c.appendChild(el('p', 'hint', 'Компоненты: ' + (job.components || '(все)') + '.'));
+    c.appendChild(buildFilesTable(job.plan && job.plan.files));
+    var needsLocal = job.plan && job.plan.overwrite_required;
+    var needsConfig = job.config_diff !== null && job.plan && job.plan.config_migration && job.plan.config_migration.confirmation_required;
+    if (needsLocal) {
+      c.appendChild(el('p', 'msg-err', 'Есть локально изменённые файлы - они будут перезаписаны.'));
+    }
+    if (job.config_diff) {
+      c.appendChild(el('h2', null, 'Изменения config.yaml'));
+      var pre = el('pre', 'diff-block', JSON.stringify(job.config_diff, null, 2));
+      c.appendChild(pre);
+      if (needsConfig) {
+        c.appendChild(el('p', 'msg-err', 'Миграция конфига требует отдельного подтверждения.'));
+      }
+    }
+    var row = el('div', 'btn-row');
+    var confirmLocal = null, confirmConfig = null;
+    if (needsLocal) {
+      var lbl1 = el('label', 'row-checkbox');
+      confirmLocal = el('input'); confirmLocal.type = 'checkbox';
+      lbl1.appendChild(confirmLocal); lbl1.appendChild(document.createTextNode('Перезаписать локальные изменения'));
+      c.appendChild(lbl1);
+    }
+    if (needsConfig) {
+      var lbl2 = el('label', 'row-checkbox');
+      confirmConfig = el('input'); confirmConfig.type = 'checkbox';
+      lbl2.appendChild(confirmConfig); lbl2.appendChild(document.createTextNode('Подтверждаю миграцию config.yaml'));
+      c.appendChild(lbl2);
+    }
+    var applyBtn = el('button', 'submit', 'Применить обновление');
+    applyBtn.type = 'button';
+    var cancelBtn = el('button', 'submit secondary', 'Отмена');
+    cancelBtn.type = 'button';
+    row.appendChild(applyBtn); row.appendChild(cancelBtn);
+    c.appendChild(row);
+    applyBtn.addEventListener('click', function () {
+      if (needsLocal && !confirmLocal.checked) { showFormMessage(c, 'Подтвердите перезапись локальных изменений.', 'err'); return; }
+      if (needsConfig && !confirmConfig.checked) { showFormMessage(c, 'Подтвердите миграцию конфига.', 'err'); return; }
+      applyBtn.disabled = true; cancelBtn.disabled = true;
+      var body = new URLSearchParams();
+      body.set('plan_id', job.plan_id);
+      if (confirmLocal && confirmLocal.checked) { body.set('confirm_local', '1'); }
+      if (confirmConfig && confirmConfig.checked) { body.set('confirm_config', '1'); }
+      fetchJson('/api/updates/apply', { method: 'POST', body: body }).then(function (resp) {
+        if (!resp.started) { showFormMessage(c, 'Уже выполняется другая операция обновления.', 'err'); applyBtn.disabled = false; cancelBtn.disabled = false; return; }
+        renderUpdatesProgress('apply');
+      })['catch'](function (err) { showFormMessage(c, 'Не удалось запустить обновление: ' + err.message, 'err'); applyBtn.disabled = false; cancelBtn.disabled = false; });
+    });
+    cancelBtn.addEventListener('click', function () {
+      cancelBtn.disabled = true;
+      var body = new URLSearchParams(); body.set('plan_id', job.plan_id);
+      fetchJson('/api/updates/discard', { method: 'POST', body: body })['catch'](function () { /* discard - лучшее из возможного, план и так истечёт сам через 24ч */ })
+        .then(function () { renderUpdates(); });
+    });
+    container.appendChild(c);
+  }
+
+  function renderUpdatesProgress(action) {
+    clearApp();
+    var c = card(action === 'prepare' ? 'Подготовка обновления' : 'Применение обновления');
+    var status = el('p', 'hint', 'Выполняется...');
+    c.appendChild(status);
+    app.appendChild(c);
+    startUpdateJobPolling(function (job) {
+      if (!job || job.action !== action) { return; }
+      if (job.state === 'queued' || job.state === 'running') { return; }
+      stopUpdateJobPolling();
+      if (job.state === 'error') {
+        status.className = 'msg-err'; status.textContent = 'Ошибка: ' + (job.error || 'неизвестная ошибка');
+        return;
+      }
+      if (action === 'prepare') { renderUpdates(); return; }
+      status.className = 'msg-ok'; status.textContent = 'Обновление применено. Проверьте раздел ещё раз ("Проверить сейчас"), чтобы обновить список.';
+    });
+  }
+
+  function renderUpdates() {
+    stopProgressPolling();
+    stopUpdateJobPolling();
+    setLoading();
+    fetchJson('/api/updates/status').then(function (data) {
+      clearApp();
+      var lc = data.last_check;
+      var job = data.job;
+      if (job && (job.state === 'queued' || job.state === 'running')) {
+        renderUpdatesProgress(job.action);
+        return;
+      }
+      var summary = card('Проверка обновлений');
+      if (lc && lc.ok) {
+        summary.appendChild(el('p', 'hint', 'Последняя проверка: ' + lc.checked_at + '. Доступная версия релиза: ' + lc.plan.release_version + '.'));
+      } else if (lc) {
+        summary.appendChild(el('p', 'msg-err', 'Последняя проверка не удалась: ' + (lc.error || '')));
+      } else {
+        summary.appendChild(el('p', 'hint', 'Проверок ещё не было.'));
+      }
+      var checkBtn = el('button', 'submit', 'Проверить сейчас');
+      checkBtn.type = 'button';
+      checkBtn.addEventListener('click', function () {
+        checkBtn.disabled = true;
+        fetchJson('/api/updates/check', { method: 'POST' }).then(function () { renderUpdates(); refreshUpdatesBadge(); })
+          ['catch'](function (err) { showFormMessage(summary, 'Не удалось проверить: ' + err.message, 'err'); checkBtn.disabled = false; });
+      });
+      summary.appendChild(checkBtn);
+      app.appendChild(summary);
+      if (lc && lc.ok && lc.plan) {
+        var list = card('Изменившиеся компоненты');
+        list.appendChild(buildFilesTable(lc.plan.files));
+        var updateBtn = el('button', 'submit', 'Обновить');
+        updateBtn.type = 'button';
+        updateBtn.addEventListener('click', function () {
+          updateBtn.disabled = true;
+          fetchJson('/api/updates/prepare', { method: 'POST' }).then(function (resp) {
+            if (!resp.started) { showFormMessage(list, 'Уже выполняется другая операция обновления.', 'err'); updateBtn.disabled = false; return; }
+            renderUpdatesProgress('prepare');
+          })['catch'](function (err) { showFormMessage(list, 'Не удалось начать подготовку: ' + err.message, 'err'); updateBtn.disabled = false; });
+        });
+        list.appendChild(updateBtn);
+        app.appendChild(list);
+      }
+      if (job && job.state === 'done' && job.action === 'prepare' && job.plan) {
+        buildUpdatesConfirmScreen(job, app);
+      }
+    })['catch'](function (err) { showError('Не удалось загрузить раздел обновлений: ', err); });
+  }
+
   function render(path) {
     stopProgressPolling();
-    if (path === '/settings') { renderSettings(); } else { renderStats(); }
+    stopUpdateJobPolling();
+    if (path === '/updates') { renderUpdates(); }
+    else if (path === '/settings') { renderSettings(); }
+    else { renderStats(); }
+    if (path !== '/updates') { refreshUpdatesBadge(); }
   }
 
   function setAuthenticatedUi(authenticated) {
@@ -727,6 +910,7 @@
 
   function renderAuthForm(mode) {
     stopProgressPolling();
+    stopUpdateJobPolling();
     setAuthenticatedUi(false);
     clearApp();
     var c = card(mode === 'setup' ? 'Первичная настройка' : 'Вход');
@@ -781,6 +965,7 @@
 
   function renderUninitialized() {
     stopProgressPolling();
+    stopUpdateJobPolling();
     setAuthenticatedUi(false);
     clearApp();
     var c = card('Авторизация не настроена');

@@ -66,6 +66,17 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     Существующее поведение, не новое - фронтенд должен сам отличать JSON
     от HTML в ответе (Content-Type или неудачный JSON.parse), а не
     полагаться на код ответа.
+  - "/api/updates/check", "/api/updates/status", "/api/updates/prepare",
+    "/api/updates/apply", "/api/updates/discard" - внутренние алиасы на
+    один и тот же CGI-скрипт "cgi-bin/update" (копия stats_update.sh,
+    кладётся write_stats_update() в speedtest2.sh - раздел "Обновления"),
+    различаются только переменной окружения MST_UPDATE_ACTION
+    ("check"/"status"/"prepare"/"apply"/"discard" соответственно) - тем же
+    приёмом, что уже используется у "/api/settings" с API_JSON=1. Сам
+    stats_update.sh решает по MST_UPDATE_ACTION и REQUEST_METHOD, какую
+    команду update.sh вызвать (см. stats_update.sh и спеку раздела
+    "Веб-флоу") - здесь, в stats_httpd.py, только маршрутизация под общей
+    сессией/CSRF, без отдельной логики авторизации.
   - "/api/..." (всё остальное) - алиасов нет, отвечает JSON с кодом 501,
     а не 404, чтобы фронтенд мог отличить "эндпоинт ещё не существует" от
     обрыва сети или опечатки в пути.
@@ -153,6 +164,11 @@ API_ALIASES = {
     "api/settings": ("cgi-bin/config", {"API_JSON": "1"}),
     "api/stats": ("stats.json", {}),
     "api/progress": ("progress.json", {}),
+    "api/updates/check": ("cgi-bin/update", {"MST_UPDATE_ACTION": "check"}),
+    "api/updates/status": ("cgi-bin/update", {"MST_UPDATE_ACTION": "status"}),
+    "api/updates/prepare": ("cgi-bin/update", {"MST_UPDATE_ACTION": "prepare"}),
+    "api/updates/apply": ("cgi-bin/update", {"MST_UPDATE_ACTION": "apply"}),
+    "api/updates/discard": ("cgi-bin/update", {"MST_UPDATE_ACTION": "discard"}),
 }
 
 

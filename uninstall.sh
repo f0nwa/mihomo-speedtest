@@ -22,6 +22,8 @@ BIN=${BIN:-/opt/sbin/mihomo}
 API_MAIN=${API_MAIN:-127.0.0.1:9090}
 CONFIG=${CONFIG:-$DIR/config.yaml}
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
+UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
+STATS_UPDATE_RUNTIME_DIR=${STATS_UPDATE_RUNTIME_DIR:-/tmp/mihomo-speedtest-update}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
@@ -39,7 +41,7 @@ PURGE_DATA=${PURGE_DATA:-0}
 # Файлы самого спидтеста и веб-статистики - те же, что кладёт
 # install_files() в install.sh (см. соответствующий список там).
 CORE_FILES="speedtest2.sh prep.awk render_stats.awk stats_cgi.sh
-stats_run.sh stats_index.html stats_style.css stats_app.js stats_chart.js
+stats_run.sh stats_update.sh stats_index.html stats_style.css stats_app.js stats_chart.js
 stats_httpd.py stats_auth.py stats_auth.sh node_stats_update.awk sub_convert.awk render_progress.awk"
 
 atomic_install() {
@@ -108,6 +110,16 @@ remove_cron() {
   echo "uninstall.sh: cron-строка для $INSTALLED_SCRIPT удалена" >&2
 }
 
+remove_update_cron() {
+  current=$(crontab -l 2>/dev/null || true)
+  if [ -z "$current" ] || ! printf '%s\n' "$current" | grep -qF "$UPDATE_CHECK_SCRIPT"; then
+    return 0
+  fi
+  filtered=$(printf '%s\n' "$current" | grep -vF "$UPDATE_CHECK_SCRIPT" || true)
+  printf '%s\n' "$filtered" | crontab -
+  echo "uninstall.sh: cron-строка для $UPDATE_CHECK_SCRIPT удалена" >&2
+}
+
 revert_config() {
   [ "$SKIP_CONFIG_REVERT" = 1 ] && return 0
   [ -f "$CONFIG" ] || return 0
@@ -160,6 +172,7 @@ remove_files() {
   rm -f "$INITD_SCRIPT"
   rm -rf "$STATS_SERVICE_RUNTIME_DIR"
   rm -rf "$STATS_AUTH_RUNTIME_DIR"
+  rm -rf "$STATS_UPDATE_RUNTIME_DIR"
   rm -rf "$DIR/__pycache__"
 }
 
@@ -175,6 +188,7 @@ main() {
   confirm || return 1
   stop_service
   remove_cron
+  remove_update_cron
   revert_config
   remove_files
   purge_data

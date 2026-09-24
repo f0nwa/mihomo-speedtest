@@ -82,6 +82,8 @@ STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исход�
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
 STATS_RUN_SOURCE=${STATS_RUN_SOURCE:-$DIR/stats_run.sh}              # исходник CGI-скрипта кнопки force-прогона, ставится install.sh
 STATS_RUN_SCRIPT=${STATS_RUN_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/run}    # его же копия внутри раздаваемого каталога, пишется сама
+STATS_UPDATE_SOURCE=${STATS_UPDATE_SOURCE:-$DIR/stats_update.sh}              # исходник CGI-обёртки над update.sh (раздел "Обновления"), ставится install.sh
+STATS_UPDATE_SCRIPT=${STATS_UPDATE_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/update}    # его же копия внутри раздаваемого каталога, пишется сама
 STATS_INDEX_SOURCE=${STATS_INDEX_SOURCE:-$DIR/stats_index.html}     # исходник SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md), ставится install.sh
 STATS_INDEX_HTML=${STATS_INDEX_HTML:-$STATS_HTTP_DIR/index.html}    # его же копия внутри раздаваемого каталога, пишется сама
 STATS_STYLE_SOURCE=${STATS_STYLE_SOURCE:-$DIR/stats_style.css}      # исходник общего CSS для SPA-shell, ставится install.sh
@@ -429,6 +431,22 @@ write_stats_run() {
   chmod +x "$STATS_RUN_SCRIPT" 2>/dev/null || true
 }
 
+write_stats_update() {
+  # Копирует CGI-обёртку раздела "Обновления" ($STATS_UPDATE_SOURCE, ставится
+  # install.sh рядом со speedtest2.sh) в раздаваемый каталог ($STATS_UPDATE_SCRIPT) -
+  # тот же приём, что write_stats_run(). Каталог $STATS_HTTP_DIR/cgi-bin уже
+  # создан вызывающим ensure_stats_httpd(), отдельная проверка не нужна.
+  if [ ! -f "$STATS_UPDATE_SOURCE" ]; then
+    say "WARN: $STATS_UPDATE_SOURCE не найден, раздел обновлений недоступен (переустановите install.sh)"
+    return 0
+  fi
+  if ! publish_file "$STATS_UPDATE_SOURCE" "$STATS_UPDATE_SCRIPT"; then
+    say "WARN: не удалось записать $STATS_UPDATE_SCRIPT, раздел обновлений не обновлён"
+    return 0
+  fi
+  chmod +x "$STATS_UPDATE_SCRIPT" 2>/dev/null || true
+}
+
 write_stats_static() {
   # Копирует статические файлы SPA-shell ($STATS_INDEX_SOURCE/$STATS_STYLE_SOURCE/
   # $STATS_APP_SOURCE/$STATS_CHARTJS_SOURCE, ставятся install.sh рядом со
@@ -540,6 +558,7 @@ ensure_stats_httpd() {
 
   write_stats_cgi
   write_stats_run
+  write_stats_update
   write_stats_static
 
   want="$STATS_HTTP_BIND:$STATS_HTTP_PORT"
