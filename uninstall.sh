@@ -34,6 +34,10 @@ STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 # 1 - не трогать config.yaml, даже если рядом есть бэкап setup.sh.
 SKIP_CONFIG_REVERT=${SKIP_CONFIG_REVERT:-0}
+# 1 - откатывать config.yaml не к самому свежему бэкапу *.bak, а к самому
+# свежему из тех бэкапов, где ещё нет провайдера "fast" (группы, которую
+# ведёт speedtest2.sh - см. has_fast_group()/find_backup_before_fast()).
+REVERT_BEFORE_FAST=${REVERT_BEFORE_FAST:-0}
 # 1 - дополнительно удалить журналы, историю замеров и веб-статику
 # статистики (по умолчанию они остаются на диске).
 PURGE_DATA=${PURGE_DATA:-0}
@@ -73,6 +77,18 @@ confirm() {
     echo "uninstall.sh: PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
   fi
   printf 'uninstall.sh: продолжить? [y/N] ' >&2
+  # Под "curl ... | sh" стандартный ввод занят телом самого uninstall.sh -
+  # без переоткрытия от терминала read -r ниже сразу получит EOF, и
+  # деинсталляция молча отменится (безопасный отказ, но не то, чего хочет
+  # человек за интерактивным терминалом). "exec < /dev/tty" сам по себе
+  # фатален для sh при неудаче (нет управляющего терминала - обычное дело
+  # в автоматизации/тестах), поэтому сначала пробуем открыть /dev/tty в
+  # отдельном подшелле: его неудача убивает только подшелл, uninstall.sh
+  # просто продолжает читать исходный stdin (см. тот же приём в install.sh
+  # перед хэндовером в setup.sh).
+  if [ ! -t 0 ] && (exec < /dev/tty) 2>/dev/null; then
+    exec < /dev/tty
+  fi
   read -r ans || ans=""
   case "$ans" in
     [Yy]*) return 0 ;;
@@ -120,18 +136,45 @@ remove_update_cron() {
   echo "uninstall.sh: cron-строка для $UPDATE_CHECK_SCRIPT удалена" >&2
 }
 
+# Отпечаток группы "fast" (proxy-providers -> fast -> path: ./fast.yaml,
+# см. config.example.yaml) - именно этот провайдер speedtest2.sh ведёт
+# автоматически, а не любое упоминание слова "fast" (например, в
+# fastly@domain/fastly@ipcidr среди правил).
+has_fast_group() {
+  grep -qE '^[[:space:]]*path:[[:space:]]*\./fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
+}
+
+# Среди $CONFIG.*.bak (тот же порядок перебора, что и обычный поиск
+# "последнего" ниже) - самый свежий бэкап, где группы fast ещё нет.
+find_backup_before_fast() {
+  found=""
+  for b in "$CONFIG".*.bak; do
+    [ -f "$b" ] || continue
+    has_fast_group "$b" || found=$b
+  done
+  printf '%s\n' "$found"
+}
+
 revert_config() {
   [ "$SKIP_CONFIG_REVERT" = 1 ] && return 0
   [ -f "$CONFIG" ] || return 0
 
-  latest=""
-  for b in "$CONFIG".*.bak; do
-    [ -f "$b" ] || continue
-    latest=$b
-  done
-  if [ -z "$latest" ]; then
-    echo "uninstall.sh: рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
-    return 0
+  if [ "$REVERT_BEFORE_FAST" = 1 ]; then
+    latest=$(find_backup_before_fast)
+    if [ -z "$latest" ]; then
+      echo "uninstall.sh: REVERT_BEFORE_FAST=1, но среди бэкапов $CONFIG.*.bak нет ни одного без группы fast - config.yaml оставлен как есть" >&2
+      return 0
+    fi
+  else
+    latest=""
+    for b in "$CONFIG".*.bak; do
+      [ -f "$b" ] || continue
+      latest=$b
+    done
+    if [ -z "$latest" ]; then
+      echo "uninstall.sh: рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
+      return 0
+    fi
   fi
 
   echo "uninstall.sh: найден бэкап $latest, проверяю mihomo -t" >&2

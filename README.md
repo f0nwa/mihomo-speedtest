@@ -103,6 +103,11 @@ curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install
 Чтобы полностью убрать надстройку с роутера (веб-службу статистики,
 cron-задачу и, если нужно, откат `config.yaml`), используйте
 `uninstall.sh` - подробности в [руководстве](docs/guide.md#деинсталляция).
+Как и install.sh, он самодостаточен и ставится одной командой:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/uninstall.sh | sh
+```
 
 ## Документация
 
