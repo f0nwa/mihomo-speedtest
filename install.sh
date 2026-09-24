@@ -9,13 +9,200 @@ BIN=${BIN:-/opt/sbin/mihomo}
 API_MAIN=${API_MAIN:-127.0.0.1:9090}
 SPEED_URL=${SPEED_URL:-"https://speed.cloudflare.com/__down?bytes=10485760"}
 TMPROOT=${TMPROOT:-/tmp}
-SELFDIR=${SELFDIR:-.}
+# По умолчанию - $DIR, а не текущий каталог: при "curl ... | sh" (см. ниже)
+# рядом со скриптом физически ничего нет, а единственный осмысленный
+# каталог, где могут (или должны появиться) остальные файлы проекта - это
+# DIR, целевой каталог установки. При обычном сценарии (ручной перенос
+# файлов, "cd /opt/etc/mihomo && sh install.sh") DIR и "." совпадают, так
+# что поведение не меняется.
+SELFDIR=${SELFDIR:-$DIR}
 CONFIG=${CONFIG:-$DIR/config.yaml}
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
+
+# --- Bootstrap для однострочной установки ---------------------------------
+# Позволяет ставить проект командой
+#   curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install.sh | sh
+# (см. README.md/docs/guide.md, "Установка с нуля"). raw.githubusercontent
+# отдаёт ТОЛЬКО сам install.sh - остального набора файлов проекта рядом со
+# скриптом при таком запуске нет. Блок ниже срабатывает именно в этом
+# случае (и в любом другом, где рядом с install.sh не оказалось
+# version_check.sh - например, незавершённый перенос файлов) и скачивает
+# остальные файлы с уже опубликованного релиза на GitHub, тем же способом,
+# каким их получает update.sh при последующих обновлениях: манифест
+# релиза (manifest.txt) и сам контент файлов - через закреплённый тег
+# релиза (PINNED_BASE = .../releases/download/<RELEASE_TAG>/<файл>), с
+# проверкой размера и SHA256 каждого файла по манифесту. Отдельного
+# raw.githubusercontent-канала для содержимого файлов нет: это сознательный
+# выбор в пользу переиспользования уже проверенной инфраструктуры
+# релизов/манифеста, а не второй параллельный механизм раздачи (см.
+# update.sh:bootstrap_header/pinned_base/bootstrap_prepare - тот же
+# протокол, только там он берёт из манифеста строки FILE только
+# компонента updater, а здесь - все компоненты, т.к. ставится весь проект).
+#
+# Обычный сценарий (файлы перенесены на роутер вручную, см. README) блок
+# не трогает: version_check.sh уже лежит рядом, проверка ниже сразу
+# проходит, никакой сети. Также не запускается при подключении install.sh
+# как библиотеки (INSTALL_LIB_ONLY=1, см. tests/test_install.sh) - сорсинг
+# файла не должен иметь сетевых побочных эффектов.
+
+bootstrap_manifest_field() { awk -F= -v k="$2" '$1==k{print $2; exit}' "$1"; }
+
+bootstrap_sha256_tool() {
+  if command -v sha256sum >/dev/null 2>&1; then echo sha256sum
+  elif command -v openssl >/dev/null 2>&1; then echo openssl
+  elif command -v busybox >/dev/null 2>&1 && printf '' | busybox sha256sum >/dev/null 2>&1; then echo busybox
+  else return 1; fi
+}
+
+bootstrap_sha256_of() {
+  case $BOOTSTRAP_SHA_TOOL in
+    sha256sum) hash_output=$(sha256sum "$1") || return 1 ;;
+    openssl) hash_output=$(openssl dgst -sha256 "$1") || return 1 ;;
+    busybox) hash_output=$(busybox sha256sum "$1") || return 1 ;;
+  esac
+  hash_value=$(printf '%s
+' "$hash_output" | awk '{if ($1 ~ /^[0-9a-f]{64}$/) print $1; else if ($NF ~ /^[0-9a-f]{64}$/) print $NF}')
+  [ "${#hash_value}" = 64 ] || return 1
+  printf '%s
+' "$hash_value"
+}
+
+bootstrap_http_get() {
+  if [ -n "${UPDATE_HTTP_CMD:-}" ]; then $UPDATE_HTTP_CMD "$1"
+  elif command -v curl >/dev/null 2>&1; then
+    case $1 in
+      https://*) curl -fsSL --proto '=https' --proto-redir '=https' --max-time "${UPDATE_HTTP_TIMEOUT:-15}" --max-filesize "$2" "$1" 2>/dev/null ;;
+      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 --max-time "${UPDATE_HTTP_TIMEOUT:-15}" --max-filesize "$2" "$1" 2>/dev/null ;;
+      *) return 1 ;;
+    esac
+  else
+    echo "install.sh: для установки нужен curl с поддержкой HTTPS" >&2
+    return 1
+  fi
+}
+
+bootstrap_download_to() {
+  write_limit=$3
+  [ "$write_limit" -ge 262144 ] || write_limit=262144
+  if ! (ulimit -f "$(( (write_limit + 511) / 512 ))"; bootstrap_http_get "$1" "$3") > "$2"; then
+    echo "install.sh: не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
+    return 1
+  fi
+  download_size=$(wc -c < "$2" | tr -d ' ')
+  [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || {
+    echo "install.sh: пустой файл или превышен лимит загрузки: $1" >&2
+    return 1
+  }
+}
+
+bootstrap_check_download() {
+  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "install.sh: неверный размер файла релиза: $1" >&2; return 1; }
+  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "install.sh: неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
+}
+
+bootstrap_awk_syntax() {
+  printf 'BEGIN { exit 0 }\nEND { exit 0 }\n' > "$BOOTSTRAP_WORK/awk-guard"
+  awk -f "$BOOTSTRAP_WORK/awk-guard" -f "$1" /dev/null >/dev/null 2>&1 || {
+    echo "install.sh: файл не прошёл проверку синтаксиса AWK: $1" >&2
+    return 1
+  }
+}
+
+bootstrap_header() {
+  # Тот же протокол разбора, что update.sh:bootstrap_header, но берёт ВСЕ
+  # строки FILE (все компоненты), а не только updater - первичная
+  # установка ставит весь проект, а не только обновлятор.
+  awk -F'|' '
+    function bad(){exit 1}
+    /^[A-Z_]+=/ {
+      if (split($0,h,"=") != 2 || seen[h[1]]++) bad()
+      if (h[1]=="FORMAT_VERSION") fmt=h[2]
+      if (h[1]=="RELEASE_TAG") tag=h[2]
+      if (h[1] ~ /^(RELEASE_VERSION|MIN_UPDATER_VERSION|CONFIG_SCHEMA_VERSION)$/ && h[2] !~ /^[0-9]+$/) bad()
+      next
+    }
+    $1=="FILE" {
+      if (NF!=8 || used[$3]++) bad()
+      if ($3 !~ /^[A-Za-z0-9_.-]+$/) bad()
+      if ($5 !~ /^[0-9]+$/ || $5+0<1 || $5+0>10485760 || $6 !~ /^[0-9a-f]{64}$/) bad()
+      if ($7 !~ /^[0-7]{3,4}$/) bad()
+      if ($8 !~ /^(sh|awk|py|none)$/) bad()
+      row[++n]=$0
+    }
+    END {
+      if (fmt!="2" || tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || tag ~ /\.\./ || n<1 ||
+          !seen["RELEASE_VERSION"] || !seen["MIN_UPDATER_VERSION"] || !seen["CONFIG_SCHEMA_VERSION"]) exit 1
+      for (i=1;i<=n;i++) print row[i]
+    }
+  ' "$BOOTSTRAP_MANIFEST" > "$BOOTSTRAP_WORK/files" || {
+    echo "install.sh: манифест релиза не прошёл проверку - установка остановлена" >&2
+    return 1
+  }
+}
+
+bootstrap_pinned_base() {
+  case $UPDATE_RELEASE_BASE in
+    */releases/latest/download)
+      BOOTSTRAP_PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG) ;;
+    *) echo "install.sh: для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
+  esac
+}
+
+bootstrap_selfinstall() {
+  BOOTSTRAP_SHA_TOOL=$(bootstrap_sha256_tool) || {
+    echo "install.sh: не найден инструмент SHA256 (sha256sum/openssl/busybox) - установка остановлена" >&2
+    return 1
+  }
+  bootstrap_tmproot=${TMPROOT:-/tmp}
+  BOOTSTRAP_WORK=$(mktemp -d "$bootstrap_tmproot/mst-install-bootstrap.XXXXXX") || return 1
+  BOOTSTRAP_MANIFEST=$BOOTSTRAP_WORK/manifest.txt
+
+  echo "install.sh: рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
+
+  bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+
+  mkdir -p "$DIR" || { echo "install.sh: не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+
+  # Проход 1: скачать и проверить всё во временном каталоге. Ничего не
+  # пишем в DIR, пока не убедимся, что весь набор цел - иначе отказ на
+  # середине списка оставил бы в DIR наполовину установленный проект.
+  while IFS='|' read -r kind cid src dest bytes sum mode check; do
+    bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    case $check in
+      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "install.sh: неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
+      awk) bootstrap_awk_syntax "$BOOTSTRAP_WORK/$src" || { rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
+    esac
+  done < "$BOOTSTRAP_WORK/files"
+
+  # Проход 2: весь набор проверен - переносим в DIR.
+  while IFS='|' read -r kind cid src dest bytes sum mode check; do
+    mv "$BOOTSTRAP_WORK/$src" "$DIR/$src" || { echo "install.sh: не удалось записать $DIR/$src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    chmod "$mode" "$DIR/$src" || { echo "install.sh: не удалось задать режим $DIR/$src" >&2; return 1; }
+  done < "$BOOTSTRAP_WORK/files"
+
+  # Тег - хвост BOOTSTRAP_PINNED_BASE (.../download/<RELEASE_TAG>), а не
+  # повторное чтение манифеста - тот уже удалён следующей строкой ниже.
+  bootstrap_tag=${BOOTSTRAP_PINNED_BASE##*/}
+  rm -rf "$BOOTSTRAP_WORK"
+  echo "install.sh: файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
+  SELFDIR=$DIR
+}
+
+if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && [ ! -f "$SELFDIR/version_check.sh" ]; then
+  UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
+  UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
+  bootstrap_selfinstall || {
+    echo "install.sh: автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
+    exit 1
+  }
+fi
 
 . "$SELFDIR/version_check.sh"
 
@@ -320,7 +507,32 @@ initialize_web_auth() {
 main() {
   check_mihomo_process && check_versions || return 1
 
-  [ -f "$CONFIG" ] || { echo "install.sh: $CONFIG не найден" >&2; return 1; }
+  if [ ! -f "$CONFIG" ]; then
+    # Новый роутер: config.yaml ещё нет. Вместо отказа передаём управление
+    # мастеру настройки (setup.sh, который сам в конце вызывает install.sh
+    # ещё раз - см. setup.sh) - это второй из двух сценариев однострочной
+    # установки (см. bootstrap-блок в начале файла): "конфиг уже настроен"
+    # обрабатывается штатным продолжением main() ниже, "конфига нет" - тут.
+    [ -f "$SELFDIR/setup.sh" ] || { echo "install.sh: $CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки" >&2; return 1; }
+    echo "install.sh: $CONFIG не найден - похоже, это установка на новом роутере. Запускаю мастер настройки (setup.sh)" >&2
+    # Под "curl ... | sh" стандартный ввод занят телом самого install.sh -
+    # без переоткрытия от терминала интерактивные read -r в setup.sh сразу
+    # получат EOF вместо ответов пользователя. Если stdin уже терминал
+    # (обычный "sh install.sh" после ручного переноса файлов) - трогать
+    # не нужно; если терминала нет вовсе - оставляем как есть, setup.sh
+    # сам корректно откажет на первом read.
+    # "exec < /dev/tty" сам по себе фатален для sh при неудаче (нет
+    # управляющего терминала - это нормально для не-интерактивных
+    # запусков), даже с последующим "|| true" - POSIX требует, чтобы shell
+    # завершился при ошибке редиректа у голого exec без команды. Поэтому
+    # сначала пробуем открыть /dev/tty в отдельном подшелле: его неудача
+    # убивает только подшелл, а не install.sh.
+    if [ ! -t 0 ] && (exec < /dev/tty) 2>/dev/null; then
+      exec < /dev/tty
+    fi
+    export SELFDIR DIR CONFIG
+    exec sh "$SELFDIR/setup.sh"
+  fi
   for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
