@@ -60,13 +60,19 @@ REVERT_BEFORE_FAST=${REVERT_BEFORE_FAST:-0}
 PURGE_DATA=${PURGE_DATA:-0}
 
 # Полный набор файлов проекта (все 5 компонентов из release/components.txt) -
-# запасной список на случай, если $INSTALLED_MANIFEST_PATH не найден
-# (установка до этого изменения, ни разу не обновлялись через update.sh).
-# Не включает $STATS_SERVICE_DEST/$INITD_SCRIPT - у них свои переменные с
-# возможным переопределением пути, удаляются отдельно в remove_project_files().
+# всегда объединяется с $INSTALLED_MANIFEST_PATH в project_files_to_remove()
+# (не запасной вариант "если манифеста нет" - манифест может быть неполным,
+# см. комментарий там). Не включает $STATS_SERVICE_DEST/$INITD_SCRIPT - у
+# них свои переменные с возможным переопределением пути, удаляются отдельно
+# в remove_project_files(). Включает stats_init.sh как файл ПОД $DIR - его
+# манифестный dest (release/components.txt) - $INITD_SCRIPT, а не $DIR, так
+# что из манифеста путь $DIR/stats_init.sh не появится никогда: это чисто
+# промежуточный артефакт bootstrap (докачивается в $DIR/$SELFDIR, оттуда уже
+# install_files() копирует его в $INITD_SCRIPT) - без явного перечисления
+# здесь оставался бы на роутере вечно (найдено при реальном тесте).
 FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
 render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
-stats_index.html stats_style.css stats_app.js stats_chart.js render_progress.awk
+stats_index.html stats_style.css stats_app.js stats_chart.js render_progress.awk stats_init.sh
 uninstall.sh VERSIONS install.sh version_check.sh
 migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml
 update_transaction.sh update_prepare.sh update.sh update_plan.awk"
@@ -284,7 +290,11 @@ remove_project_files() {
 
 purge_data() {
   [ "$PURGE_DATA" = 1 ] || return 0
-  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv"
+  # fast.yaml/speedtest_last.txt - тоже результат работы speedtest2.sh (см.
+  # OUT/LAST в его шапке), не только журналы - раньше не удалялись, найдено
+  # при реальном тесте полного сноса (после revert_config() config.yaml уже
+  # не ссылается на fast.yaml, но сам файл оставался).
+  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$DIR/fast.yaml" "$DIR/speedtest_last.txt"
   rm -rf "$STATS_HTTP_DIR"
   rm -rf "$DIR/.stats-auth"
   echo "uninstall.sh: PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2
