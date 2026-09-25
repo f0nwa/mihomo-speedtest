@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 COMPONENTS=${COMPONENTS:-$ROOT/release/components.txt}
-PLAN_AWK=$ROOT/update_plan.awk
+PLAN_AWK=$ROOT/updater/update_plan.awk
 
 usage() {
   echo "Использование: $0 <release_version> <min_updater_version> <config_schema_version> [release_tag]" >&2
@@ -76,7 +76,8 @@ trap 'rm -f "$OUT"' EXIT INT TERM
         [ -f "$src" ] || { echo "components.txt: файл не найден: $src" >&2; exit 1; }
         sz=$(size_of "$src")
         sum=$(sha256_of "$src") || exit 1
-        printf 'FILE|%s|%s|%s|%s|%s|%s|%s\n' "$a" "$b" "$c" "$sz" "$sum" "$d" "$e"
+        b_base=${b##*/}
+        printf 'FILE|%s|%s|%s|%s|%s|%s|%s\n' "$a" "$b_base" "$c" "$sz" "$sum" "$d" "$e"
         ;;
       *)
         echo "components.txt: нераспознанный тип строки: $rtype" >&2

@@ -19,44 +19,44 @@ NOTE|config-tools|Новый шаблон и инструменты; рабоч�
 
 DEPENDS|web|speedtest-runtime
 
-FILE|updater|update_transaction.sh|/opt/etc/mihomo/update_transaction.sh|0755|sh
-FILE|updater|update_prepare.sh|/opt/etc/mihomo/update_prepare.sh|0755|sh
-FILE|updater|update.sh|/opt/etc/mihomo/update.sh|0755|sh
-FILE|updater|update_plan.awk|/opt/etc/mihomo/update_plan.awk|0644|awk
+FILE|updater|updater/update_transaction.sh|/opt/etc/mihomo/update_transaction.sh|0755|sh
+FILE|updater|updater/update_prepare.sh|/opt/etc/mihomo/update_prepare.sh|0755|sh
+FILE|updater|updater/update.sh|/opt/etc/mihomo/update.sh|0755|sh
+FILE|updater|updater/update_plan.awk|/opt/etc/mihomo/update_plan.awk|0644|awk
 
-FILE|speedtest-runtime|speedtest2.sh|/opt/etc/mihomo/speedtest2.sh|0755|sh
-FILE|speedtest-runtime|prep.awk|/opt/etc/mihomo/prep.awk|0644|awk
-FILE|speedtest-runtime|providers.awk|/opt/etc/mihomo/providers.awk|0644|awk
-FILE|speedtest-runtime|node_stats_update.awk|/opt/etc/mihomo/node_stats_update.awk|0644|awk
-FILE|speedtest-runtime|sub_convert.awk|/opt/etc/mihomo/sub_convert.awk|0644|awk
+FILE|speedtest-runtime|speedtest-runtime/speedtest2.sh|/opt/etc/mihomo/speedtest2.sh|0755|sh
+FILE|speedtest-runtime|speedtest-runtime/prep.awk|/opt/etc/mihomo/prep.awk|0644|awk
+FILE|speedtest-runtime|speedtest-runtime/providers.awk|/opt/etc/mihomo/providers.awk|0644|awk
+FILE|speedtest-runtime|speedtest-runtime/node_stats_update.awk|/opt/etc/mihomo/node_stats_update.awk|0644|awk
+FILE|speedtest-runtime|speedtest-runtime/sub_convert.awk|/opt/etc/mihomo/sub_convert.awk|0644|awk
 
-FILE|web|render_stats.awk|/opt/etc/mihomo/render_stats.awk|0644|awk
-FILE|web|stats_cgi.sh|/opt/etc/mihomo/stats_cgi.sh|0755|sh
-FILE|web|stats_run.sh|/opt/etc/mihomo/stats_run.sh|0755|sh
-FILE|web|stats_update.sh|/opt/etc/mihomo/stats_update.sh|0755|sh
-FILE|web|stats_httpd.py|/opt/etc/mihomo/stats_httpd.py|0644|py
-FILE|web|stats_auth.py|/opt/etc/mihomo/stats_auth.py|0644|py
-FILE|web|stats_auth.sh|/opt/etc/mihomo/stats_auth.sh|0755|sh
-FILE|web|stats_index.html|/opt/etc/mihomo/stats_index.html|0644|none
-FILE|web|stats_style.css|/opt/etc/mihomo/stats_style.css|0644|none
-FILE|web|stats_app.js|/opt/etc/mihomo/stats_app.js|0644|none
-FILE|web|stats_chart.js|/opt/etc/mihomo/stats_chart.js|0644|none
-FILE|web|render_progress.awk|/opt/etc/mihomo/render_progress.awk|0644|awk
-FILE|web|stats_service.sh|/opt/etc/mihomo/stats_service.sh|0755|sh
-FILE|web|stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh
+FILE|web|web/render_stats.awk|/opt/etc/mihomo/render_stats.awk|0644|awk
+FILE|web|web/stats_cgi.sh|/opt/etc/mihomo/stats_cgi.sh|0755|sh
+FILE|web|web/stats_run.sh|/opt/etc/mihomo/stats_run.sh|0755|sh
+FILE|web|web/stats_update.sh|/opt/etc/mihomo/stats_update.sh|0755|sh
+FILE|web|web/stats_httpd.py|/opt/etc/mihomo/stats_httpd.py|0644|py
+FILE|web|web/stats_auth.py|/opt/etc/mihomo/stats_auth.py|0644|py
+FILE|web|web/stats_auth.sh|/opt/etc/mihomo/stats_auth.sh|0755|sh
+FILE|web|web/stats_index.html|/opt/etc/mihomo/stats_index.html|0644|none
+FILE|web|web/stats_style.css|/opt/etc/mihomo/stats_style.css|0644|none
+FILE|web|web/stats_app.js|/opt/etc/mihomo/stats_app.js|0644|none
+FILE|web|web/stats_chart.js|/opt/etc/mihomo/stats_chart.js|0644|none
+FILE|web|web/render_progress.awk|/opt/etc/mihomo/render_progress.awk|0644|awk
+FILE|web|web/stats_service.sh|/opt/etc/mihomo/stats_service.sh|0755|sh
+FILE|web|web/stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh
 
 FILE|installer|uninstall.sh|/opt/etc/mihomo/uninstall.sh|0755|sh
-FILE|installer|VERSIONS|/opt/etc/mihomo/VERSIONS|0644|none
+FILE|installer|installer/VERSIONS|/opt/etc/mihomo/VERSIONS|0644|none
 FILE|installer|install.sh|/opt/etc/mihomo/install.sh|0755|sh
-FILE|installer|version_check.sh|/opt/etc/mihomo/version_check.sh|0755|sh
+FILE|installer|installer/version_check.sh|/opt/etc/mihomo/version_check.sh|0755|sh
 
-FILE|config-tools|migrate_config.sh|/opt/etc/mihomo/migrate_config.sh|0755|sh
-FILE|config-tools|migrate_config.awk|/opt/etc/mihomo/migrate_config.awk|0644|awk
-FILE|config-tools|config_diff.awk|/opt/etc/mihomo/config_diff.awk|0644|awk
-FILE|config-tools|setup.sh|/opt/etc/mihomo/setup.sh|0755|sh
-FILE|config-tools|detect_ua.sh|/opt/etc/mihomo/detect_ua.sh|0755|sh
-FILE|config-tools|render_config.awk|/opt/etc/mihomo/render_config.awk|0644|awk
-FILE|config-tools|existing_config.awk|/opt/etc/mihomo/existing_config.awk|0644|awk
-FILE|config-tools|config.example.yaml|/opt/etc/mihomo/config.example.yaml|0644|none
+FILE|config-tools|config-tools/migrate_config.sh|/opt/etc/mihomo/migrate_config.sh|0755|sh
+FILE|config-tools|config-tools/migrate_config.awk|/opt/etc/mihomo/migrate_config.awk|0644|awk
+FILE|config-tools|config-tools/config_diff.awk|/opt/etc/mihomo/config_diff.awk|0644|awk
+FILE|config-tools|config-tools/setup.sh|/opt/etc/mihomo/setup.sh|0755|sh
+FILE|config-tools|config-tools/detect_ua.sh|/opt/etc/mihomo/detect_ua.sh|0755|sh
+FILE|config-tools|config-tools/render_config.awk|/opt/etc/mihomo/render_config.awk|0644|awk
+FILE|config-tools|config-tools/existing_config.awk|/opt/etc/mihomo/existing_config.awk|0644|awk
+FILE|config-tools|config-tools/config.example.yaml|/opt/etc/mihomo/config.example.yaml|0644|none
 
 ACTION|web|restart-web

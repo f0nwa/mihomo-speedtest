@@ -625,17 +625,17 @@ write_stats_static()/install.sh будут смотреть на старую в
 вовсе ничего не найдут):
 
 ```sh
-scp -O -P <порт SSH, если не 22> install.sh speedtest2.sh prep.awk \
-    providers.awk render_stats.awk stats_cgi.sh stats_run.sh \
-    stats_httpd.py stats_index.html stats_style.css stats_app.js \
-    stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk \
-    stats_service.sh \
+scp -O -P <порт SSH, если не 22> install.sh speedtest-runtime/speedtest2.sh speedtest-runtime/prep.awk \
+    speedtest-runtime/providers.awk web/render_stats.awk web/stats_cgi.sh web/stats_run.sh \
+    web/stats_httpd.py web/stats_index.html web/stats_style.css web/stats_app.js \
+    web/stats_chart.js speedtest-runtime/node_stats_update.awk speedtest-runtime/sub_convert.awk web/render_progress.awk \
+    web/stats_service.sh \
     root@<IP роутера>:/opt/etc/mihomo/
 
 # stats_init.sh (шаблон init-скрипта независимой службы, см. "Независимая
 # служба веб-интерфейса статистики" выше) ставится не в /opt/etc/mihomo,
 # а прямо в каталог автозапуска Entware - если менялся именно он:
-scp -O -P <порт SSH, если не 22> stats_init.sh \
+scp -O -P <порт SSH, если не 22> web/stats_init.sh \
     root@<IP роутера>:/opt/etc/init.d/S80speedtest-stats
 ssh -p <порт SSH, если не 22> root@<IP роутера> chmod +x /opt/etc/init.d/S80speedtest-stats
 ```
