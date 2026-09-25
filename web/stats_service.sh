@@ -50,7 +50,7 @@ STATS_SERVICE_STABLE_SECONDS=${STATS_SERVICE_STABLE_SECONDS:-60}
 export DIR MIHOMO_DIR STATS_HTTP_PIDFILE STATS_HTTP_LOG RUN_LOG
 
 if [ ! -f "$SPEEDTEST_SCRIPT" ]; then
-  echo "stats_service.sh: $SPEEDTEST_SCRIPT не найден - переустановите проект" >&2
+  echo "$SPEEDTEST_SCRIPT не найден - переустановите проект" >&2
   exit 1
 fi
 
@@ -176,7 +176,7 @@ supervise() {
   fi
 
   mkdir -p "$STATS_SERVICE_RUNTIME_DIR" 2>/dev/null || {
-    echo "stats_service.sh: не удалось создать $STATS_SERVICE_RUNTIME_DIR" >&2
+    echo "не удалось создать $STATS_SERVICE_RUNTIME_DIR" >&2
     return 1
   }
 
@@ -192,7 +192,7 @@ supervise() {
   fi
 
   if ! echo "$$" > "$SUPERVISOR_PIDFILE"; then
-    echo "stats_service.sh: не удалось записать $SUPERVISOR_PIDFILE" >&2
+    echo "не удалось записать $SUPERVISOR_PIDFILE" >&2
     return 1
   fi
 

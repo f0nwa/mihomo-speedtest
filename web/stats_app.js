@@ -480,7 +480,12 @@
     fetchJson('/api/stats').then(function (data) {
       clearApp();
 
-      var meta = el('p', 'hint', 'Обновлено: ' + (data.generated || '-') + ' · прогонов в истории: ' + data.runs.count);
+      // {} - /api/stats без файла на диске (см. комментарий в
+      // progressPollTick() и в stats_httpd.py про SPA-фоллбек) - трактуем
+      // как "прогонов ещё не было", а не как ошибку.
+      var runsCount = data.runs && typeof data.runs.count === 'number' ? data.runs.count : 0;
+
+      var meta = el('p', 'hint', 'Обновлено: ' + (data.generated || '-') + ' · прогонов в истории: ' + runsCount);
       app.appendChild(meta);
 
       var lastRunCard = card('Последний прогон');
@@ -511,7 +516,7 @@
       }
       app.appendChild(lastMeasureCard);
 
-      var chartCard = card('Скорость по нодам (последние ' + data.runs.count + ' прогонов)');
+      var chartCard = card('Скорость по нодам (последние ' + runsCount + ' прогонов)');
       if (data.node_history && data.node_history.total_unique > 0) {
         chartCard.appendChild(buildNodeLegend(data.node_history));
         chartCard.appendChild(buildNodeChart(data.node_history, data.runs.series));

@@ -95,7 +95,7 @@ bootstrap_http_get() {
       *) return 1 ;;
     esac
   else
-    echo "install.sh: для установки нужен curl с поддержкой HTTPS" >&2
+    echo "для установки нужен curl с поддержкой HTTPS" >&2
     return 1
   fi
 }
@@ -104,25 +104,25 @@ bootstrap_download_to() {
   write_limit=$3
   [ "$write_limit" -ge 262144 ] || write_limit=262144
   if ! (ulimit -f "$(( (write_limit + 511) / 512 ))"; bootstrap_http_get "$1" "$3") > "$2"; then
-    echo "install.sh: не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
+    echo "не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
     return 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
   [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || {
-    echo "install.sh: пустой файл или превышен лимит загрузки: $1" >&2
+    echo "пустой файл или превышен лимит загрузки: $1" >&2
     return 1
   }
 }
 
 bootstrap_check_download() {
-  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "install.sh: неверный размер файла релиза: $1" >&2; return 1; }
-  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "install.sh: неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
+  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "неверный размер файла релиза: $1" >&2; return 1; }
+  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
 }
 
 bootstrap_awk_syntax() {
   printf 'BEGIN { exit 0 }\nEND { exit 0 }\n' > "$BOOTSTRAP_WORK/awk-guard"
   awk -f "$BOOTSTRAP_WORK/awk-guard" -f "$1" /dev/null >/dev/null 2>&1 || {
-    echo "install.sh: файл не прошёл проверку синтаксиса AWK: $1" >&2
+    echo "файл не прошёл проверку синтаксиса AWK: $1" >&2
     return 1
   }
 }
@@ -154,7 +154,7 @@ bootstrap_header() {
       for (i=1;i<=n;i++) print row[i]
     }
   ' "$BOOTSTRAP_MANIFEST" > "$BOOTSTRAP_WORK/files" || {
-    echo "install.sh: манифест релиза не прошёл проверку - установка остановлена" >&2
+    echo "манифест релиза не прошёл проверку - установка остановлена" >&2
     return 1
   }
 }
@@ -163,43 +163,51 @@ bootstrap_pinned_base() {
   case $UPDATE_RELEASE_BASE in
     */releases/latest/download)
       BOOTSTRAP_PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG) ;;
-    *) echo "install.sh: для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
+    *) echo "для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
   esac
 }
 
 bootstrap_selfinstall() {
   BOOTSTRAP_SHA_TOOL=$(bootstrap_sha256_tool) || {
-    echo "install.sh: не найден инструмент SHA256 (sha256sum/openssl/busybox) - установка остановлена" >&2
+    echo "не найден инструмент SHA256 (sha256sum/openssl/busybox) - установка остановлена" >&2
     return 1
   }
   bootstrap_tmproot=${TMPROOT:-/tmp}
   BOOTSTRAP_WORK=$(mktemp -d "$bootstrap_tmproot/mst-install-bootstrap.XXXXXX") || return 1
   BOOTSTRAP_MANIFEST=$BOOTSTRAP_WORK/manifest.txt
 
-  echo "install.sh: рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
+  echo "рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
 
   bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
-  mkdir -p "$DIR" || { echo "install.sh: не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  mkdir -p "$DIR" || { echo "не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
   # Проход 1: скачать и проверить всё во временном каталоге. Ничего не
   # пишем в DIR, пока не убедимся, что весь набор цел - иначе отказ на
   # середине списка оставил бы в DIR наполовину установленный проект.
+  # Счётчик N/TOTAL печатается перед каждым файлом - иначе на медленной
+  # сети скачивание полного набора (см. release/components.txt) выглядит
+  # как зависший скрипт: единственная строка "скачиваю релиз..." выше не
+  # даёт никакой обратной связи до самого конца.
+  bootstrap_total=$(wc -l < "$BOOTSTRAP_WORK/files" | tr -d ' ')
+  bootstrap_idx=0
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
+    bootstrap_idx=$((bootstrap_idx + 1))
+    echo "скачиваю файл $bootstrap_idx/$bootstrap_total: $src" >&2
     bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     case $check in
-      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "install.sh: неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
+      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
       awk) bootstrap_awk_syntax "$BOOTSTRAP_WORK/$src" || { rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
     esac
   done < "$BOOTSTRAP_WORK/files"
 
   # Проход 2: весь набор проверен - переносим в DIR.
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
-    mv "$BOOTSTRAP_WORK/$src" "$DIR/$src" || { echo "install.sh: не удалось записать $DIR/$src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
-    chmod "$mode" "$DIR/$src" || { echo "install.sh: не удалось задать режим $DIR/$src" >&2; return 1; }
+    mv "$BOOTSTRAP_WORK/$src" "$DIR/$src" || { echo "не удалось записать $DIR/$src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    chmod "$mode" "$DIR/$src" || { echo "не удалось задать режим $DIR/$src" >&2; return 1; }
   done < "$BOOTSTRAP_WORK/files"
 
   # Тег - хвост BOOTSTRAP_PINNED_BASE (.../download/<RELEASE_TAG>), берём
@@ -222,7 +230,7 @@ bootstrap_selfinstall() {
   fi
 
   rm -rf "$BOOTSTRAP_WORK"
-  echo "install.sh: файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
+  echo "файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
   SELFDIR=$DIR
 }
 
@@ -237,7 +245,7 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && bootstrap_needed; then
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   bootstrap_selfinstall || {
-    echo "install.sh: автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
+    echo "автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
     exit 1
   }
 fi
@@ -278,13 +286,13 @@ resolve_block() {
           eval "BLOCK=\$BLOCK_$choice"
           BLOCK_SOURCE="из конфига (вариант $choice)"
         else
-          echo "install.sh: номер вне диапазона" >&2
+          echo "номер вне диапазона" >&2
           BLOCK=""
         fi
         ;;
     esac
     if [ -z "$BLOCK" ]; then
-      echo "install.sh: пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+      echo "пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
       return 1
     fi
     return 0
@@ -300,10 +308,10 @@ resolve_block() {
       BLOCK_SOURCE="введён вручную"
       return 0
     fi
-    echo "install.sh: пустой фильтр не принимается (попытка $attempt из 3)" >&2
+    echo "пустой фильтр не принимается (попытка $attempt из 3)" >&2
     attempt=$((attempt + 1))
   done
-  echo "install.sh: фильтр обязателен - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
+  echo "фильтр обязателен - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
   return 1
 }
 
@@ -434,7 +442,7 @@ write_env() {
 recalibrate_env() {
   dst=$1
   new_min=$2
-  [ -f "$dst" ] || { echo "install.sh: $dst не найден, сначала обычная установка" >&2; return 1; }
+  [ -f "$dst" ] || { echo "$dst не найден, сначала обычная установка" >&2; return 1; }
   dstdir=${dst%/*}
   dstbase=${dst##*/}
   tmp=$dstdir/.$dstbase.$$
@@ -511,22 +519,22 @@ ensure_python3() {
   have_python3 && return 0
 
   if ! have_opkg; then
-    echo "install.sh: python3 не найден, а opkg недоступен - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    echo "python3 не найден, а opkg недоступен - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
     return 1
   fi
 
-  echo "install.sh: python3 не найден, пробую поставить через opkg install python3..." >&2
+  echo "python3 не найден, пробую поставить через opkg install python3..." >&2
   if ! opkg install python3 >/dev/null 2>&1; then
-    echo "install.sh: opkg install python3 не удался с первого раза, обновляю список пакетов (opkg update) и пробую ещё раз..." >&2
+    echo "opkg install python3 не удался с первого раза, обновляю список пакетов (opkg update) и пробую ещё раз..." >&2
     opkg update >/dev/null 2>&1 || true
     opkg install python3 >/dev/null 2>&1 || true
   fi
 
   if have_python3; then
-    echo "install.sh: python3 успешно установлен через opkg" >&2
+    echo "python3 успешно установлен через opkg" >&2
     return 0
   else
-    echo "install.sh: не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    echo "не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
     return 1
   fi
 }
@@ -536,9 +544,31 @@ initialize_web_auth() {
     --state-dir "$DIR/.stats-auth" \
     --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}") || return 1
   if [ -n "$code" ]; then
-    echo "install.sh: одноразовый код первичной настройки: $code" >&2
-    echo "install.sh: откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
+    echo "одноразовый код первичной настройки: $code" >&2
+    echo "откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
   fi
+}
+
+# Пробный прогон speedtest2.sh при установке/переустановке может занимать
+# от десятков секунд до нескольких минут (зависит от числа нод), а сам
+# speedtest2.sh обычным ходом ничего не пишет в консоль - весь его лог
+# идёт в файл (см. log() в speedtest-runtime/speedtest2.sh). Без обратной
+# связи это выглядит как зависший install.sh. Фоновый "тик" каждые
+# TRIAL_HEARTBEAT_INTERVAL секунд - самый надёжный вариант для POSIX sh:
+# не портит вывод при логировании в файл или по SSH с задержкой, в
+# отличие от анимации через \r.
+run_trial_with_heartbeat() {
+  trial_heartbeat_interval=${TRIAL_HEARTBEAT_INTERVAL:-8}
+  (
+    while :; do
+      sleep "$trial_heartbeat_interval"
+      echo "пробный прогон ещё выполняется, ждите..." >&2
+    done
+  ) &
+  trial_heartbeat_pid=$!
+  "$DIR/speedtest2.sh" || true
+  kill "$trial_heartbeat_pid" 2>/dev/null || true
+  wait "$trial_heartbeat_pid" 2>/dev/null || true
 }
 
 main() {
@@ -550,8 +580,8 @@ main() {
     # ещё раз - см. setup.sh) - это второй из двух сценариев однострочной
     # установки (см. bootstrap-блок в начале файла): "конфиг уже настроен"
     # обрабатывается штатным продолжением main() ниже, "конфига нет" - тут.
-    [ -f "$SELFDIR/setup.sh" ] || { echo "install.sh: $CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки" >&2; return 1; }
-    echo "install.sh: $CONFIG не найден - похоже, это установка на новом роутере. Запускаю мастер настройки (setup.sh)" >&2
+    [ -f "$SELFDIR/setup.sh" ] || { echo "$CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки" >&2; return 1; }
+    echo "$CONFIG не найден - похоже, это установка на новом роутере. Запускаю мастер настройки (setup.sh)" >&2
     # Под "curl ... | sh" стандартный ввод занят телом самого install.sh -
     # без переоткрытия от терминала интерактивные read -r в setup.sh сразу
     # получат EOF вместо ответов пользователя. Если stdin уже терминал
@@ -572,17 +602,17 @@ main() {
   fi
   for f in $ALL_PROJECT_FILES; do
     [ -f "$SELFDIR/$f" ] || {
-      echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
+      echo "$SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
     }
   done
   "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" >/dev/null 2>&1 || {
-    echo "install.sh: $CONFIG не проходит mihomo -t" >&2
+    echo "$CONFIG не проходит mihomo -t" >&2
     return 1
   }
 
   if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
-    echo "install.sh: providers.awk не смог разобрать $CONFIG" >&2
+    echo "providers.awk не смог разобрать $CONFIG" >&2
     return 1
   fi
   eval "$PARSED"
@@ -593,31 +623,31 @@ main() {
     curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/$name" >/dev/null 2>&1 || true
     sleep 3
     [ -f "$src" ] || {
-      echo "install.sh: кэш $src не появился, сначала чините подписку $name" >&2
+      echo "кэш $src не появился, сначала чините подписку $name" >&2
       return 1
     }
   done
 
   resolve_block || return 1
-  echo "install.sh: фильтр ($BLOCK_SOURCE): $BLOCK" >&2
+  echo "фильтр ($BLOCK_SOURCE): $BLOCK" >&2
 
   CHANNEL=$(measure_channel)
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
-    echo "install.sh: канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
+    echo "канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
   else
     # MIN_SPEED в шапке speedtest2.sh - не в кавычках (число), в отличие
     # от BLOCK; читаем тем же read_speedtest_const, что и MIN_RATIO/MIN_FLOOR.
     MIN_SPEED=$(read_speedtest_const MIN_SPEED 1048576)
-    echo "install.sh: прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
+    echo "прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
   fi
 
   write_env "$DIR/speedtest2.env" || {
-    echo "install.sh: не удалось записать speedtest2.env" >&2
+    echo "не удалось записать speedtest2.env" >&2
     return 1
   }
   install_files || {
-    echo "install.sh: не удалось установить файлы" >&2
+    echo "не удалось установить файлы" >&2
     return 1
   }
   install_cron
@@ -636,45 +666,45 @@ main() {
   # промолчала как "уже запущена" на старых настройках.
   if [ "$web_ready" = 1 ] && ! initialize_web_auth; then
     web_ready=0
-    echo "install.sh: WARN - не удалось инициализировать авторизацию, веб-интерфейс не запущен" >&2
+    echo "WARN - не удалось инициализировать авторизацию, веб-интерфейс не запущен" >&2
   fi
   if [ "$web_ready" = 1 ] && [ -x "$INITD_SCRIPT" ]; then
     if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
-      echo "install.sh: веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
+      echo "веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
     else
-      echo "install.sh: WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
+      echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
     fi
   elif [ "$web_ready" = 1 ]; then
-    echo "install.sh: WARN - $INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен" >&2
+    echo "WARN - $INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен" >&2
   else
     [ ! -x "$INITD_SCRIPT" ] || "$INITD_SCRIPT" stop >/dev/null 2>&1 || true
-    echo "install.sh: CLI, speedtest и обновлятор установлены; веб-интерфейс отключён до установки Python 3" >&2
+    echo "CLI, speedtest и обновлятор установлены; веб-интерфейс отключён до установки Python 3" >&2
   fi
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
-    "$DIR/speedtest2.sh" || true
-    echo "install.sh: пробный запуск завершён, хвост журнала:" >&2
+    run_trial_with_heartbeat
+    echo "пробный запуск завершён, хвост журнала:" >&2
     tail -5 "$DIR/speedtest.log" 2>/dev/null >&2 || true
   fi
 
-  echo "install.sh: установка завершена" >&2
+  echo "установка завершена" >&2
 }
 
 recalibrate_main() {
   ENVFILE=${ENVFILE:-$DIR/speedtest2.env}
   [ -f "$ENVFILE" ] || {
-    echo "install.sh: $ENVFILE не найден, сначала обычная установка" >&2
+    echo "$ENVFILE не найден, сначала обычная установка" >&2
     return 1
   }
   CHANNEL=$(measure_channel)
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     NEW_MIN=$(compute_min_speed "$CHANNEL")
   else
-    echo "install.sh: прямой замер канала не удался, MIN_SPEED не изменён" >&2
+    echo "прямой замер канала не удался, MIN_SPEED не изменён" >&2
     return 1
   fi
   recalibrate_env "$ENVFILE" "$NEW_MIN" || return 1
-  echo "install.sh: MIN_SPEED пересчитан: $((NEW_MIN/1048576)) МБ/с" >&2
+  echo "MIN_SPEED пересчитан: $((NEW_MIN/1048576)) МБ/с" >&2
 }
 
 if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then

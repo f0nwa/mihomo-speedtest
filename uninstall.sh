@@ -98,15 +98,15 @@ pid_alive() {
 
 confirm() {
   [ "$SKIP_CONFIRM" = 1 ] && return 0
-  echo "uninstall.sh: будут остановлена веб-служба статистики, сняты cron-записи," >&2
-  echo "uninstall.sh: удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR." >&2
+  echo "будут остановлена веб-служба статистики, сняты cron-записи," >&2
+  echo "удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR." >&2
   if [ "$SKIP_CONFIG_REVERT" != 1 ] && [ -f "$CONFIG" ]; then
-    echo "uninstall.sh: если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
+    echo "если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
   fi
   if [ "$PURGE_DATA" = 1 ]; then
-    echo "uninstall.sh: PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
+    echo "PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
   fi
-  printf 'uninstall.sh: продолжить? [y/N] ' >&2
+  printf 'продолжить? [y/N] ' >&2
   # Под "curl ... | sh" стандартный ввод занят телом самого uninstall.sh -
   # без переоткрытия от терминала read -r ниже сразу получит EOF, и
   # деинсталляция молча отменится (безопасный отказ, но не то, чего хочет
@@ -133,13 +133,13 @@ confirm() {
   fi
   case "$ans" in
     [Yy]*) return 0 ;;
-    *) echo "uninstall.sh: отменено, ничего не изменено" >&2; return 1 ;;
+    *) echo "отменено, ничего не изменено" >&2; return 1 ;;
   esac
 }
 
 stop_service() {
   if [ -x "$INITD_SCRIPT" ]; then
-    "$INITD_SCRIPT" stop || echo "uninstall.sh: WARN - $INITD_SCRIPT stop не удался, продолжаю" >&2
+    "$INITD_SCRIPT" stop || echo "WARN - $INITD_SCRIPT stop не удался, продолжаю" >&2
     return 0
   fi
   # init-скрипт уже отсутствует (или так и не был установлен), но
@@ -164,7 +164,7 @@ remove_cron() {
   fi
   filtered=$(printf '%s\n' "$current" | grep -vF "$INSTALLED_SCRIPT" || true)
   printf '%s\n' "$filtered" | crontab -
-  echo "uninstall.sh: cron-строка для $INSTALLED_SCRIPT удалена" >&2
+  echo "cron-строка для $INSTALLED_SCRIPT удалена" >&2
 }
 
 remove_update_cron() {
@@ -174,7 +174,7 @@ remove_update_cron() {
   fi
   filtered=$(printf '%s\n' "$current" | grep -vF "$UPDATE_CHECK_SCRIPT" || true)
   printf '%s\n' "$filtered" | crontab -
-  echo "uninstall.sh: cron-строка для $UPDATE_CHECK_SCRIPT удалена" >&2
+  echo "cron-строка для $UPDATE_CHECK_SCRIPT удалена" >&2
 }
 
 # Отпечаток группы "fast" (proxy-providers -> fast -> path: ./fast.yaml,
@@ -203,7 +203,7 @@ revert_config() {
   if [ "$REVERT_BEFORE_FAST" = 1 ]; then
     latest=$(find_backup_before_fast)
     if [ -z "$latest" ]; then
-      echo "uninstall.sh: REVERT_BEFORE_FAST=1, но среди бэкапов $CONFIG.*.bak нет ни одного без группы fast - config.yaml оставлен как есть" >&2
+      echo "REVERT_BEFORE_FAST=1, но среди бэкапов $CONFIG.*.bak нет ни одного без группы fast - config.yaml оставлен как есть" >&2
       return 0
     fi
   else
@@ -213,29 +213,29 @@ revert_config() {
       latest=$b
     done
     if [ -z "$latest" ]; then
-      echo "uninstall.sh: рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
+      echo "рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
       return 0
     fi
   fi
 
-  echo "uninstall.sh: найден бэкап $latest, проверяю mihomo -t" >&2
+  echo "найден бэкап $latest, проверяю mihomo -t" >&2
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$latest" >/dev/null 2>&1; then
-    echo "uninstall.sh: WARN - $latest не проходит mihomo -t, config.yaml не тронут" >&2
+    echo "WARN - $latest не проходит mihomo -t, config.yaml не тронут" >&2
     return 0
   fi
 
   own_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
   if ! cp "$CONFIG" "$own_backup"; then
-    echo "uninstall.sh: WARN - не удалось сохранить $own_backup, config.yaml не тронут" >&2
+    echo "WARN - не удалось сохранить $own_backup, config.yaml не тронут" >&2
     return 0
   fi
-  echo "uninstall.sh: текущий config.yaml сохранён в $own_backup" >&2
+  echo "текущий config.yaml сохранён в $own_backup" >&2
 
   if ! atomic_install "$latest" "$CONFIG"; then
-    echo "uninstall.sh: WARN - не удалось записать $CONFIG из $latest" >&2
+    echo "WARN - не удалось записать $CONFIG из $latest" >&2
     return 0
   fi
-  echo "uninstall.sh: config.yaml откачен к $latest" >&2
+  echo "config.yaml откачен к $latest" >&2
 
   xkeen -restart
   i=0
@@ -244,7 +244,7 @@ revert_config() {
     sleep 1; i=$((i + 1))
   done
   if ! curl -s -m 2 "http://$API_MAIN/version" >/dev/null 2>&1; then
-    echo "uninstall.sh: WARN - mihomo не поднялся после xkeen -restart, проверьте $CONFIG вручную" >&2
+    echo "WARN - mihomo не поднялся после xkeen -restart, проверьте $CONFIG вручную" >&2
   fi
 }
 
@@ -298,7 +298,7 @@ purge_data() {
   rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$MIHOMO_DIR/fast.yaml" "$DIR/speedtest_last.txt"
   rm -rf "$STATS_HTTP_DIR"
   rm -rf "$DIR/.stats-auth"
-  echo "uninstall.sh: PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2
+  echo "PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2
 }
 
 main() {
@@ -309,7 +309,7 @@ main() {
   revert_config
   remove_project_files
   purge_data
-  echo "uninstall.sh: деинсталляция завершена" >&2
+  echo "деинсталляция завершена" >&2
 }
 
 if [ "${UNINSTALL_LIB_ONLY:-0}" != 1 ]; then

@@ -18,12 +18,12 @@ case ${1:-} in initialize|reset) [ "$#" -eq 1 ] ;; *) false ;; esac || {
 }
 
 command -v "$STATS_AUTH_PYTHON" >/dev/null 2>&1 || {
-  echo "stats_auth.sh: Python 3 не найден: $STATS_AUTH_PYTHON" >&2
+  echo "Python 3 не найден: $STATS_AUTH_PYTHON" >&2
   exit 1
 }
 
 [ -f "$STATS_AUTH_PY" ] || {
-  echo "stats_auth.sh: stats_auth.py не найден: $STATS_AUTH_PY" >&2
+  echo "stats_auth.py не найден: $STATS_AUTH_PY" >&2
   exit 1
 }
 
@@ -41,11 +41,11 @@ fi
 [ "$1" = reset ] || exit 0
 
 [ -x "$INITD_SCRIPT" ] || {
-  echo "stats_auth.sh: init-скрипт веб-службы не найден: $INITD_SCRIPT" >&2
+  echo "init-скрипт веб-службы не найден: $INITD_SCRIPT" >&2
   exit 1
 }
 
 "$INITD_SCRIPT" restart || {
-  echo "stats_auth.sh: не удалось перезапустить веб-службу" >&2
+  echo "не удалось перезапустить веб-службу" >&2
   exit 1
 }
