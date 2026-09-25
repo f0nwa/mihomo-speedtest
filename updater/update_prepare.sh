@@ -68,7 +68,7 @@ build_snapshot() {
       printf '%s\t%s\t%s\n' "$logical" "$file_sum" "$file_mode" >> "$WORK/local.tsv"
     fi
   done < "$WORK/records"
-  inspect_file "$(target_file /opt/etc/mihomo/config.yaml)" config >> "$WORK/snapshot.tsv"
+  inspect_file "$(target_file "$MIHOMO_DIR/config.yaml")" config >> "$WORK/snapshot.tsv"
   inspect_file "$INSTALLED_MANIFEST_PATH" installed-manifest >> "$WORK/snapshot.tsv"
   inspect_file "$UPDATE_STATE_DIR/config-schema-version" config-schema >> "$WORK/snapshot.tsv"
   inspect_file "$UPDATE_STATE_DIR/config-sha256" config-sha256 >> "$WORK/snapshot.tsv"
@@ -258,7 +258,7 @@ detect_config_schema() {
 config_tools() {
   mkdir "$WORK/migration-tools" || die 'не удалось подготовить инструменты миграции'
   for config_tool in migrate_config.sh migrate_config.awk config_diff.awk config.example.yaml; do
-    config_number=$(awk -F'|' -v name="$config_tool" '$1=="FILE"{n++;if($2=="config-tools"&&$3==name&&$4=="/opt/etc/mihomo/" name) {number=n;count++}} END{if(count!=1)exit 1;print number}' "$WORK/records") || die 'релиз не содержит обязательный инструмент миграции'
+    config_number=$(awk -F'|' -v name="$config_tool" '$1=="FILE"{n++;if($2=="config-tools"&&$3==name&&$4=="/opt/etc/mihomo-speedtest/" name) {number=n;count++}} END{if(count!=1)exit 1;print number}' "$WORK/records") || die 'релиз не содержит обязательный инструмент миграции'
     safe_path "$CONFIG_PAYLOAD/files/$config_number"
     cp "$CONFIG_PAYLOAD/files/$config_number" "$WORK/migration-tools/$config_tool" || die 'не удалось скопировать проверенный инструмент'
   done
@@ -274,7 +274,7 @@ run_config_test() {
   # никогда не даём тестовому процессу путь записи в /opt.
   geo_total=0
   for geo_name in GeoSite.dat GeoIP.dat Country.mmdb geoip.metadb geoip.db ASN.mmdb BundleMRS.7z; do
-    geo_source=$(target_file /opt/etc/mihomo)/$geo_name
+    geo_source=$(target_file "$MIHOMO_DIR")/$geo_name
     safe_path "$geo_source"
     [ -f "$geo_source" ] || continue
     geo_bytes=$(wc -c < "$geo_source" | tr -d ' ')
@@ -310,7 +310,7 @@ check_config_source_snapshot() {
 prepare_config_candidate() {
   CONFIG_PAYLOAD=$WORK
   config_tools
-  cp "$(target_file /opt/etc/mihomo/config.yaml)" "$WORK/config-source.yaml" || die 'не удалось прочитать рабочий конфиг'
+  cp "$(target_file "$MIHOMO_DIR/config.yaml")" "$WORK/config-source.yaml" || die 'не удалось прочитать рабочий конфиг'
   check_config_source_snapshot
   sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
     --output "$WORK/candidate.yaml" --report "$WORK/migration-report.txt" > "$WORK/migration.log" 2>&1 || die 'не удалось собрать кандидат конфига; подробный вывод скрыт'

@@ -21,6 +21,11 @@
 #   задан/пуст — между маркерами ничего не добавляется, и никакого
 #   dns: в итоговом config.yaml не будет (шаблон по умолчанию его не
 #   содержит).
+# mihomo_dir: необязательно — абсолютный каталог самой Mihomo (по
+#   умолчанию /opt/etc/mihomo), подставляется в путь fast-провайдера
+#   ("path: /opt/etc/mihomo/fast.yaml" вместо "path: ./fast.yaml" в
+#   шаблоне) - см. docs/superpowers/specs/
+#   2026-09-25-install-dir-separation-design.md.
 BEGIN {
   nprov = 0
   if (providers_file != "") {
@@ -63,6 +68,12 @@ BEGIN {
   in_sub = 0
   in_static = 0
   in_dns_static = 0
+  mihomo_dir_out = (mihomo_dir != "" ? mihomo_dir : "/opt/etc/mihomo")
+}
+
+/^    path: \.\/fast\.yaml$/ {
+  printf "    path: %s/fast.yaml\n", mihomo_dir_out
+  next
 }
 
 /^  # --- SUBSCRIPTIONS:BEGIN ---/ {

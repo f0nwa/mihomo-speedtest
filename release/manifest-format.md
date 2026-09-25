@@ -34,7 +34,7 @@ CLI для этой проверки не требуется.
 ```text
 COMPONENT|updater|Обновлятор
 NOTE|updater|Обновление инструмента без перезапуска служб
-FILE|updater|update.sh|/opt/etc/mihomo/update.sh|123|<64 символа sha256>|0755|sh
+FILE|updater|update.sh|/opt/etc/mihomo-speedtest/update.sh|123|<64 символа sha256>|0755|sh
 DEPENDS|web|speedtest-runtime
 CONFLICT|legacy-web|web
 ACTION|web|restart-web
@@ -58,8 +58,11 @@ ACTION|web|restart-web
   размер, SHA256 в нижнем регистре, режим 0644/0755 (допускается без ведущего
   нуля), проверка sh/awk/py/none. Пути используют ASCII-буквы, цифры,
   `_`, `.`, `/`, `-`; пустые сегменты, `.`/`..` и завершающий `/` запрещены.
-- Разрешены назначения внутри /opt/etc/mihomo, кроме config.yaml и .update
-  с её содержимым; вне него только /opt/etc/init.d/S80speedtest-stats.
+- Разрешены назначения внутри /opt/etc/mihomo-speedtest (каталог ПРОЕКТА,
+  не самой Mihomo - см. docs/superpowers/specs/2026-09-25-install-dir-separation-design.md),
+  кроме .update с её содержимым; вне него только /opt/etc/init.d/S80speedtest-stats.
+  config.yaml и прочие файлы самой Mihomo лежат в /opt/etc/mihomo и в набор
+  допустимых назначений манифеста не входят вовсе - их туда и не пытаются класть.
   Подготовка отвергает символические ссылки назначения и родителей.
 - ACTION допускает только restart-web/migrate-config/restart-mihomo.
   Замена файлов speedtest-runtime не требует restart-mihomo. Это действие
@@ -93,9 +96,9 @@ uninstall.sh и переходный VERSIONS в installer. Рабочий confi
 ## Подготовка и повторная проверка
 
 ```sh
-sh /opt/etc/mihomo/update.sh --prepare --components=web --format=json
-sh /opt/etc/mihomo/update.sh --verify-plan "$plan_id" --format=json
-sh /opt/etc/mihomo/update.sh --discard-plan "$plan_id"
+sh /opt/etc/mihomo-speedtest/update.sh --prepare --components=web --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --verify-plan "$plan_id" --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --discard-plan "$plan_id"
 ```
 
 Перед проверкой задайте переменную `plan_id` равной 64-значному идентификатору
@@ -135,9 +138,9 @@ localhost/127.0.0.1 с явным портом и без перенаправл�
 ## Применение, откат и восстановление
 
 ```sh
-sh /opt/etc/mihomo/update.sh --apply "$plan_id" --format=json
-sh /opt/etc/mihomo/update.sh --rollback-last
-sh /opt/etc/mihomo/update.sh --recover
+sh /opt/etc/mihomo-speedtest/update.sh --apply "$plan_id" --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --rollback-last
+sh /opt/etc/mihomo-speedtest/update.sh --recover
 ```
 
 --apply заново проверяет подготовленный план под общей блокировкой. Для
@@ -208,7 +211,7 @@ sh "$engine" --apply "$plan_id" --confirm-local --confirm-config
 ```
 
 После успешного применения устанавливается CLI версии 6; следующие операции
-выполняются обычным /opt/etc/mihomo/update.sh. На Keenetic проверены реальный
+выполняются обычным /opt/etc/mihomo-speedtest/update.sh. На Keenetic проверены реальный
 HTTPS, подготовка, Mihomo -t, оба подтверждения и структурный diff. Боевое
 применение v2 завершилось applied: схема 2 и CLI 6 установлены, конфиг совпал
 с кандидатом, режим 0600 сохранён, process/API health прошёл, журнал закрыт,
@@ -217,7 +220,13 @@ rollback старого конфига проверен. Приёмка откл
 
 ## Ручное обновление несовместимого bootstrap
 
-Версия 4 добавляет update_transaction.sh в bootstrap. Установленный bootstrap
+Начиная с разделения каталогов (см.
+docs/superpowers/specs/2026-09-25-install-dir-separation-design.md) эти четыре
+файла обновлятора - файлы ПРОЕКТА, их место - /opt/etc/mihomo-speedtest, а не
+/opt/etc/mihomo (это правило автоматической миграции не имеет: установка со
+старым layout'ом должна быть удалена uninstall.sh и переустановлена заново,
+ручной перенос ниже относится только к установкам, уже перешедшим на новый
+layout). Версия 4 добавляет update_transaction.sh в bootstrap. Установленный bootstrap
 версии 3 требует однократного ручного обновления четырёх файлов.
 Если стабильный bootstrap не может прочитать релиз, возьмите проверенные
 владельцем update.sh, update_plan.awk, update_prepare.sh и update_transaction.sh из локального
@@ -229,16 +238,16 @@ ssh -p 222 root@192.168.10.1 'mkdir -p /tmp/mihomo-updater-manual' &&
 scp -O -P 222 update.sh update_plan.awk update_prepare.sh update_transaction.sh root@192.168.10.1:/tmp/mihomo-updater-manual/ &&
 ssh -p 222 root@192.168.10.1 'set -eu
 stage=/tmp/mihomo-updater-manual
-trap '\''rm -rf "$stage"; rm -f /opt/etc/mihomo/.update.sh.manual /opt/etc/mihomo/.update_plan.awk.manual /opt/etc/mihomo/.update_prepare.sh.manual /opt/etc/mihomo/.update_transaction.sh.manual'\'' EXIT
+trap '\''rm -rf "$stage"; rm -f /opt/etc/mihomo-speedtest/.update.sh.manual /opt/etc/mihomo-speedtest/.update_plan.awk.manual /opt/etc/mihomo-speedtest/.update_prepare.sh.manual /opt/etc/mihomo-speedtest/.update_transaction.sh.manual'\'' EXIT
 sh -n "$stage/update.sh"
 sh -n "$stage/update_prepare.sh"
 sh -n "$stage/update_transaction.sh"
 printf "BEGIN { exit 0 } END { exit 0 }\n" > "$stage/guard.awk"
 awk -f "$stage/guard.awk" -f "$stage/update_plan.awk" </dev/null
 for name in update_plan.awk update_prepare.sh update_transaction.sh update.sh; do
-  cp "$stage/$name" "/opt/etc/mihomo/.$name.manual"
-  case "$name" in *.sh) chmod 0755 "/opt/etc/mihomo/.$name.manual" ;; *) chmod 0644 "/opt/etc/mihomo/.$name.manual" ;; esac
-  mv "/opt/etc/mihomo/.$name.manual" "/opt/etc/mihomo/$name"
+  cp "$stage/$name" "/opt/etc/mihomo-speedtest/.$name.manual"
+  case "$name" in *.sh) chmod 0755 "/opt/etc/mihomo-speedtest/.$name.manual" ;; *) chmod 0644 "/opt/etc/mihomo-speedtest/.$name.manual" ;; esac
+  mv "/opt/etc/mihomo-speedtest/.$name.manual" "/opt/etc/mihomo-speedtest/$name"
 done'
 ```
 
@@ -313,11 +322,11 @@ config-diff.json и config-info.txt. Поэтому при миграции ис
 diff и mihomo -t, проверяет исходный снимок и все сохранённые результаты.
 
 ```sh
-sh /opt/etc/mihomo/update.sh --prepare --components=config-tools --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --prepare --components=config-tools --format=json
 # plan_id берётся из результата подготовки:
-sh /opt/etc/mihomo/update.sh --show-config-diff "$plan_id" --format=json
-sh /opt/etc/mihomo/update.sh --show-config-diff "$plan_id" --full-config-diff
-sh /opt/etc/mihomo/update.sh --verify-plan "$plan_id" --confirm-config
+sh /opt/etc/mihomo-speedtest/update.sh --show-config-diff "$plan_id" --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --show-config-diff "$plan_id" --full-config-diff
+sh /opt/etc/mihomo-speedtest/update.sh --verify-plan "$plan_id" --confirm-config
 ```
 
 Обычный diff - JSON-массив разделов {section, change}; change равен added,
@@ -347,11 +356,11 @@ removed или changed. Он не содержит значений, URL, имё
 ## Применение миграции: часть 3.3
 
 ```sh
-sh /opt/etc/mihomo/update.sh --apply "$plan_id" --confirm-config --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --apply "$plan_id" --confirm-config --format=json
 # После ошибки или прерывания сначала восстановите транзакцию:
-sh /opt/etc/mihomo/update.sh --recover --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --recover --format=json
 # Вернуть весь последний успешно установленный набор:
-sh /opt/etc/mihomo/update.sh --rollback-last --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --rollback-last --format=json
 ```
 
 Подтверждение на --verify-plan не переносится на --apply: при необходимости

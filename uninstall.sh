@@ -32,10 +32,11 @@
 # при повторном запуске на уже деинсталлированном каталоге.
 set -eu
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 BIN=${BIN:-/opt/sbin/mihomo}
 API_MAIN=${API_MAIN:-127.0.0.1:9090}
-CONFIG=${CONFIG:-$DIR/config.yaml}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
 STATS_UPDATE_RUNTIME_DIR=${STATS_UPDATE_RUNTIME_DIR:-/tmp/mihomo-speedtest-update}
@@ -181,7 +182,7 @@ remove_update_cron() {
 # автоматически, а не любое упоминание слова "fast" (например, в
 # fastly@domain/fastly@ipcidr среди правил).
 has_fast_group() {
-  grep -qE '^[[:space:]]*path:[[:space:]]*\./fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
+  grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
 }
 
 # Среди $CONFIG.*.bak (тот же порядок перебора, что и обычный поиск
@@ -218,7 +219,7 @@ revert_config() {
   fi
 
   echo "uninstall.sh: найден бэкап $latest, проверяю mihomo -t" >&2
-  if ! "$BIN" -t -d "$DIR" -f "$latest" >/dev/null 2>&1; then
+  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$latest" >/dev/null 2>&1; then
     echo "uninstall.sh: WARN - $latest не проходит mihomo -t, config.yaml не тронут" >&2
     return 0
   fi
@@ -294,7 +295,7 @@ purge_data() {
   # OUT/LAST в его шапке), не только журналы - раньше не удалялись, найдено
   # при реальном тесте полного сноса (после revert_config() config.yaml уже
   # не ссылается на fast.yaml, но сам файл оставался).
-  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$DIR/fast.yaml" "$DIR/speedtest_last.txt"
+  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$MIHOMO_DIR/fast.yaml" "$DIR/speedtest_last.txt"
   rm -rf "$STATS_HTTP_DIR"
   rm -rf "$DIR/.stats-auth"
   echo "uninstall.sh: PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2

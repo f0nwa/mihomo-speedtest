@@ -22,7 +22,7 @@
 # check       - печатает состояние supervisor'а и HTTP-бэкенда
 #               (делегирует "$SERVICE" status) и возвращает код 0/1.
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 SERVICE=${SERVICE:-$DIR/stats_service.sh}
 ENV=${ENV:-$DIR/speedtest2.env}
 STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}

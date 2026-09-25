@@ -10,7 +10,8 @@ UPDATER_VERSION=6
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
-UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-/opt/etc/mihomo/.update}
+UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-/opt/etc/mihomo-speedtest/.update}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 INSTALLED_MANIFEST_PATH=${INSTALLED_MANIFEST_PATH:-$UPDATE_STATE_DIR/installed-manifest.txt}
 TMPROOT=${TMPROOT:-/tmp}
 
@@ -24,7 +25,7 @@ initialize_web_auth() {
   # установленный stats_auth.py нужно искать через target_file(), которая
   # уже доступна - update_prepare.sh подключён и prepare_init выполнен до
   # вызова initialize_web_auth() в единственной точке вызова (ветка apply).
-  auth_dir=$(target_file /opt/etc/mihomo)
+  auth_dir=$(target_file /opt/etc/mihomo-speedtest)
   auth_py=$auth_dir/stats_auth.py
   [ -f "$auth_py" ] || return 0
   if ! command -v python3 >/dev/null 2>&1; then
@@ -147,7 +148,7 @@ bootstrap_header() {
       next
     }
     $1=="FILE" && $2=="updater" {
-      if (NF!=8 || used[$3]++ || $4!="/opt/etc/mihomo/" $3) bad()
+      if (NF!=8 || used[$3]++ || $4!="/opt/etc/mihomo-speedtest/" $3) bad()
       if ($3!="update.sh" && $3!="update_plan.awk" && $3!="update_prepare.sh" && $3!="update_transaction.sh") bad()
       if ($5 !~ /^[0-9]+$/ || $5+0<1 || $5+0>1048576 || $6 !~ /^[0-9a-f]{64}$/) bad()
       if ($3=="update_plan.awk") {if ($7!="0644" || $8!="awk") bad()}

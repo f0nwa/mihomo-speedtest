@@ -64,10 +64,10 @@ BEGIN {
   known_check["py"] = 1
   known_check["none"] = 1
 
-  allowed_prefix[1] = "/opt/etc/mihomo/"
+  allowed_prefix[1] = "/opt/etc/mihomo-speedtest/"
   allowed_prefix[2] = "/opt/etc/init.d/"
 
-  # Служебные пути вне /opt/etc/mihomo/ разрешены только явным перечислением
+  # Служебные пути вне /opt/etc/mihomo-speedtest/ разрешены только явным перечислением
   # (см. спецификацию: "известные целевые каталоги ... и явно перечисленные
   # служебные пути") - открытый префикс /opt/etc/init.d/ сам по себе не
   # достаточен, разрешён только конкретный, уже используемый проектом путь.
@@ -144,10 +144,7 @@ BEGIN {
       if (index(dest, "/opt/etc/init.d/") == 1 && !(dest in allowed_full)) {
         fail("FILE: служебный путь не входит в явный список разрешённых: " dest)
       }
-      if (dest == "/opt/etc/mihomo/config.yaml") {
-        fail("FILE: config.yaml не может быть файлом релиза: " dest)
-      }
-      if (dest == "/opt/etc/mihomo/.update" || index(dest, "/opt/etc/mihomo/.update/") == 1) {
+      if (dest == "/opt/etc/mihomo-speedtest/.update" || index(dest, "/opt/etc/mihomo-speedtest/.update/") == 1) {
         fail("FILE: запрещённый целевой каталог (служебное состояние обновлятора): " dest)
       }
 

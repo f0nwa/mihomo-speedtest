@@ -4,7 +4,7 @@
 # Запускать из каталога, где рядом лежат speedtest2.sh, prep.awk, providers.awk.
 set -eu
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 BIN=${BIN:-/opt/sbin/mihomo}
 API_MAIN=${API_MAIN:-127.0.0.1:9090}
 SPEED_URL=${SPEED_URL:-"https://speed.cloudflare.com/__down?bytes=10485760"}
@@ -16,7 +16,8 @@ TMPROOT=${TMPROOT:-/tmp}
 # файлов, "cd /opt/etc/mihomo && sh install.sh") DIR и "." совпадают, так
 # что поведение не меняется.
 SELFDIR=${SELFDIR:-$DIR}
-CONFIG=${CONFIG:-$DIR/config.yaml}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
 PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk"
@@ -575,12 +576,12 @@ main() {
       return 1
     }
   done
-  "$BIN" -t -d "$DIR" -f "$CONFIG" >/dev/null 2>&1 || {
+  "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" >/dev/null 2>&1 || {
     echo "install.sh: $CONFIG не проходит mihomo -t" >&2
     return 1
   }
 
-  if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
+  if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
     echo "install.sh: providers.awk не смог разобрать $CONFIG" >&2
     return 1
   fi

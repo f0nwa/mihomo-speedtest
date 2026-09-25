@@ -5,11 +5,12 @@
 # конфиг и передаёт управление install.sh (speedtest).
 set -eu
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 BIN=${BIN:-/opt/sbin/mihomo}
 API_MAIN=${API_MAIN:-127.0.0.1:9090}
 SELFDIR=${SELFDIR:-.}
-CONFIG=${CONFIG:-$DIR/config.yaml}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 TEMPLATE=${TEMPLATE:-$SELFDIR/config.example.yaml}
 # Разделитель URL<TAB>UA в строках между collect_subscriptions() и
 # build_provider_specs() - существующий provider с уже настроенным
@@ -352,14 +353,14 @@ main() {
   fi
 
   rendered=$(mktemp "${TMPDIR:-/tmp}/setup_config.XXXXXX")
-  awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" \
+  awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" -v mihomo_dir="$MIHOMO_DIR" \
       -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered"
   rm -f "$specs_file"
   [ -z "$static_file" ] || rm -f "$static_file"
   [ -z "$dns_file" ] || rm -f "$dns_file"
 
   mtest_log=$(mktemp "${TMPDIR:-/tmp}/setup_mtest.XXXXXX")
-  if ! "$BIN" -t -d "$DIR" -f "$rendered" >"$mtest_log" 2>&1; then
+  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$rendered" >"$mtest_log" 2>&1; then
     echo "setup.sh: новый конфиг не прошёл mihomo -t, $CONFIG не тронут. Вывод mihomo -t:" >&2
     cat "$mtest_log" >&2
     rm -f "$mtest_log"

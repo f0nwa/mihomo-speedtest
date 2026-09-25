@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 STATS_AUTH_PYTHON=${STATS_AUTH_PYTHON:-python3}
 STATS_AUTH_PY=${STATS_AUTH_PY:-$DIR/stats_auth.py}
 STATS_AUTH_STATE_DIR=${STATS_AUTH_STATE_DIR:-$DIR/.stats-auth}

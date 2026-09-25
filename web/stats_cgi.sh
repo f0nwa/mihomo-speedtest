@@ -361,9 +361,10 @@ fi
 # Нужно и HTML-пути (datalist ниже), и JSON-пути (print_settings_json) -
 # посчитано один раз здесь, до ветвления по API_JSON.
 BLOCK_COUNT=0
-CONFIG_YAML=$DIR/config.yaml
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+CONFIG_YAML=$MIHOMO_DIR/config.yaml
 if [ -f "$CONFIG_YAML" ] && [ -n "${UPDATE_PROVIDERS_AWK:-}" ] && [ -f "$UPDATE_PROVIDERS_AWK" ]; then
-  block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
+  block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$MIHOMO_DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
   [ -n "$block_candidates" ] && eval "$block_candidates"
 fi
 geo_filter_options=""

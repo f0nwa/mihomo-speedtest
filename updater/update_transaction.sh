@@ -8,8 +8,8 @@
 tx_logical_path() {
   case $1 in
     /opt/etc/init.d/S80speedtest-stats) ;;
-    /opt/etc/mihomo/*)
-      case $1 in /opt/etc/mihomo/config.yaml|/opt/etc/mihomo/.update|/opt/etc/mihomo/.update/*) return 1 ;; esac ;;
+    /opt/etc/mihomo-speedtest/*)
+      case $1 in /opt/etc/mihomo-speedtest/.update|/opt/etc/mihomo-speedtest/.update/*) return 1 ;; esac ;;
     *) return 1 ;;
   esac
   case $1 in *'|'*|*[[:cntrl:]]*|*//*|*/../*|*/./*|*/..|*/.) return 1 ;; esac
@@ -17,7 +17,7 @@ tx_logical_path() {
 }
 tx_record_destination() {
   case $1:$2 in
-    CONFIG:active-config) target_file /opt/etc/mihomo/config.yaml ;;
+    CONFIG:active-config) target_file "$MIHOMO_DIR/config.yaml" ;;
     SCHEMA:config-schema-version) printf '%s\n' "$UPDATE_STATE_DIR/config-schema-version" ;;
     HASH:config-sha256) printf '%s\n' "$UPDATE_STATE_DIR/config-sha256" ;;
     STATE:installed-manifest) printf '%s\n' "$INSTALLED_MANIFEST_PATH" ;;
@@ -45,7 +45,7 @@ transaction_validate_bundle() (
     safe_path "$tx_bundle/$tx_meta"
     [ -f "$tx_bundle/$tx_meta" ] || exit 1
   done
-  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file /opt/etc/mihomo/config.yaml)" ] || exit 1
+  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file "$MIHOMO_DIR/config.yaml")" ] || exit 1
   tx_context > "$WORK/tx-context-check"
   cmp -s "$WORK/tx-context-check" "$tx_bundle/context.txt" || exit 1
   tx_integrity=$(cat "$tx_bundle/integrity.txt")
@@ -65,7 +65,7 @@ transaction_validate_bundle() (
     $3=="missing" && ($4!="-" || $5!="0" || $6!="-") {exit 1}
     END {if(state!=1 || config!=schema || schema!=hash) exit 1}' "$tx_bundle/list.txt" || exit 1
   : > "$WORK/tx-reserved-check"
-  for tx_reserved in "$(target_file /opt/etc/mihomo/config.yaml)" "$INSTALLED_MANIFEST_PATH" "$UPDATE_STATE_DIR/config-schema-version" "$UPDATE_STATE_DIR/config-sha256"; do
+  for tx_reserved in "$(target_file "$MIHOMO_DIR/config.yaml")" "$INSTALLED_MANIFEST_PATH" "$UPDATE_STATE_DIR/config-schema-version" "$UPDATE_STATE_DIR/config-sha256"; do
     safe_path "$tx_reserved"; safe_path "$tx_reserved.mst-update-new"
     printf '%s\n%s\n' "$tx_reserved" "$tx_reserved.mst-update-new" >> "$WORK/tx-reserved-check"
   done
@@ -134,7 +134,10 @@ tx_bounded_action() (
   tx_init=$(target_file /opt/etc/init.d/S80speedtest-stats)
   safe_path "$tx_init"
   [ -f "$tx_init" ] || exit 1
-  tx_mihomo=$(target_file /opt/etc/mihomo)
+  # DIR/SERVICE/ENV службы статистики - это файлы ПРОЕКТА (мигрировали
+  # в /opt/etc/mihomo-speedtest), а не самой Mihomo (MIHOMO_DIR) - см.
+  # docs/superpowers/specs/2026-09-25-install-dir-separation-design.md.
+  tx_project=$(target_file /opt/etc/mihomo-speedtest)
   tx_runtime=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}
   tx_supervisor=${SUPERVISOR_PIDFILE:-$tx_runtime/supervisor.pid}
   tx_http_pid=${STATS_HTTP_PIDFILE:-$tx_runtime/httpd.pid}
@@ -146,7 +149,7 @@ tx_bounded_action() (
   fi
   # DIR обновлятора указывает на engine, поэтому явно передаём пути службы.
   tx_bounded_command "${UPDATE_ACTION_TIMEOUT:-15}" env \
-    DIR="$tx_mihomo" SERVICE="$tx_mihomo/stats_service.sh" ENV="$tx_mihomo/speedtest2.env" \
+    DIR="$tx_project" SERVICE="$tx_project/stats_service.sh" ENV="$tx_project/speedtest2.env" \
     STATS_SERVICE_RUNTIME_DIR="$tx_runtime" SUPERVISOR_PIDFILE="$tx_supervisor" \
     STATS_HTTP_PIDFILE="$tx_http_pid" sh "$tx_init" "$1"
 )
@@ -281,7 +284,7 @@ tx_health_config() (
 )
 tx_default_health() (
   pidof mihomo >/dev/null 2>&1 || exit 1
-  tx_health_config "$(target_file /opt/etc/mihomo/config.yaml)" || exit 1
+  tx_health_config "$(target_file "$MIHOMO_DIR/config.yaml")" || exit 1
   curl -q --config - < "$WORK/tx-curl-config" >/dev/null 2>&1
   tx_rc=$?; rm -f "$WORK/tx-curl-config"; exit "$tx_rc"
 )
@@ -469,7 +472,7 @@ transaction_apply() (
   trap 'tx_cancel_action_children; exit 1' HUP INT TERM
   safe_path "$UPDATE_STATE_DIR"
   safe_path "$INSTALLED_MANIFEST_PATH"
-  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file /opt/etc/mihomo/config.yaml)" ] || die 'config.yaml не является файлом состояния обновлятора'
+  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file "$MIHOMO_DIR/config.yaml")" ] || die 'config.yaml не является файлом состояния обновлятора'
   safe_path "$INSTALLED_MANIFEST_PATH.mst-update-new"
   [ ! -e "$INSTALLED_MANIFEST_PATH.mst-update-new" ] || die 'временный путь манифеста занят'
   for tx_name in transaction.txt rollback.pending rollback rollback.previous; do safe_path "$UPDATE_STATE_DIR/$tx_name"; done
@@ -527,7 +530,7 @@ transaction_apply() (
     esac
   done < "$WORK/records"
   if [ "${migration_required:-0}" = 1 ]; then
-    tx_config=$(target_file /opt/etc/mihomo/config.yaml)
+    tx_config=$(target_file "$MIHOMO_DIR/config.yaml")
     [ -f "$tx_config" ] && [ ! -L "$tx_config" ] || die 'исходный конфиг отсутствует'
     tx_config_mode=$(mode_of "$tx_config")
     tx_timeout_valid "${UPDATE_ACTION_TIMEOUT:-15}" && tx_timeout_valid "${UPDATE_HEALTH_TIMEOUT:-15}" || die 'неверный таймаут завершающих действий'

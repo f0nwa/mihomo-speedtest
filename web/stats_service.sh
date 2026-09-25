@@ -29,7 +29,8 @@
 # дизайна: пользовательские переопределения в speedtest2.env сохраняют
 # приоритет над новыми путями по умолчанию.
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 SPEEDTEST_SCRIPT=${SPEEDTEST_SCRIPT:-$DIR/speedtest2.sh}
 
 STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}
@@ -46,7 +47,7 @@ RUN_LOG=${RUN_LOG:-$STATS_SERVICE_RUNTIME_DIR/service.log}   # свой журн
 STATS_SERVICE_BACKOFF=${STATS_SERVICE_BACKOFF:-"2 5 15 60"}
 STATS_SERVICE_STABLE_SECONDS=${STATS_SERVICE_STABLE_SECONDS:-60}
 
-export DIR STATS_HTTP_PIDFILE STATS_HTTP_LOG RUN_LOG
+export DIR MIHOMO_DIR STATS_HTTP_PIDFILE STATS_HTTP_LOG RUN_LOG
 
 if [ ! -f "$SPEEDTEST_SCRIPT" ]; then
   echo "stats_service.sh: $SPEEDTEST_SCRIPT не найден - переустановите проект" >&2
@@ -55,7 +56,7 @@ fi
 
 export MST_LIB_ONLY=1
 . "$SPEEDTEST_SCRIPT"
-export DIR ENV   # то же самое, что делает ensure_stats_httpd() - дочерний httpd и его
+export DIR MIHOMO_DIR ENV   # то же самое, что делает ensure_stats_httpd() - дочерний httpd и его
                   # CGI (stats_cgi.sh/stats_run.sh) должны видеть тот же speedtest2.env
 
 BACKEND_PID=
@@ -77,7 +78,7 @@ prepare() {
   # ensure_stats_httpd() в speedtest2.sh (до выбора и запуска бэкенда) -
   # см. design, порция 2 переносит этот код сюда окончательно и убирает
   # дублирование в speedtest2.sh.
-  export DIR ENV
+  export DIR MIHOMO_DIR ENV
   cleanup_old_zash_stats
   if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
     say "WARN: не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"

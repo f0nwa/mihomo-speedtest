@@ -14,6 +14,28 @@
 
 ## Установка с нуля
 
+> **Уже установили проект раньше?** Начиная с этой версии файлы проекта
+> ставятся в `/opt/etc/mihomo-speedtest`, а не в `/opt/etc/mihomo` (там
+> остаётся только сама Mihomo - `config.yaml`, `fast.yaml`). Это
+> осознанно ломающее изменение: `update.sh` уже установленной версии
+> откажется применять новые релизы (безопасно, явной ошибкой, без
+> порчи файлов). Чтобы перейти - выполните на роутере **свою уже
+> установленную копию** `uninstall.sh` (она всё ещё лежит в старом
+> `/opt/etc/mihomo` и по умолчанию знает верный старый путь):
+>
+> ```sh
+> cd /opt/etc/mihomo
+> sh uninstall.sh
+> ```
+>
+> Не используйте здесь однострочник `curl .../uninstall.sh | sh` из
+> раздела [Деинсталляция](#деинсталляция) ниже - он всегда скачивает
+> СВЕЖИЙ `uninstall.sh`, который по умолчанию уже ищет файлы в новом
+> `/opt/etc/mihomo-speedtest` и старую установку не найдёт. Если своей
+> копии на роутере не осталось, задайте старый путь явно:
+> `DIR=/opt/etc/mihomo curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/uninstall.sh | sh`.
+> После деинсталляции поставьте проект заново по инструкции ниже.
+
 ### Что нужно
 
 - Роутер Keenetic с USB-накопителем, на нём установлен Entware.
@@ -119,7 +141,7 @@ xkeen -restart
 сам Mihomo/XKeen этим проектом не устанавливался и не удаляется.
 
 ```sh
-cd /opt/etc/mihomo
+cd /opt/etc/mihomo-speedtest
 sh uninstall.sh
 ```
 
@@ -431,7 +453,7 @@ DIRECT
 `prep.awk`, `providers.awk`):
 
 ```sh
-cd /opt/etc/mihomo   # или каталог, куда скопированы все четыре файла
+cd /opt/etc/mihomo-speedtest   # или каталог, куда скопированы все четыре файла
 sh install.sh
 ```
 
@@ -449,9 +471,9 @@ sh install.sh --recalibrate
 Первый запуск руками, потом смотреть лог:
 
 ```sh
-/opt/etc/mihomo/speedtest2.sh
-cat /opt/etc/mihomo/speedtest.log
-cat /opt/etc/mihomo/speedtest_last.txt   # полная таблица замера
+/opt/etc/mihomo-speedtest/speedtest2.sh
+cat /opt/etc/mihomo-speedtest/speedtest.log
+cat /opt/etc/mihomo-speedtest/speedtest_last.txt   # полная таблица замера
 ```
 
 Прогон занимает 60-70 секунд. Блокировка запуска хранится в
@@ -466,7 +488,7 @@ cat /opt/etc/mihomo/speedtest_last.txt   # полная таблица заме�
 Design:
 [`docs/superpowers/specs/2026-09-15-independent-stats-service-design.md`](../docs/superpowers/specs/2026-09-15-independent-stats-service-design.md).
 
-- `stats_service.sh` (ставится в `/opt/etc/mihomo/stats_service.sh`) -
+- `stats_service.sh` (ставится в `/opt/etc/mihomo-speedtest/stats_service.sh`) -
   supervisor: готовит раздаваемый каталог, запускает единственный
   поддерживаемый HTTP-бэкенд (`python3 stats_httpd.py`; без `python3`
   запуск не выполняется вовсе, см. выше), ждёт его завершения и
@@ -499,10 +521,10 @@ Design:
 Runtime-состояние (PID-файлы, журнал HTTP-бэкенда и самого supervisor'а)
 живёт в `/tmp/mihomo-speedtest-stats` и теряется при перезагрузке -
 постоянные данные (`stats_www`, история замеров, `speedtest2.env`)
-остаются в `/opt/etc/mihomo` как и раньше. Диагностика при проблемах:
+остаются в `/opt/etc/mihomo-speedtest` как и раньше. Диагностика при проблемах:
 
 ```sh
-sh /opt/etc/mihomo/stats_service.sh status         # то же, что check, но без обёртки init-скрипта
+sh /opt/etc/mihomo-speedtest/stats_service.sh status         # то же, что check, но без обёртки init-скрипта
 cat /tmp/mihomo-speedtest-stats/service.log        # журнал supervisor'а: respawn, backoff
 cat /tmp/mihomo-speedtest-stats/httpd.log           # stderr/stdout самого HTTP-бэкенда (python3 stats_httpd.py)
 ```
@@ -518,7 +540,7 @@ cat /tmp/mihomo-speedtest-stats/httpd.log           # stderr/stdout самого
 без сессии недоступны ни `stats.html`, ни `/settings`, ни данные графиков.
 Открыты без входа только страницы первичной настройки/входа и статические
 файлы самого интерфейса (JS/CSS). Учётные данные постоянные (логин и
-PBKDF2-хеш пароля) хранятся в `/opt/etc/mihomo/.stats-auth` с правами
+PBKDF2-хеш пароля) хранятся в `/opt/etc/mihomo-speedtest/.stats-auth` с правами
 `0600`; сами сессии, CSRF-токены и ограничение частоты попыток входа -
 только в RAM (`/tmp/mihomo-speedtest-auth`) и теряются при перезагрузке
 (сессия неактивности - до 12 часов).
@@ -545,7 +567,7 @@ PBKDF2-хеш пароля) хранятся в `/opt/etc/mihomo/.stats-auth` с
 - **Смена логина/пароля и сброс через SSH.** Сменить логин или пароль
   через саму веб-форму настроек нельзя - только через сброс по SSH:
   ```sh
-  sh /opt/etc/mihomo/stats_auth.sh reset
+  sh /opt/etc/mihomo-speedtest/stats_auth.sh reset
   ```
   Команда стирает текущие credentials и все активные сессии, перезапускает
   веб-службу и печатает новый одноразовый код для `/setup`, как при первой
@@ -630,10 +652,10 @@ scp -O -P <порт SSH, если не 22> install.sh speedtest-runtime/speedtes
     web/stats_httpd.py web/stats_index.html web/stats_style.css web/stats_app.js \
     web/stats_chart.js speedtest-runtime/node_stats_update.awk speedtest-runtime/sub_convert.awk web/render_progress.awk \
     web/stats_service.sh \
-    root@<IP роутера>:/opt/etc/mihomo/
+    root@<IP роутера>:/opt/etc/mihomo-speedtest/
 
 # stats_init.sh (шаблон init-скрипта независимой службы, см. "Независимая
-# служба веб-интерфейса статистики" выше) ставится не в /opt/etc/mihomo,
+# служба веб-интерфейса статистики" выше) ставится не в /opt/etc/mihomo-speedtest,
 # а прямо в каталог автозапуска Entware - если менялся именно он:
 scp -O -P <порт SSH, если не 22> web/stats_init.sh \
     root@<IP роутера>:/opt/etc/init.d/S80speedtest-stats
@@ -651,7 +673,7 @@ ssh -p <порт SSH, если не 22> root@<IP роутера> chmod +x /opt/e
 
 ```sh
 ssh -p <порт SSH, если не 22> root@<IP роутера>
-sh /opt/etc/mihomo/speedtest2.sh --force
+sh /opt/etc/mihomo-speedtest/speedtest2.sh --force
 ```
 
 `--force` запускает прогон немедленно и перегенерирует `stats.html`/
@@ -702,7 +724,7 @@ md5sum stats_app.js   # на рабочей машине, из каталога 
 меняет на диске, только читает и печатает результат):
 
 ```sh
-sh /opt/etc/mihomo/speedtest2.sh --check-update
+sh /opt/etc/mihomo-speedtest/speedtest2.sh --check-update
 ```
 
 Команда сверяет две независимые версии с файлом `VERSIONS` в репозитории
@@ -728,8 +750,8 @@ sh /opt/etc/mihomo/speedtest2.sh --check-update
 
 ```sh
 ssh -p <порт SSH, если не 22> root@<IP роутера>
-sh /opt/etc/mihomo/speedtest2.sh --update-core
-sh /opt/etc/mihomo/speedtest2.sh --update-stats
+sh /opt/etc/mihomo-speedtest/speedtest2.sh --update-core
+sh /opt/etc/mihomo-speedtest/speedtest2.sh --update-stats
 ```
 
 Каждая команда скачивает весь свой набор файлов (см. списки выше) во
@@ -943,7 +965,8 @@ curl -s 'http://127.0.0.1:9090/proxies/<имя ноды>/delay?url=https://examp
   первым источником в `SOURCES` (`speedtest2.env`), перед кэшами
   подписок - так что и статические ноды участвуют в замере скорости
   наравне с нодами из подписок.
-- Бэкап: `/opt/etc/mihomo` целиком плюс `crontab -l`. Busybox на роутере
+- Бэкап: `/opt/etc/mihomo` (config.yaml, fast.yaml) и `/opt/etc/mihomo-speedtest`
+  (файлы проекта) целиком плюс `crontab -l`. Busybox на роутере
   умеет только распаковывать tar, создавать архив нечем - копировать по
   scp как есть.
 

@@ -11,7 +11,7 @@
 # "apply-worker", наружу через CGI не проброшены).
 set -eu
 
-DIR=${DIR:-/opt/etc/mihomo}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
 TMPROOT=${TMPROOT:-/tmp}
 UPDATE_SCRIPT=${UPDATE_SCRIPT:-$DIR/update.sh}
 STATS_UPDATE_RUNTIME_DIR=${STATS_UPDATE_RUNTIME_DIR:-/tmp/mihomo-speedtest-update}

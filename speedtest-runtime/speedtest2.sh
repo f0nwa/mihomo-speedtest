@@ -4,10 +4,11 @@
 # (xhttp, hysteria2, AmneziaWG и прочее): поднимает второй экземпляр на своих портах,
 # переключает селектор через API и качает файл через локальный прокси.
 
-DIR=${DIR:-/opt/etc/mihomo}
-PROV=${PROV:-$DIR/proxy-providers}
-SOURCES=${SOURCES:-"$DIR/config.yaml"}   # установщик добавляет кэши провайдеров через speedtest2.env
-OUT=${OUT:-$DIR/fast.yaml}
+DIR=${DIR:-/opt/etc/mihomo-speedtest}
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+PROV=${PROV:-$MIHOMO_DIR/proxy-providers}
+SOURCES=${SOURCES:-"$MIHOMO_DIR/config.yaml"}   # установщик добавляет кэши провайдеров через speedtest2.env
+OUT=${OUT:-$MIHOMO_DIR/fast.yaml}
 LOG=${LOG:-$DIR/speedtest.log}
 LAST=${LAST:-$DIR/speedtest_last.txt}
 BIN=${BIN:-/opt/sbin/mihomo}
