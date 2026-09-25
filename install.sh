@@ -17,6 +17,15 @@ TMPROOT=${TMPROOT:-/tmp}
 # что поведение не меняется.
 SELFDIR=${SELFDIR:-$DIR}
 CONFIG=${CONFIG:-$DIR/config.yaml}
+# Полные инструменты проекта, нужные для планирования обновления (тот же
+# список используется ниже в install_files()).
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk"
+# Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
+# истины и для триггера bootstrap ниже, и для финальной проверки полноты
+# в main() (было два отдельных списка с двумя разными файлами-часовыми -
+# см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
+# т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -216,8 +225,14 @@ bootstrap_selfinstall() {
   SELFDIR=$DIR
 }
 
-if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] &&
-   { [ ! -f "$SELFDIR/version_check.sh" ] || [ ! -f "$SELFDIR/speedtest2.sh" ]; }; then
+bootstrap_needed() {
+  for bf in $ALL_PROJECT_FILES; do
+    [ -f "$SELFDIR/$bf" ] || return 0
+  done
+  return 1
+}
+
+if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && bootstrap_needed; then
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   bootstrap_selfinstall || {
@@ -329,9 +344,8 @@ atomic_install() {
   if ! mv "$tmp" "$dst"; then rm -f "$tmp"; return 1; fi
 }
 
-# Полные инструменты проекта, нужные для планирования обновления.
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk"
-
+# PROJECT_TOOLS определён выше, рядом с DIR/SELFDIR (нужен и bootstrap-
+# триггеру, который срабатывает раньше этого места файла).
 install_files() {
   for project_file in $PROJECT_TOOLS; do
     atomic_install "$SELFDIR/$project_file" "$DIR/$project_file" || return 1
@@ -555,7 +569,7 @@ main() {
     export SELFDIR DIR CONFIG
     exec sh "$SELFDIR/setup.sh"
   fi
-  for f in $PROJECT_TOOLS speedtest2.sh prep.awk providers.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh; do
+  for f in $ALL_PROJECT_FILES; do
     [ -f "$SELFDIR/$f" ] || {
       echo "install.sh: $SELFDIR/$f не найден рядом с install.sh" >&2
       return 1
