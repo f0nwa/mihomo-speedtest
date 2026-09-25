@@ -1,9 +1,23 @@
 #!/bin/sh
-# Деинсталлирует надстройку speedtest/stats, установленную install.sh
-# (и, если найден бэкап, откатывает config.yaml к состоянию до
-# последнего запуска setup.sh). Сам mihomo/XKeen не устанавливался этим
-# проектом и не удаляется - трогается только то, что поставили
-# install.sh/setup.sh.
+# Полностью деинсталлирует проект mihomo-speedtest, установленный install.sh
+# (и, если найден бэкап, откатывает config.yaml к состоянию до последнего
+# запуска setup.sh). Сам mihomo/XKeen не устанавливался этим проектом и не
+# удаляется - трогается только то, что относится к проекту.
+#
+# Снос полный и намеренный: удаляются вообще все файлы проекта, включая
+# version_check.sh, setup.sh, update.sh и сам себя/install.sh - после
+# uninstall.sh переустановка всегда идёт через bootstrap install.sh
+# (curl ... | sh, свежая закачка с GitHub), а не подхватом локальных
+# файлов. Это НЕ отменяет офлайн-переустановку как таковую: пока проект не
+# деинсталлирован, "sh install.sh" без сети на месте работает как и
+# раньше (см. install.sh) - uninstall.sh просто ставит чёткую границу,
+# после которой офлайн-путь закономерно недоступен.
+#
+# Список удаляемых файлов - $INSTALLED_MANIFEST_PATH (пишет install.sh
+# после установки/bootstrap, см. install.sh:bootstrap_selfinstall) - это
+# точное отражение того, что реально стоит на диске. Если файла нет
+# (установка до этого изменения, ни разу не обновлялись через update.sh) -
+# запасной список FALLBACK_PROJECT_FILES ниже. См. project_files_to_remove().
 #
 # Проверка версий (version_check.sh) сюда намеренно не подключается:
 # в отличие от установки, деинсталляция должна работать и на роутере
@@ -11,10 +25,11 @@
 # откатиться именно из-за несовместимости.
 #
 # Порядок действий: подтверждение -> остановка веб-службы статистики ->
-# снятие cron-строки -> удаление установленных файлов надстройки ->
-# откат config.yaml (если есть бэкап setup.sh) -> по запросу (PURGE_DATA=1)
-# удаление журналов/истории/веб-статики. Каждый шаг использует rm -f/-rf
-# и безопасен при повторном запуске на уже деинсталлированном каталоге.
+# снятие cron-строк -> откат config.yaml (если есть бэкап setup.sh) ->
+# удаление всех файлов проекта (включая install.sh/uninstall.sh и
+# служебное состояние обновлятора) -> по запросу (PURGE_DATA=1) удаление
+# журналов/истории/веб-статики. Каждый шаг использует rm -f/-rf и безопасен
+# при повторном запуске на уже деинсталлированном каталоге.
 set -eu
 
 DIR=${DIR:-/opt/etc/mihomo}
@@ -30,6 +45,8 @@ INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}
 STATS_AUTH_RUNTIME_DIR=${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}
+UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-$DIR/.update}
+INSTALLED_MANIFEST_PATH=${INSTALLED_MANIFEST_PATH:-$UPDATE_STATE_DIR/installed-manifest.txt}
 # 1 - не спрашивать подтверждения (для запуска по SSH одной командой).
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 # 1 - не трогать config.yaml, даже если рядом есть бэкап setup.sh.
@@ -42,11 +59,17 @@ REVERT_BEFORE_FAST=${REVERT_BEFORE_FAST:-0}
 # статистики (по умолчанию они остаются на диске).
 PURGE_DATA=${PURGE_DATA:-0}
 
-# Файлы самого спидтеста и веб-статистики - те же, что кладёт
-# install_files() в install.sh (см. соответствующий список там).
-CORE_FILES="speedtest2.sh prep.awk render_stats.awk stats_cgi.sh
-stats_run.sh stats_update.sh stats_index.html stats_style.css stats_app.js stats_chart.js
-stats_httpd.py stats_auth.py stats_auth.sh node_stats_update.awk sub_convert.awk render_progress.awk"
+# Полный набор файлов проекта (все 5 компонентов из release/components.txt) -
+# запасной список на случай, если $INSTALLED_MANIFEST_PATH не найден
+# (установка до этого изменения, ни разу не обновлялись через update.sh).
+# Не включает $STATS_SERVICE_DEST/$INITD_SCRIPT - у них свои переменные с
+# возможным переопределением пути, удаляются отдельно в remove_project_files().
+FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
+render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
+stats_index.html stats_style.css stats_app.js stats_chart.js render_progress.awk
+uninstall.sh VERSIONS install.sh version_check.sh
+migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml
+update_transaction.sh update_prepare.sh update.sh update_plan.awk"
 
 atomic_install() {
   src=$1
@@ -68,8 +91,8 @@ pid_alive() {
 
 confirm() {
   [ "$SKIP_CONFIRM" = 1 ] && return 0
-  echo "uninstall.sh: будут остановлена веб-служба статистики, снята cron-запись $INSTALLED_SCRIPT" >&2
-  echo "uninstall.sh: и удалены установленные файлы спидтеста/статистики в $DIR." >&2
+  echo "uninstall.sh: будут остановлена веб-служба статистики, сняты cron-записи," >&2
+  echo "uninstall.sh: удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR." >&2
   if [ "$SKIP_CONFIG_REVERT" != 1 ] && [ -f "$CONFIG" ]; then
     echo "uninstall.sh: если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
   fi
@@ -207,9 +230,23 @@ revert_config() {
   fi
 }
 
-remove_files() {
-  for f in $CORE_FILES; do
-    rm -f "$DIR/$f"
+# Абсолютные пути всех файлов проекта, один на строку: из
+# $INSTALLED_MANIFEST_PATH, если он есть (точный список установленного -
+# см. install.sh:bootstrap_selfinstall), иначе - FALLBACK_PROJECT_FILES.
+project_files_to_remove() {
+  if [ -f "$INSTALLED_MANIFEST_PATH" ]; then
+    awk -F'|' '$1=="FILE"{print $4}' "$INSTALLED_MANIFEST_PATH"
+    return 0
+  fi
+  for f in $FALLBACK_PROJECT_FILES; do
+    printf '%s\n' "$DIR/$f"
+  done
+}
+
+remove_project_files() {
+  project_files_to_remove | while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    rm -f "$p"
   done
   rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env"
   rm -f "$INITD_SCRIPT"
@@ -217,6 +254,15 @@ remove_files() {
   rm -rf "$STATS_AUTH_RUNTIME_DIR"
   rm -rf "$STATS_UPDATE_RUNTIME_DIR"
   rm -rf "$DIR/__pycache__"
+  rm -rf "$UPDATE_STATE_DIR"
+  # Страховка: install.sh/uninstall.sh снимаются явно независимо от
+  # источника списка выше (например, устаревший installed-manifest.txt от
+  # версии до этого изменения мог не содержать их) - переустановка после
+  # uninstall.sh должна безусловно идти через bootstrap, а не искать себя
+  # рядом. Безопасно при запуске как "sh .../uninstall.sh" (Linux не
+  # трогает уже открытый исполняемый файл до завершения процесса) и
+  # пропускается сам собой, если файлов уже нет.
+  rm -f "$DIR/install.sh" "$DIR/uninstall.sh"
 }
 
 purge_data() {
@@ -233,7 +279,7 @@ main() {
   remove_cron
   remove_update_cron
   revert_config
-  remove_files
+  remove_project_files
   purge_data
   echo "uninstall.sh: деинсталляция завершена" >&2
 }

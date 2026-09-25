@@ -22,6 +22,11 @@ STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
+# Те же дефолты, что в update.sh - единое состояние обновлятора, которым
+# пользуется и install.sh (пишет installed-manifest.txt после установки),
+# и update.sh, и uninstall.sh (читает его же для полного сноса).
+UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-$DIR/.update}
+INSTALLED_MANIFEST_PATH=${INSTALLED_MANIFEST_PATH:-$UPDATE_STATE_DIR/installed-manifest.txt}
 
 # --- Bootstrap для однострочной установки ---------------------------------
 # Позволяет ставить проект командой
@@ -187,15 +192,32 @@ bootstrap_selfinstall() {
     chmod "$mode" "$DIR/$src" || { echo "install.sh: не удалось задать режим $DIR/$src" >&2; return 1; }
   done < "$BOOTSTRAP_WORK/files"
 
-  # Тег - хвост BOOTSTRAP_PINNED_BASE (.../download/<RELEASE_TAG>), а не
-  # повторное чтение манифеста - тот уже удалён следующей строкой ниже.
+  # Тег - хвост BOOTSTRAP_PINNED_BASE (.../download/<RELEASE_TAG>), берём
+  # ДО удаления временного каталога с манифестом ниже.
   bootstrap_tag=${BOOTSTRAP_PINNED_BASE##*/}
+
+  # Сохраняем сам манифест релиза как installed-manifest.txt - тот же файл
+  # и формат, что пишет update_transaction.sh после обновления (см.
+  # update.sh:INSTALLED_MANIFEST_PATH). Это единый источник истины о том,
+  # что реально установлено - его читает uninstall.sh при полном сносе
+  # проекта, вместо отдельного захардкоженного списка. Неудача записи не
+  # должна валить установку - при её отсутствии uninstall.sh просто
+  # использует запасной список (см. uninstall.sh:FALLBACK_PROJECT_FILES).
+  if mkdir -p "$UPDATE_STATE_DIR" 2>/dev/null; then
+    bootstrap_manifest_tmp="$UPDATE_STATE_DIR/.installed-manifest.$$.tmp"
+    if cp "$BOOTSTRAP_MANIFEST" "$bootstrap_manifest_tmp" 2>/dev/null; then
+      chmod 0600 "$bootstrap_manifest_tmp" 2>/dev/null || true
+      mv "$bootstrap_manifest_tmp" "$INSTALLED_MANIFEST_PATH" 2>/dev/null || rm -f "$bootstrap_manifest_tmp"
+    fi
+  fi
+
   rm -rf "$BOOTSTRAP_WORK"
   echo "install.sh: файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
   SELFDIR=$DIR
 }
 
-if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && [ ! -f "$SELFDIR/version_check.sh" ]; then
+if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] &&
+   { [ ! -f "$SELFDIR/version_check.sh" ] || [ ! -f "$SELFDIR/speedtest2.sh" ]; }; then
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   bootstrap_selfinstall || {
