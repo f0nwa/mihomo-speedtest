@@ -53,7 +53,7 @@ SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 # 1 - не трогать config.yaml, даже если рядом есть бэкап setup.sh.
 SKIP_CONFIG_REVERT=${SKIP_CONFIG_REVERT:-0}
 # 1 - откатывать config.yaml не к самому свежему бэкапу *.bak, а к самому
-# свежему из тех бэкапов, где ещё нет провайдера "fast" (группы, которую
+# РАННЕМУ из тех бэкапов, где ещё нет провайдера "fast" (группы, которую
 # ведёт speedtest2.sh - см. has_fast_group()/find_backup_before_fast()).
 REVERT_BEFORE_FAST=${REVERT_BEFORE_FAST:-0}
 # 1 - дополнительно удалить журналы, историю замеров и веб-статику
@@ -74,7 +74,7 @@ PURGE_DATA=${PURGE_DATA:-0}
 FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
 render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
 stats_index.html stats_style.css stats_app.js stats_chart.js render_progress.awk stats_init.sh
-uninstall.sh VERSIONS install.sh version_check.sh
+uninstall.sh VERSIONS install.sh version_check.sh mihomo-speedtest.sh
 migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml
 update_transaction.sh update_prepare.sh update.sh update_plan.awk"
 
@@ -185,15 +185,21 @@ has_fast_group() {
   grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
 }
 
-# Среди $CONFIG.*.bak (тот же порядок перебора, что и обычный поиск
-# "последнего" ниже) - самый свежий бэкап, где группы fast ещё нет.
+# Среди $CONFIG.*.bak (имена вида config.yaml.YYYY-MM-DD_HHMMSS.bak - глоб
+# перебирает их в хронологическом порядке) - самый РАННИЙ бэкап, где
+# группы fast ещё нет. Не самый свежий из pre-fast: цель -
+# гарантированно чистое, самое старое известное состояние до того, как
+# fast появилась вообще, а не последнее состояние перед самим её
+# появлением. Как только нашли первый подходящий - выходим, дальше не
+# смотрим (более новые pre-fast бэкапы, если они есть, не нужны).
 find_backup_before_fast() {
-  found=""
   for b in "$CONFIG".*.bak; do
     [ -f "$b" ] || continue
-    has_fast_group "$b" || found=$b
+    if ! has_fast_group "$b"; then
+      printf '%s\n' "$b"
+      return 0
+    fi
   done
-  printf '%s\n' "$found"
 }
 
 revert_config() {
@@ -267,7 +273,31 @@ project_files_to_remove() {
   done
 }
 
+remove_mihomo_speedtest_symlink() {
+  # Удаляет /opt/sbin/mihomo-speedtest или /opt/bin/mihomo-speedtest, но
+  # только если это символическая ссылка именно на $DIR/mihomo-speedtest.sh -
+  # посторонний файл/ссылка по тому же имени не трогается. install.sh мог
+  # создать ссылку в любом из двух каталогов в зависимости от того, что
+  # было доступно на момент установки (ensure_mihomo_speedtest_symlink()) -
+  # проверяем оба, а не только /opt/sbin.
+  own_target=$DIR/mihomo-speedtest.sh
+  for bindir in "${BIN_SBIN_DIR:-/opt/sbin}" "${BIN_BIN_DIR:-/opt/bin}"; do
+    link=$bindir/mihomo-speedtest
+    [ -L "$link" ] || continue
+    current=$(readlink "$link" 2>/dev/null) || current=""
+    # if/then, а не "&&" отдельной командой цикла: несовпадение (обычный,
+    # ожидаемый случай для чужой ссылки в другом каталоге) даёт статус 1 -
+    # под set -eu это раньше валило remove_project_files() и весь
+    # uninstall.sh целиком, не дойдя до остальной очистки (найдено финальным
+    # обзором ветки 2026-09-26 - см. ledger плана).
+    if [ "$current" = "$own_target" ]; then
+      rm -f "$link"
+    fi
+  done
+}
+
 remove_project_files() {
+  remove_mihomo_speedtest_symlink
   project_files_to_remove | while IFS= read -r p; do
     [ -n "$p" ] || continue
     rm -f "$p"

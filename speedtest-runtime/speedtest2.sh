@@ -109,7 +109,7 @@ STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # п
 # ставятся/обновляются через install.sh и новый релизный обновлятор
 # (release/components.txt, update.sh, версионируется отдельно через
 # UPDATER_VERSION - см. release/manifest-format.md).
-CORE_VERSION=${CORE_VERSION:-4}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk
+CORE_VERSION=${CORE_VERSION:-4}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk, mihomo-speedtest.sh
 STATS_VERSION=${STATS_VERSION:-4}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk, stats_service.sh, stats_init.sh
 UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
 UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}

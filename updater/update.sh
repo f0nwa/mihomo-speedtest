@@ -17,6 +17,39 @@ TMPROOT=${TMPROOT:-/tmp}
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+ensure_mihomo_speedtest_symlink() {
+  # Копия install.sh:ensure_mihomo_speedtest_symlink() - символическая
+  # ссылка не публикуется через манифест/транзакцию (см.
+  # docs/superpowers/specs/2026-09-26-mihomo-speedtest-cli-design.md,
+  # раздел 3), поэтому продублирована здесь так же, как install.sh
+  # дублирует has_fast_group() из uninstall.sh. Сообщения - через echo/>&2,
+  # а не через say() (тот пишет в stdout): apply у некоторых вызывающих
+  # (см. tests/test_update_transaction.sh) читает stdout как чистый JSON
+  # результата транзакции, и любая посторонняя строка там (даже успешная)
+  # ломает разбор - эта функция вызывается на КАЖДЫЙ apply независимо от
+  # состава компонентов, поэтому её сообщения не могут быть на стандартном
+  # выводе, в отличие от initialize_web_auth() (та молчит, если веб-компонент
+  # не установлен, и это уже терпимо существующими тестами).
+  target=$1
+  for bindir in "${2:-/opt/sbin}" "${3:-/opt/bin}"; do
+    [ -d "$bindir" ] && [ -w "$bindir" ] || continue
+    link=$bindir/mihomo-speedtest
+    if [ -e "$link" ] && [ ! -L "$link" ]; then
+      echo "WARN: $link уже существует и не является символической ссылкой - не трогаю, пробую следующий каталог" >&2
+      continue
+    fi
+    current=$(readlink "$link" 2>/dev/null) || current=""
+    [ "$current" = "$target" ] && return 0
+    if ln -sf "$target" "$link" 2>/dev/null; then
+      echo "команда доступна как: mihomo-speedtest (симлинк в $bindir)" >&2
+      return 0
+    fi
+  done
+  echo "WARN: не удалось создать символическую ссылку mihomo-speedtest в /opt/sbin или /opt/bin - используйте полный путь: sh $target" >&2
+  return 0
+}
+
 initialize_web_auth() {
   # $DIR здесь - каталог проверенного движка обновления (bootstrap-копия
   # update.sh/update_plan.awk/update_prepare.sh/update_transaction.sh), а не
@@ -425,6 +458,7 @@ case $cmd in
       . "$DIR/update_transaction.sh"
       transaction_apply
       transaction_result
+      ensure_mihomo_speedtest_symlink "$(target_file /opt/etc/mihomo-speedtest)/mihomo-speedtest.sh"
       initialize_web_auth
     fi
     exit 0 ;;

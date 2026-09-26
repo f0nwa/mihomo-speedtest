@@ -20,7 +20,7 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh VERSIONS setup.sh detect_ua.sh render_config.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
@@ -353,6 +353,33 @@ atomic_install() {
   if ! mv "$tmp" "$dst"; then rm -f "$tmp"; return 1; fi
 }
 
+ensure_mihomo_speedtest_symlink() {
+  # $1 - путь к mihomo-speedtest.sh, $2/$3 - каталоги-кандидаты для ссылки
+  # (по умолчанию /opt/sbin и /opt/bin - см. вызов ниже; параметризовано
+  # ради тестируемости без системных путей). Публикация символической
+  # ссылки через манифест/транзакцию обновлятора невозможна (см.
+  # docs/superpowers/specs/2026-09-26-mihomo-speedtest-cli-design.md,
+  # раздел 3) - функция продублирована здесь, в update.sh и в uninstall.sh
+  # по образцу уже существующего дублирования has_fast_group().
+  target=$1
+  for bindir in "${2:-/opt/sbin}" "${3:-/opt/bin}"; do
+    [ -d "$bindir" ] && [ -w "$bindir" ] || continue
+    link=$bindir/mihomo-speedtest
+    if [ -e "$link" ] && [ ! -L "$link" ]; then
+      echo "WARN - $link уже существует и не является символической ссылкой - не трогаю, пробую следующий каталог" >&2
+      continue
+    fi
+    current=$(readlink "$link" 2>/dev/null) || current=""
+    [ "$current" = "$target" ] && return 0
+    if ln -sf "$target" "$link" 2>/dev/null; then
+      echo "команда доступна как: mihomo-speedtest (симлинк в $bindir)" >&2
+      return 0
+    fi
+  done
+  echo "WARN - не удалось создать символическую ссылку mihomo-speedtest в /opt/sbin или /opt/bin - используйте полный путь: sh $target" >&2
+  return 0
+}
+
 # PROJECT_TOOLS определён выше, рядом с DIR/SELFDIR (нужен и bootstrap-
 # триггеру, который срабатывает раньше этого места файла).
 install_files() {
@@ -406,6 +433,7 @@ install_files() {
   mkdir -p "$INITD_DIR" 2>/dev/null || true
   atomic_install "$SELFDIR/stats_init.sh" "$INITD_SCRIPT" || return 1
   chmod +x "$INITD_SCRIPT"
+  ensure_mihomo_speedtest_symlink "$DIR/mihomo-speedtest.sh"
 }
 
 write_env() {
@@ -435,6 +463,23 @@ write_env() {
         printf "%s='%s'\n" "$limit_key" "$(read_speedtest_const "$limit_key" "$limit_default")"
       fi
     done
+    # STATS_HTTP_ENABLE - персистентный флаг stop-web/start-web (см.
+    # docs/superpowers/specs/2026-09-26-mihomo-speedtest-cli-design.md,
+    # раздел 4): фиксированный дефолт '1', а не число из read_speedtest_const -
+    # у read_speedtest_const's awk-парсера свой формат под NAME=число, а не
+    # под NAME=${NAME:-1}, как объявлен STATS_HTTP_ENABLE в speedtest2.sh.
+    # Без кавычек - web/stats_init.sh:stats_enabled() читает эту переменную
+    # наивным sed-разбором (s/^STATS_HTTP_ENABLE=//p), не полноценным ".",
+    # и кавычки попали бы в значение буквально (val="'1'" != "1") - служба
+    # решила бы, что флаг выключен, хотя он включён. В отличие от прочих
+    # полей этого файла (BLOCK, лимиты и т.п.), которые читает только
+    # обычный "." - там кавычки безопасны и стилистически единообразны.
+    saved_web_enable=$(sed -n '/^STATS_HTTP_ENABLE=/p' "$dst" 2>/dev/null | tail -1)
+    if [ -n "$saved_web_enable" ]; then
+      printf '%s\n' "$saved_web_enable"
+    else
+      printf "STATS_HTTP_ENABLE=1\n"
+    fi
   } > "$tmp"
   mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
 }
@@ -545,7 +590,104 @@ initialize_web_auth() {
     --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}") || return 1
   if [ -n "$code" ]; then
     echo "одноразовый код первичной настройки: $code" >&2
-    echo "откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
+    host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
+    [ -n "$host" ] || host="<адрес роутера>"
+    echo "откройте http://$host:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
+  fi
+}
+
+advertise_host() {
+  # $1 = STATS_HTTP_BIND. Копия stats_httpd_advertise_host() из
+  # speedtest-runtime/speedtest2.sh (см. её комментарий там) - install.sh
+  # не подключает speedtest2.sh как библиотеку, поэтому логика
+  # продублирована буквально, по образцу уже существующего дублирования
+  # has_fast_group() между install.sh/uninstall.sh. STATS_HTTPD_IP_CMD
+  # задаётся дефолтом инлайн (а не отдельной верхнеуровневой переменной,
+  # как в speedtest2.sh) - install.sh этой переменной не объявляет.
+  case "$1" in
+    0.0.0.0|"") ;;
+    *) printf '%s' "$1"; return 0 ;;
+  esac
+  command -v "${STATS_HTTPD_IP_CMD:-ip}" >/dev/null 2>&1 || return 0
+  "${STATS_HTTPD_IP_CMD:-ip}" -4 -o addr show scope global 2>/dev/null \
+    | awk '{print $4}' | cut -d/ -f1 | awk '
+        function is_private(ip,    o, n) {
+          n = split(ip, o, ".")
+          if (n != 4) return 0
+          if (o[1] == 10) return 1
+          if (o[1] == 192 && o[2] == 168) return 1
+          if (o[1] == 172 && o[2] >= 16 && o[2] <= 31) return 1
+          return 0
+        }
+        !got_any { first = $0; got_any = 1 }
+        is_private($0) && !got_priv { priv = $0; got_priv = 1 }
+        END {
+          if (got_priv) print priv
+          else if (got_any) print first
+        }
+      '
+}
+
+print_web_url() {
+  envfile=${ENVFILE:-$DIR/speedtest2.env}
+  if [ ! -f "$envfile" ]; then
+    echo "$envfile не найден - сначала выполните установку (mihomo-speedtest install)" >&2
+    return 1
+  fi
+  . "$envfile"
+  if [ "${STATS_HTTP_ENABLE:-1}" != 1 ]; then
+    echo "веб-сервис статистики отключён (mihomo-speedtest start-web - включить)" >&2
+    return 0
+  fi
+  host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
+  [ -n "$host" ] || host="<не удалось определить IP - смотрите ip addr на роутере>"
+  echo "веб-интерфейс статистики: http://$host:${STATS_HTTP_PORT:-8899}/stats.html" >&2
+}
+
+show_url_main() {
+  print_web_url
+  # if/then, а не "&&" отдельной командой функции: check возвращает
+  # ненулевой статус, когда служба остановлена (это его штатное поведение),
+  # а такая функция, вызванная простой командой (например, из case-
+  # диспетчера конца файла), под set -eu обрывалась бы здесь, не доходя до
+  # "return 0" (найдено финальным обзором ветки 2026-09-26 - см. ledger
+  # плана).
+  if [ -x "$INITD_SCRIPT" ]; then
+    "$INITD_SCRIPT" check || true
+  fi
+  return 0
+}
+
+set_env_flag() {
+  # $1=имя, $2=значение - точечная атомарная замена одной строки в
+  # $DIR/speedtest2.env без потери остальных (тот же приём, что
+  # web/stats_cgi.sh:set_env_var(), продублирован здесь - install.sh не
+  # подключает stats_cgi.sh). БЕЗ кавычек вокруг значения (в отличие от
+  # set_env_var()) - единственный вызывающий на сегодня, STATS_HTTP_ENABLE,
+  # читает web/stats_init.sh:stats_enabled() наивным sed-разбором без
+  # снятия кавычек (см. комментарий в write_env()); в кавычках значение
+  # '1' != 1 сломало бы проверку.
+  name=$1; val=$2
+  envfile=${ENVFILE:-$DIR/speedtest2.env}
+  [ -f "$envfile" ] || { echo "$envfile не найден, сначала обычная установка" >&2; return 1; }
+  tmp="$envfile.$$"
+  { grep -v "^$name=" "$envfile"; printf "%s=%s\n" "$name" "$val"; } > "$tmp" \
+    && mv "$tmp" "$envfile" || { rm -f "$tmp"; echo "не удалось записать $envfile" >&2; return 1; }
+}
+
+stop_web_main() {
+  set_env_flag STATS_HTTP_ENABLE 0 || return 1
+  [ -x "$INITD_SCRIPT" ] && "$INITD_SCRIPT" stop >/dev/null 2>&1
+  echo "веб-сервис статистики остановлен и отключён - при переустановке/обновлении проекта он не будет запускаться автоматически (mihomo-speedtest start-web - включить обратно)" >&2
+  return 0
+}
+
+start_web_main() {
+  set_env_flag STATS_HTTP_ENABLE 1 || return 1
+  if [ -x "$INITD_SCRIPT" ] && "$INITD_SCRIPT" restart >/dev/null 2>&1; then
+    print_web_url
+  else
+    echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
   fi
 }
 
@@ -671,6 +813,7 @@ main() {
   if [ "$web_ready" = 1 ] && [ -x "$INITD_SCRIPT" ]; then
     if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
       echo "веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
+      print_web_url
     else
       echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
     fi
@@ -708,9 +851,11 @@ recalibrate_main() {
 }
 
 if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then
-  if [ "${1:-}" = "--recalibrate" ]; then
-    recalibrate_main
-  else
-    main "$@"
-  fi
+  case "${1:-}" in
+    --recalibrate) recalibrate_main ;;
+    --stop-web) stop_web_main ;;
+    --start-web) start_web_main ;;
+    --show-url) show_url_main ;;
+    *) main "$@" ;;
+  esac
 fi

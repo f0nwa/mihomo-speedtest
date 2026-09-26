@@ -49,6 +49,7 @@ FILE|installer|uninstall.sh|/opt/etc/mihomo-speedtest/uninstall.sh|0755|sh
 FILE|installer|installer/VERSIONS|/opt/etc/mihomo-speedtest/VERSIONS|0644|none
 FILE|installer|install.sh|/opt/etc/mihomo-speedtest/install.sh|0755|sh
 FILE|installer|installer/version_check.sh|/opt/etc/mihomo-speedtest/version_check.sh|0755|sh
+FILE|installer|mihomo-speedtest.sh|/opt/etc/mihomo-speedtest/mihomo-speedtest.sh|0755|sh
 
 FILE|config-tools|config-tools/migrate_config.sh|/opt/etc/mihomo-speedtest/migrate_config.sh|0755|sh
 FILE|config-tools|config-tools/migrate_config.awk|/opt/etc/mihomo-speedtest/migrate_config.awk|0644|awk
