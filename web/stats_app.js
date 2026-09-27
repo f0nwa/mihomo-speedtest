@@ -18,30 +18,10 @@
 (function () {
   'use strict';
 
-  var THEME_KEY = 'speedtest2-theme';
-  var root = document.documentElement;
   var app = document.getElementById('app');
-  var themeBtn = document.getElementById('themeBtn');
   var mainNav = document.getElementById('mainNav');
   var logoutBtn = document.getElementById('logoutBtn');
   var authState = null;
-
-  function applyTheme(t) {
-    if (t) { root.setAttribute('data-theme', t); } else { root.removeAttribute('data-theme'); }
-    var cur = root.getAttribute('data-theme');
-    themeBtn.textContent = cur === 'dark' ? 'Светлая тема' : cur === 'light' ? 'Тёмная тема' : 'Тема: авто';
-  }
-  var savedTheme = null;
-  try { savedTheme = localStorage.getItem(THEME_KEY); } catch (e) { /* приватный режим и т.п. - без темы по умолчанию */ }
-  applyTheme(savedTheme);
-  themeBtn.addEventListener('click', function () {
-    var cur = root.getAttribute('data-theme');
-    var next = cur === 'dark' ? 'light' : cur === 'light' ? null : 'dark';
-    applyTheme(next);
-    try {
-      if (next) { localStorage.setItem(THEME_KEY, next); } else { localStorage.removeItem(THEME_KEY); }
-    } catch (e) { /* см. выше */ }
-  });
 
   function updateActiveNav(path) {
     var links = document.querySelectorAll('nav a[data-link]');
