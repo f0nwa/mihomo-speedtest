@@ -87,6 +87,7 @@ prepare() {
   write_stats_cgi
   write_stats_run
   write_stats_update
+  write_stats_system
   write_stats_static
   return 0
 }
