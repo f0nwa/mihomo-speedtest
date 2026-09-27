@@ -17,10 +17,23 @@ UPDATE_SCRIPT=${UPDATE_SCRIPT:-$DIR/update.sh}
 STATS_UPDATE_RUNTIME_DIR=${STATS_UPDATE_RUNTIME_DIR:-/tmp/mihomo-speedtest-update}
 LAST_CHECK_FILE=$STATS_UPDATE_RUNTIME_DIR/last-check.json
 JOB_FILE=$STATS_UPDATE_RUNTIME_DIR/job.json
+# job.log - путь ФИКСИРОВАННЫЙ (не $$-суффиксный, в отличие от прежних
+# cpw_err/caw_err) - только так статус (cmd_status(), другой процесс) может
+# читать его ПОКА фоновый воркер ещё работает: это и есть "мини консоль"
+# раздела /updates (задача веб-редизайна, см. CHANGELOG). Усекается самим
+# воркером в начале prepare-worker/apply-worker; наружу отдаётся как есть,
+# без ротации - следующий запуск воркера снова усекает.
+JOB_LOG=$STATS_UPDATE_RUNTIME_DIR/job.log
 export DIR TMPROOT UPDATE_SCRIPT STATS_UPDATE_RUNTIME_DIR
 export UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-} UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-} \
   UPDATE_TARGET_ROOT=${UPDATE_TARGET_ROOT:-} UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-} \
   UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}
+# UPDATE_NOTES_API_BASE/UPDATE_NOTES_HTTP_CMD - для cmd_check(): текст "что
+# нового" в релизе (задача веб-редизайна). UPDATE_NOTES_HTTP_CMD - только
+# для тестов (подменяет и curl, и сам API GitHub локальной фикстурой),
+# аналогично UPDATE_HTTP_CMD у update.sh.
+UPDATE_NOTES_API_BASE=${UPDATE_NOTES_API_BASE:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases/tags}
+UPDATE_NOTES_HTTP_CMD=${UPDATE_NOTES_HTTP_CMD:-}
 
 json_error() {
   echo "Content-Type: application/json; charset=utf-8"
@@ -49,7 +62,20 @@ json_escape_line() {
 # в update.sh всегда печатает одну строку "ERROR: ...", но на всякий
 # случай схлопываем весь stderr в одну строку и обрезаем длину).
 capture_stderr_line() {
-  tr '\n' ' ' < "$1" | cut -c1-400
+  # Берём ПОСЛЕДНЮЮ строку "ERROR: ..." (die() в update.sh всегда пишет
+  # именно так), а не весь файл целиком - после того как job.log начал
+  # получать несколько строк прогресса (мини консоль, задача веб-
+  # редизайна), схлопывание всего файла в одну строку и обрезка по 400
+  # символам могла бы отрезать саму ошибку, если прогресс-строк перед ней
+  # накопилось много. Если строки "ERROR:" нет вовсе (не должно случаться
+  # при code=1 от update.sh, но лучше отдать хоть что-то) - старое
+  # поведение как запасной вариант.
+  cfl_line=$(grep '^ERROR:' "$1" 2>/dev/null | tail -1)
+  if [ -n "$cfl_line" ]; then
+    printf '%s' "$cfl_line" | cut -c1-400
+  else
+    tr '\n' ' ' < "$1" | cut -c1-400
+  fi
 }
 
 urldecode() {
@@ -120,6 +146,91 @@ read_json_or_null() {
   [ -f "$1" ] && cat "$1" || printf 'null'
 }
 
+# Локальное чтение одного поля из FORMAT_VERSION=2-манифеста (то же самое,
+# что manifest_field() в update.sh) - update.sh запускается ОТДЕЛЬНЫМ
+# процессом (sh "$UPDATE_SCRIPT" ...), его shell-функции сюда не
+# пробрасываются, поэтому копия нужна: используется только для чтения
+# installed_version при формировании notes (см. fetch_release_notes()
+# ниже) и НЕ меняет схему update_plan.awk/update.sh (задача веб-редизайна -
+# минимизация отпечатка изменения).
+su_manifest_field() { awk -F= -v k="$2" '$1==k{print $2; exit}' "$1" 2>/dev/null; }
+
+# Путь к установленному манифесту - та же логика по умолчанию, что и в
+# update.sh (DIR/UPDATE_STATE_DIR/INSTALLED_MANIFEST_PATH), но вычисляется
+# здесь заново: update.sh не экспортирует свои переменные наружу.
+su_installed_manifest_path() {
+  su_state_dir=${UPDATE_STATE_DIR:-$DIR/.update}
+  printf '%s' "${INSTALLED_MANIFEST_PATH:-$su_state_dir/installed-manifest.txt}"
+}
+
+# Забирает текст релиза (поле "body") с GitHub API для одного тега -
+# $1=тег (например "v10"). Печатает уже готовую JSON-строку В КАВЫЧКАХ
+# (json.dumps дал бы то же самое, но парсер здесь наивный - экранирование
+# всегда через python3, чтобы переносы строк/кавычки в тексте релиза не
+# ломали итоговый JSON last-check.json). Возврат 1 при любой сетевой/
+# парсинг-ошибке - вызывающий код (fetch_release_notes) должен считать
+# это некритичным и не блокировать сам check.
+fetch_release_note() {
+  frn_tag=$1
+  frn_url="$UPDATE_NOTES_API_BASE/$frn_tag"
+  frn_json=$STATS_UPDATE_RUNTIME_DIR/.notes-$$.json
+  mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
+  if [ -n "$UPDATE_NOTES_HTTP_CMD" ]; then
+    $UPDATE_NOTES_HTTP_CMD "$frn_url" > "$frn_json" 2>/dev/null || { rm -f "$frn_json"; return 1; }
+  elif command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time "${UPDATE_HTTP_TIMEOUT:-15}" -H 'Accept: application/vnd.github+json' \
+      -H 'User-Agent: mihomo-speedtest' "$frn_url" > "$frn_json" 2>/dev/null || { rm -f "$frn_json"; return 1; }
+  else
+    return 1
+  fi
+  command -v python3 >/dev/null 2>&1 || { rm -f "$frn_json"; return 1; }
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(json.dumps(data.get("body") or "", ensure_ascii=False))
+except Exception:
+    sys.exit(1)
+' "$frn_json"
+  frn_rc=$?
+  rm -f "$frn_json"
+  return $frn_rc
+}
+
+# Собирает JSON-массив "notes" для всех релизов между установленной версией
+# (не включая) и целевой версией плана (включая) - "если пропущено
+# несколько обновлений, перечислить все изменения из предыдущих релизов"
+# (задача веб-редизайна). $1=целевая версия (release_version плана, уже
+# известно что это число). Печатает JSON-массив (может быть "[]", если
+# installed_version неизвестна/не меньше целевой, или тексты не
+# добываются - сеть/API недоступны). Непарсимые/недоступные релизы просто
+# пропускаются - лучше показать частичный список, чем не показать check
+# вовсе (ruling: не блокировать check сетевой недоступностью notes).
+fetch_release_notes() {
+  frs_target=$1
+  frs_installed=$(su_manifest_field "$(su_installed_manifest_path)" RELEASE_VERSION)
+  case $frs_installed in *[!0-9]*|'') frs_installed=0 ;; esac
+  frs_from=$((frs_installed + 1))
+  [ "$frs_from" -le "$frs_target" ] || { printf '[]'; return 0; }
+  frs_out=""
+  frs_v=$frs_from
+  while [ "$frs_v" -le "$frs_target" ]; do
+    # "if", а не хвостовая цепочка "&&" - неудачный fetch_release_note()
+    # (обычный, ожидаемый случай: отсутствующий/недоступный релиз) не
+    # должен закончить всю функцию (и cmd_check() целиком) под set -eu -
+    # та же ловушка, что и в исходном уроке ревью этой сессии про
+    # uninstall.sh:remove_mihomo_speedtest_symlink().
+    frs_body=""
+    if frs_body=$(fetch_release_note "v$frs_v") && [ -n "$frs_body" ]; then
+      frs_entry="{\"version\":$frs_v,\"tag\":\"v$frs_v\",\"body\":$frs_body}"
+      frs_out="${frs_out:+$frs_out,}$frs_entry"
+    fi
+    frs_v=$((frs_v + 1))
+  done
+  printf '[%s]' "$frs_out"
+}
+
 cmd_check() {
   # $1 = источник ("cron" или "button") - только для диагностики в файле,
   # фронтенд источник не показывает (оба пишут в один и тот же файл).
@@ -142,10 +253,20 @@ cmd_check() {
   if [ "$ok" = true ]; then
     planval=$(cat "$out")
   fi
+  # notes - только когда план получен успешно И объявляет release_version
+  # (не блокирует check при сбое: см. fetch_release_notes()) - минорная
+  # веб-фича, не часть контракта update.sh --plan.
+  notesval=null
+  if [ "$ok" = true ]; then
+    cc_target=$(printf '%s' "$planval" | sed -n 's/.*"release_version":"\([0-9]*\)".*/\1/p')
+    if [ -n "$cc_target" ]; then
+      notesval=$(fetch_release_notes "$cc_target") || notesval='[]'
+    fi
+  fi
   tmp=$STATS_UPDATE_RUNTIME_DIR/.last-check.$$
   {
-    printf '{"schema_version":1,"checked_at":"%s","source":"%s","ok":%s,"error":%s,"plan":%s}\n' \
-      "$(date '+%Y-%m-%d %H:%M:%S')" "$source" "$ok" "$errline" "$planval"
+    printf '{"schema_version":1,"checked_at":"%s","source":"%s","ok":%s,"error":%s,"plan":%s,"notes":%s}\n' \
+      "$(date '+%Y-%m-%d %H:%M:%S')" "$source" "$ok" "$errline" "$planval" "$notesval"
   } > "$tmp"
   write_json_atomic "$tmp" "$LAST_CHECK_FILE"
   rm -f "$out" "$err" "$tmp"
@@ -153,8 +274,29 @@ cmd_check() {
   [ "$ok" = true ]
 }
 
+# Отдаёт содержимое job.log как ОДНУ JSON-строку (для поля "log" в
+# cmd_status()) - переносы строк экранируются самим json_escape_line() в
+# "\n" средствами printf %s не подойдёт (тот схлопывает переносы в
+# пробел, это годится для однострочной сводки ошибки, но не для мини-
+# консоли, где переносы строк - это и есть границы этапов). Используем
+# python3 для честного JSON-экранирования всего файла целиком, включая
+# управляющие символы; при отсутствии python3 или файла - "null".
+read_job_log_json() {
+  [ -f "$1" ] || { printf 'null'; return 0; }
+  command -v python3 >/dev/null 2>&1 || { printf 'null'; return 0; }
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as f:
+        print(json.dumps(f.read(), ensure_ascii=False))
+except Exception:
+    print("null")
+' "$1"
+}
+
 cmd_status() {
-  printf '{"last_check":%s,"job":%s}\n' "$(read_json_or_null "$LAST_CHECK_FILE")" "$(read_json_or_null "$JOB_FILE")"
+  printf '{"last_check":%s,"job":%s,"log":%s}\n' \
+    "$(read_json_or_null "$LAST_CHECK_FILE")" "$(read_json_or_null "$JOB_FILE")" "$(read_job_log_json "$JOB_LOG")"
 }
 
 # --- prepare/discard: фоновый воркер и экран подтверждения (задача 3) ---
@@ -209,13 +351,16 @@ write_job() {
 # диспетчер не проброшен - недокументированный служебный вызов.
 cmd_prepare_worker() {
   cpw_components=$1
-  write_job running prepare "$cpw_components" null null null 0 0 null null
   mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
+  # job.log усекается ЗДЕСЬ, до первой строки write_job(running) - мини-
+  # консоль на фронтенде должна увидеть пустой лог сразу при переходе в
+  # running, а не хвост предыдущей операции (задача веб-редизайна).
+  : > "$JOB_LOG"
+  write_job running prepare "$cpw_components" null null null 0 0 null null
   cpw_out=$STATS_UPDATE_RUNTIME_DIR/.prepare-out.$$
-  cpw_err=$STATS_UPDATE_RUNTIME_DIR/.prepare-err.$$
   cpw_comp_arg=""
   [ -n "$cpw_components" ] && cpw_comp_arg="--components=$cpw_components"
-  if sh "$UPDATE_SCRIPT" --prepare ${cpw_comp_arg:+"$cpw_comp_arg"} --format=json > "$cpw_out" 2>"$cpw_err"; then
+  if sh "$UPDATE_SCRIPT" --prepare ${cpw_comp_arg:+"$cpw_comp_arg"} --format=json > "$cpw_out" 2>>"$JOB_LOG"; then
     cpw_plan_json=$(cat "$cpw_out")
     cpw_plan_id=$(sed -n 's/.*"plan_id":"\([0-9a-f]\{64\}\)".*/\1/p' "$cpw_out" | head -1)
     cpw_diff_json=null
@@ -235,10 +380,10 @@ cmd_prepare_worker() {
     fi
     write_job done prepare "$cpw_components" "${cpw_plan_id:-null}" "$cpw_plan_json" "$cpw_diff_json" 0 0 null null
   else
-    cpw_errline="\"$(json_escape_line "$(capture_stderr_line "$cpw_err")")\""
+    cpw_errline="\"$(json_escape_line "$(capture_stderr_line "$JOB_LOG")")\""
     write_job error prepare "$cpw_components" null null null 0 0 null "$cpw_errline"
   fi
-  rm -f "$cpw_out" "$cpw_err"
+  rm -f "$cpw_out"
 }
 
 # Фоновый воркер действия "apply". Вызывается ТОЛЬКО через self-exec
@@ -257,20 +402,23 @@ cmd_prepare_worker() {
 cmd_apply_worker() {
   caw_plan_id=$1; caw_cl=$2; caw_cc=$3
   mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
+  # job.log усекается ЗДЕСЬ, до перевода job.json в running - та же
+  # причина, что и в cmd_prepare_worker() выше: мини-консоль не должна
+  # унаследовать хвост лога от предыдущего prepare этого же плана.
+  : > "$JOB_LOG"
   update_job_state running
   set -- --apply "$caw_plan_id"
   [ "$caw_cl" = 1 ] && set -- "$@" --confirm-local
   [ "$caw_cc" = 1 ] && set -- "$@" --confirm-config
   set -- "$@" --format=json
   caw_out=$STATS_UPDATE_RUNTIME_DIR/.apply-out.$$
-  caw_err=$STATS_UPDATE_RUNTIME_DIR/.apply-err.$$
-  if sh "$UPDATE_SCRIPT" "$@" > "$caw_out" 2>"$caw_err"; then
+  if sh "$UPDATE_SCRIPT" "$@" > "$caw_out" 2>>"$JOB_LOG"; then
     write_job done apply "" null null null "$caw_cl" "$caw_cc" "$(cat "$caw_out")" null
   else
-    caw_errline="\"$(json_escape_line "$(capture_stderr_line "$caw_err")")\""
+    caw_errline="\"$(json_escape_line "$(capture_stderr_line "$JOB_LOG")")\""
     write_job error apply "" null null null "$caw_cl" "$caw_cc" null "$caw_errline"
   fi
-  rm -f "$caw_out" "$caw_err"
+  rm -f "$caw_out"
 }
 
 # Точечно меняет "state" в уже существующем job.json (записан write_job()

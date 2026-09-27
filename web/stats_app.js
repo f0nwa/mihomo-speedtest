@@ -708,11 +708,6 @@
 
   // ----- раздел "Обновления" (/api/updates/*) -----
 
-  var FILE_STATE_LABEL = {
-    current: 'актуален', new: 'доступна новая версия', missing: 'отсутствует',
-    modified: 'локально изменён', changed: 'отличается', removed: 'больше не используется'
-  };
-
   function updatesBadgeEl() { return document.getElementById('updatesBadge'); }
 
   function refreshUpdatesBadge() {
@@ -720,23 +715,15 @@
       var badge = updatesBadgeEl();
       if (!badge) { return; }
       var lc = data && data.last_check;
+      // 'missing' - тоже "есть что поставить": релиз, добавляющий только
+      // новые файлы (без единого изменённого), иначе не показал бы бейдж/
+      // кнопку "Обновить" вовсе (баг, найденный при редизайне раздела).
       var available = !!(lc && lc.ok && lc.plan && lc.plan.files &&
-        lc.plan.files.some(function (f) { return f.state === 'new' || f.state === 'modified' || f.state === 'changed'; }));
+        lc.plan.files.some(function (f) {
+          return f.state === 'new' || f.state === 'modified' || f.state === 'changed' || f.state === 'missing';
+        }));
       badge.hidden = !available;
     })['catch'](function () { /* бейдж - необязательная подсказка, сетевая ошибка не должна ломать страницу */ });
-  }
-
-  function buildFilesTable(files) {
-    var table = el('table');
-    var tbody = el('tbody');
-    (files || []).forEach(function (f) {
-      var tr = el('tr');
-      tr.appendChild(el('td', null, f.dest));
-      tr.appendChild(el('td', 'file-state-' + f.state, FILE_STATE_LABEL[f.state] || f.state));
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    return table;
   }
 
   var UPDATE_JOB_POLL_MS = 2000;
@@ -746,74 +733,77 @@
     if (updateJobPollTimer) { clearInterval(updateJobPollTimer); updateJobPollTimer = null; }
   }
 
+  // onUpdate получает целиком ответ /api/updates/status (а не только
+  // data.job) - мини консоли (renderUpdatesProgress) на каждый тик нужен
+  // ещё и data.log, второй отдельный fetch на то же самое был бы лишним.
   function startUpdateJobPolling(onUpdate) {
     stopUpdateJobPolling();
     function tick() {
       fetchJson('/api/updates/status').then(function (data) {
-        onUpdate(data && data.job ? data.job : null);
+        onUpdate(data || {});
       })['catch'](function () { /* временная заминка - опрос продолжится следующим тиком */ });
     }
     tick();
     updateJobPollTimer = setInterval(tick, UPDATE_JOB_POLL_MS);
   }
 
-  function buildUpdatesConfirmScreen(job, container) {
-    var c = card('Подтверждение обновления');
-    c.appendChild(el('p', 'hint', 'Компоненты: ' + (job.components || '(все)') + '.'));
-    c.appendChild(buildFilesTable(job.plan && job.plan.files));
-    var needsLocal = job.plan && job.plan.overwrite_required;
-    var needsConfig = job.config_diff !== null && job.plan && job.plan.config_migration && job.plan.config_migration.confirmation_required;
-    if (needsLocal) {
-      c.appendChild(el('p', 'msg-err', 'Есть локально изменённые файлы - они будут перезаписаны.'));
-    }
-    if (job.config_diff) {
-      c.appendChild(el('h2', null, 'Изменения config.yaml'));
-      var pre = el('pre', 'diff-block', JSON.stringify(job.config_diff, null, 2));
-      c.appendChild(pre);
-      if (needsConfig) {
-        c.appendChild(el('p', 'msg-err', 'Миграция конфига требует отдельного подтверждения.'));
-      }
-    }
-    var row = el('div', 'btn-row');
-    var confirmLocal = null, confirmConfig = null;
-    if (needsLocal) {
-      var lbl1 = el('label', 'row-checkbox');
-      confirmLocal = el('input'); confirmLocal.type = 'checkbox';
-      lbl1.appendChild(confirmLocal); lbl1.appendChild(document.createTextNode('Перезаписать локальные изменения'));
-      c.appendChild(lbl1);
-    }
-    if (needsConfig) {
-      var lbl2 = el('label', 'row-checkbox');
-      confirmConfig = el('input'); confirmConfig.type = 'checkbox';
-      lbl2.appendChild(confirmConfig); lbl2.appendChild(document.createTextNode('Подтверждаю миграцию config.yaml'));
-      c.appendChild(lbl2);
-    }
-    var applyBtn = el('button', 'submit', 'Применить обновление');
-    applyBtn.type = 'button';
-    var cancelBtn = el('button', 'submit secondary', 'Отмена');
-    cancelBtn.type = 'button';
-    row.appendChild(applyBtn); row.appendChild(cancelBtn);
-    c.appendChild(row);
-    applyBtn.addEventListener('click', function () {
-      if (needsLocal && !confirmLocal.checked) { showFormMessage(c, 'Подтвердите перезапись локальных изменений.', 'err'); return; }
-      if (needsConfig && !confirmConfig.checked) { showFormMessage(c, 'Подтвердите миграцию конфига.', 'err'); return; }
-      applyBtn.disabled = true; cancelBtn.disabled = true;
-      var body = new URLSearchParams();
-      body.set('plan_id', job.plan_id);
-      if (confirmLocal && confirmLocal.checked) { body.set('confirm_local', '1'); }
-      if (confirmConfig && confirmConfig.checked) { body.set('confirm_config', '1'); }
-      fetchJson('/api/updates/apply', { method: 'POST', body: body }).then(function (resp) {
-        if (!resp.started) { showFormMessage(c, 'Уже выполняется другая операция обновления.', 'err'); applyBtn.disabled = false; cancelBtn.disabled = false; return; }
-        renderUpdatesProgress('apply');
-      })['catch'](function (err) { showFormMessage(c, 'Не удалось запустить обновление: ' + err.message, 'err'); applyBtn.disabled = false; cancelBtn.disabled = false; });
+  // Мини консоль хода обновления (задача веб-редизайна раздела /updates,
+  // п.3: "видны все этапы и ошибки"). Рендерим построчно (а не одним
+  // textContent) - строки "ERROR:"/"WARN:" получают свой класс для
+  // подсветки; пустая последняя "строка" (хвостовой перевод строки файла)
+  // не рисуется отдельной пустой строкой.
+  function renderConsoleLog(pre, text) {
+    while (pre.firstChild) { pre.removeChild(pre.firstChild); }
+    var lines = String(text || '').split('\n');
+    lines.forEach(function (line, i) {
+      if (line === '' && i === lines.length - 1) { return; }
+      var isErr = line.indexOf('ERROR:') === 0 || line.indexOf('WARN:') === 0;
+      pre.appendChild(el('div', 'log-line' + (isErr ? ' err' : ''), line === '' ? ' ' : line));
     });
-    cancelBtn.addEventListener('click', function () {
-      cancelBtn.disabled = true;
-      var body = new URLSearchParams(); body.set('plan_id', job.plan_id);
-      fetchJson('/api/updates/discard', { method: 'POST', body: body })['catch'](function () { /* discard - лучшее из возможного, план и так истечёт сам через 24ч */ })
-        .then(function () { renderUpdates(); });
+    pre.scrollTop = pre.scrollHeight;
+  }
+
+  // Запускает apply для уже подготовленного плана - как в обычном пути
+  // (план не требует подтверждения, автоматически продолжаем сразу после
+  // prepare, п.2: "пользователь нажал обновить и операция началась"), так
+  // и в принудительном повторе после блокирующего сообщения о локальных
+  // изменениях/миграции конфига (см. handlePrepareDone ниже).
+  function startApply(planId, confirmLocal, confirmConfig, container) {
+    var body = new URLSearchParams();
+    body.set('plan_id', planId);
+    if (confirmLocal) { body.set('confirm_local', '1'); }
+    if (confirmConfig) { body.set('confirm_config', '1'); }
+    fetchJson('/api/updates/apply', { method: 'POST', body: body }).then(function (resp) {
+      if (!resp.started) { showFormMessage(container, 'Уже выполняется другая операция обновления.', 'err'); return; }
+      renderUpdatesProgress('apply');
+    })['catch'](function (err) { showFormMessage(container, 'Не удалось запустить обновление: ' + err.message, 'err'); });
+  }
+
+  // По завершении prepare: если план не требует подтверждения - обновление
+  // продолжается само (без отдельного экрана подтверждения, п.2 задачи
+  // редизайна). Если есть локальные изменения и/или требуется миграция
+  // config.yaml - операция останавливается, сообщение уходит в консоль, и
+  // единственный путь вперёд - кнопка "Обновить принудительно" (решение,
+  // согласованное с пользователем при обсуждении дизайна).
+  function handlePrepareDone(job, container) {
+    var plan = job.plan;
+    var needsLocal = !!(plan && plan.overwrite_required);
+    var needsConfig = !!(job.config_diff !== null && plan && plan.config_migration && plan.config_migration.confirmation_required);
+    if (!needsLocal && !needsConfig) {
+      startApply(job.plan_id, 0, 0, container);
+      return;
+    }
+    var reasons = [];
+    if (needsLocal) { reasons.push('есть локально изменённые файлы - они будут перезаписаны'); }
+    if (needsConfig) { reasons.push('миграция config.yaml требует отдельного подтверждения'); }
+    showFormMessage(container, 'Обновление остановлено: ' + reasons.join('; ') + '.', 'err');
+    var forceBtn = el('button', 'submit', 'Обновить принудительно');
+    forceBtn.type = 'button';
+    forceBtn.addEventListener('click', function () {
+      forceBtn.disabled = true;
+      startApply(job.plan_id, needsLocal ? 1 : 0, needsConfig ? 1 : 0, container);
     });
-    container.appendChild(c);
+    container.appendChild(forceBtn);
   }
 
   function renderUpdatesProgress(action) {
@@ -821,8 +811,12 @@
     var c = card(action === 'prepare' ? 'Подготовка обновления' : 'Применение обновления');
     var status = el('p', 'hint', 'Выполняется...');
     c.appendChild(status);
+    var consolePre = el('pre', 'update-console');
+    c.appendChild(consolePre);
     app.appendChild(c);
-    startUpdateJobPolling(function (job) {
+    startUpdateJobPolling(function (data) {
+      renderConsoleLog(consolePre, data.log);
+      var job = data.job;
       if (!job || job.action !== action) { return; }
       if (job.state === 'queued' || job.state === 'running') { return; }
       stopUpdateJobPolling();
@@ -830,8 +824,13 @@
         status.className = 'msg-err'; status.textContent = 'Ошибка: ' + (job.error || 'неизвестная ошибка');
         return;
       }
-      if (action === 'prepare') { renderUpdates(); return; }
-      status.className = 'msg-ok'; status.textContent = 'Обновление применено. Проверьте раздел ещё раз ("Проверить сейчас"), чтобы обновить список.';
+      if (action === 'prepare') {
+        status.className = 'msg-ok'; status.textContent = 'Подготовка завершена.';
+        handlePrepareDone(job, c);
+        return;
+      }
+      status.className = 'msg-ok'; status.textContent = 'Обновление применено.';
+      refreshUpdatesBadge();
     });
   }
 
@@ -847,7 +846,15 @@
         renderUpdatesProgress(job.action);
         return;
       }
-      var summary = card('Проверка обновлений');
+      // 'missing' - см. комментарий у refreshUpdatesBadge() выше.
+      var available = !!(lc && lc.ok && lc.plan && lc.plan.files &&
+        lc.plan.files.some(function (f) {
+          return f.state === 'new' || f.state === 'modified' || f.state === 'changed' || f.state === 'missing';
+        }));
+      // Одна карточка сверху с обеими кнопками рядом (п.1 задачи редизайна:
+      // "кнопка обновить должна быть вверху, там же где и проверка
+      // обновлений") вместо прежних двух отдельных карточек.
+      var summary = card('Обновления');
       if (lc && lc.ok) {
         summary.appendChild(el('p', 'hint', 'Последняя проверка: ' + lc.checked_at + '. Доступная версия релиза: ' + lc.plan.release_version + '.'));
       } else if (lc) {
@@ -855,32 +862,51 @@
       } else {
         summary.appendChild(el('p', 'hint', 'Проверок ещё не было.'));
       }
+      var row = el('div', 'btn-row');
       var checkBtn = el('button', 'submit', 'Проверить сейчас');
       checkBtn.type = 'button';
+      var updateBtn = el('button', 'submit', 'Обновить');
+      updateBtn.type = 'button';
+      updateBtn.disabled = !available;
       checkBtn.addEventListener('click', function () {
-        checkBtn.disabled = true;
+        checkBtn.disabled = true; updateBtn.disabled = true;
         fetchJson('/api/updates/check', { method: 'POST' }).then(function () { renderUpdates(); refreshUpdatesBadge(); })
-          ['catch'](function (err) { showFormMessage(summary, 'Не удалось проверить: ' + err.message, 'err'); checkBtn.disabled = false; });
+          ['catch'](function (err) {
+            showFormMessage(summary, 'Не удалось проверить: ' + err.message, 'err');
+            checkBtn.disabled = false; updateBtn.disabled = !available;
+          });
       });
-      summary.appendChild(checkBtn);
-      app.appendChild(summary);
-      if (lc && lc.ok && lc.plan) {
-        var list = card('Изменившиеся компоненты');
-        list.appendChild(buildFilesTable(lc.plan.files));
-        var updateBtn = el('button', 'submit', 'Обновить');
-        updateBtn.type = 'button';
-        updateBtn.addEventListener('click', function () {
-          updateBtn.disabled = true;
-          fetchJson('/api/updates/prepare', { method: 'POST' }).then(function (resp) {
-            if (!resp.started) { showFormMessage(list, 'Уже выполняется другая операция обновления.', 'err'); updateBtn.disabled = false; return; }
-            renderUpdatesProgress('prepare');
-          })['catch'](function (err) { showFormMessage(list, 'Не удалось начать подготовку: ' + err.message, 'err'); updateBtn.disabled = false; });
+      updateBtn.addEventListener('click', function () {
+        // Клик "Обновить" сразу запускает операцию, без отдельного экрана
+        // подтверждения (п.2 задачи редизайна) - подготовка (prepare)
+        // сама переходит в применение (apply), если план не требует
+        // подтверждения (см. handlePrepareDone).
+        checkBtn.disabled = true; updateBtn.disabled = true;
+        fetchJson('/api/updates/prepare', { method: 'POST' }).then(function (resp) {
+          if (!resp.started) {
+            showFormMessage(summary, 'Уже выполняется другая операция обновления.', 'err');
+            checkBtn.disabled = false; updateBtn.disabled = !available;
+            return;
+          }
+          renderUpdatesProgress('prepare');
+        })['catch'](function (err) {
+          showFormMessage(summary, 'Не удалось начать подготовку: ' + err.message, 'err');
+          checkBtn.disabled = false; updateBtn.disabled = !available;
         });
-        list.appendChild(updateBtn);
-        app.appendChild(list);
-      }
-      if (job && job.state === 'done' && job.action === 'prepare' && job.plan) {
-        buildUpdatesConfirmScreen(job, app);
+      });
+      row.appendChild(checkBtn); row.appendChild(updateBtn);
+      summary.appendChild(row);
+      app.appendChild(summary);
+      // Вместо полного списка файлов - текст релиза(ов) "что нового" (п.4
+      // задачи редизайна). lc.notes заполняется cmd_check() на backend -
+      // один элемент на каждый пропущенный релиз, от старого к новому.
+      if (lc && lc.ok && lc.notes && lc.notes.length) {
+        var notesCard = card('Что нового');
+        lc.notes.forEach(function (n) {
+          notesCard.appendChild(el('h2', null, 'Релиз ' + n.tag));
+          notesCard.appendChild(el('pre', 'release-notes', n.body || '(описание не указано)'));
+        });
+        app.appendChild(notesCard);
       }
     })['catch'](function (err) { showError('Не удалось загрузить раздел обновлений: ', err); });
   }

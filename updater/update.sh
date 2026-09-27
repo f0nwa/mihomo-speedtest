@@ -452,11 +452,17 @@ case $cmd in
     done < "$WORK/bootstrap-files"
     . "$DIR/update_prepare.sh"
     prepare_init
+    # Прогресс-строки в этом блоке - см. комментарий у "Подготовка
+    # обновления" выше (мини консоль /updates, задача веб-редизайна):
+    # каждая - отдельная команда, ничего не гейтит, только диагностика.
+    if [ "$cmd" = apply ]; then echo 'Проверка подготовленного плана...' >&2; fi
     verify_plan
     if [ "$cmd" = show-config-diff ]; then show_config_diff; fi
     if [ "$cmd" = apply ]; then
+      echo 'Публикация обновления: резервное копирование и запись файлов...' >&2
       . "$DIR/update_transaction.sh"
       transaction_apply
+      echo 'Обновление опубликовано, финальные шаги...' >&2
       transaction_result
       ensure_mihomo_speedtest_symlink "$(target_file /opt/etc/mihomo-speedtest)/mihomo-speedtest.sh"
       initialize_web_auth
@@ -473,6 +479,11 @@ esac
 if [ "$cmd" = prepare ]; then
   SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
   if [ -z "${UPDATE_BOOTSTRAP_DIR:-}" ]; then
+    # Отдельная строка, а не хвостовая часть "&&"/"||" - мини консоль
+    # раздела /updates (задача веб-редизайна) читает это через stderr
+    # родительского процесса stats_update.sh (job.log); в stdout при
+    # --format=json ничего не попадает.
+    echo 'Подготовка обновления: загрузка файлов релиза...' >&2
     # Передаём только фиксированные, уже разобранные CLI-аргументы.
     bootstrap_prepare --prepare "--components=$components" "--format=$format"
     exit 0
