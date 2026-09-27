@@ -459,10 +459,10 @@ case $cmd in
     verify_plan
     if [ "$cmd" = show-config-diff ]; then show_config_diff; fi
     if [ "$cmd" = apply ]; then
-      echo 'Публикация обновления: резервное копирование и запись файлов...' >&2
+      echo 'Применение обновления: резервное копирование и запись файлов...' >&2
       . "$DIR/update_transaction.sh"
       transaction_apply
-      echo 'Обновление опубликовано, финальные шаги...' >&2
+      echo 'Обновление установлено, финальные шаги...' >&2
       transaction_result
       ensure_mihomo_speedtest_symlink "$(target_file /opt/etc/mihomo-speedtest)/mihomo-speedtest.sh"
       initialize_web_auth

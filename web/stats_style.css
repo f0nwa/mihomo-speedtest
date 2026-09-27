@@ -18,12 +18,14 @@
 body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
 .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
 header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
-h1{font-size:19px;margin:0;letter-spacing:.4px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-led{width:8px;height:8px;flex:0 0 auto;background:var(--accent)}
+h1{font-size:17px;margin:0;letter-spacing:1.5px;font-weight:700;text-transform:uppercase}
 .meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
 nav{display:flex;gap:4px}
-nav a{color:var(--text);text-decoration:none;font-size:13px;padding:6px 10px 4px;border-radius:0;border-bottom:2px solid transparent}
+nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 10px 4px;border-radius:0;border-bottom:2px solid transparent}
 nav a:hover{background:var(--card-border)}
-nav a.active{background:transparent;border-bottom-color:var(--accent)}
+nav a.active{background:transparent;color:var(--text);border-bottom-color:var(--accent)}
 .kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
 .kpi{background:var(--card);border:1px solid var(--card-border);border-top:3px solid var(--accent);padding:14px 16px}
 .kpi.kpi-danger{border-top-color:var(--danger)}
@@ -88,3 +90,9 @@ th{color:var(--muted);font-weight:600}
 .file-state-changed{color:#dc2626}
 .file-state-removed{color:var(--muted)}
 .diff-block{max-height:320px;overflow:auto}
+
+/* Нижний футер (артборд "Панель управления": версия/аптайм слева,
+   CPU/MEM/статус mihomo справа) - данные из /api/system, см.
+   stats_app.js:refreshSystemFooter(). Виден только пока аутентифицирован
+   (та же логика, что у nav/logoutBtn) - см. setAuthenticatedUi(). */
+.sys-footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--card-border);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11.5px;letter-spacing:.3px}

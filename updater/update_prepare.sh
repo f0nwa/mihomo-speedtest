@@ -151,6 +151,11 @@ prepare_files() {
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
     [ "$kind" = FILE ] || continue
     file_number=$((file_number + 1))
+    # Построчный прогресс для мини консоли раздела /updates (job.log,
+    # см. stats_update.sh) - пункт фидбека по макету "Панель управления":
+    # раньше на весь prepare был один общий чекпоинт, не видно, что
+    # реально скачивается.
+    echo "Загрузка файла: $dest" >&2
     download_to "$PINNED_BASE/$src" "$WORK/files/$file_number" "$bytes"
     check_download "$WORK/files/$file_number" "$bytes" "$sum"
     check_file_syntax "$WORK/files/$file_number" "$check"

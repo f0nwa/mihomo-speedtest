@@ -843,7 +843,14 @@
         return;
       }
       status.className = 'msg-ok'; status.textContent = 'Обновление применено.';
-      refreshUpdatesBadge();
+      // Пункт фидбека по макету: last_check.plan к этому моменту ещё
+      // относится к состоянию ДО применения обновления, поэтому просто
+      // refreshUpdatesBadge() продолжил бы показывать бейдж как "есть
+      // обновление" до тех пор, пока пользователь не нажмёт "Проверить
+      // сейчас" вручную. Перепроверяем сами - тем же запросом, что и
+      // кнопка "Проверить сейчас" - и только потом обновляем бейдж/плитку.
+      fetchJson('/api/updates/check', { method: 'POST' }).then(function () { refreshUpdatesBadge(); })
+        ['catch'](function () { refreshUpdatesBadge(); });
     });
   }
 
@@ -933,9 +940,62 @@
     if (path !== '/updates') { refreshUpdatesBadge(); }
   }
 
+  // ----- футер (артборд "Панель управления": версия/аптайм/CPU/MEM/mihomo,
+  // см. /api/system и CHANGELOG) -----
+
+  function sysFooterEls() {
+    return {
+      el: document.getElementById('sysFooter'),
+      left: document.getElementById('sysFooterLeft'),
+      right: document.getElementById('sysFooterRight')
+    };
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function fmtUptime(sec) {
+    if (sec === null || sec === undefined) { return '-'; }
+    var d = Math.floor(sec / 86400);
+    var h = Math.floor((sec % 86400) / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    return d + 'D ' + pad2(h) + ':' + pad2(m);
+  }
+
+  function fmtPercent(v) { return (v === null || v === undefined) ? '-' : (v + '%'); }
+
+  function refreshSystemFooter() {
+    var els = sysFooterEls();
+    if (!els.el) { return; }
+    fetchJson('/api/system').then(function (data) {
+      var fw = data.release_version ? ('FIRMWARE v' + data.release_version) : 'FIRMWARE -';
+      els.left.textContent = fw + ' \u00b7 UPTIME ' + fmtUptime(data.uptime_seconds);
+      var mihomo = data.mihomo_active === true ? 'активен'
+        : (data.mihomo_active === false ? 'не активен' : 'статус неизвестен');
+      els.right.textContent = 'CPU ' + fmtPercent(data.cpu_percent) + ' \u00b7 MEM ' +
+        fmtPercent(data.mem_percent) + ' \u00b7 mihomo core ' + mihomo;
+      els.el.hidden = false;
+    })['catch'](function () { /* футер - необязательная подсказка, сетевая ошибка не должна ломать страницу */ });
+  }
+
+  var SYSTEM_FOOTER_POLL_MS = 30000;
+  var systemFooterPollTimer = null;
+
+  function startSystemFooterPolling() {
+    if (systemFooterPollTimer) { return; }
+    refreshSystemFooter();
+    systemFooterPollTimer = setInterval(refreshSystemFooter, SYSTEM_FOOTER_POLL_MS);
+  }
+
+  function stopSystemFooterPolling() {
+    if (systemFooterPollTimer) { clearInterval(systemFooterPollTimer); systemFooterPollTimer = null; }
+    var footer = sysFooterEls().el;
+    if (footer) { footer.hidden = true; }
+  }
+
   function setAuthenticatedUi(authenticated) {
     mainNav.hidden = !authenticated;
     logoutBtn.hidden = !authenticated;
+    if (authenticated) { startSystemFooterPolling(); } else { stopSystemFooterPolling(); }
   }
 
   function authInput(form, name, labelText, type, autocomplete) {

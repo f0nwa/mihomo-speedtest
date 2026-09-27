@@ -77,6 +77,11 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     команду update.sh вызвать (см. stats_update.sh и спеку раздела
     "Веб-флоу") - здесь, в stats_httpd.py, только маршрутизация под общей
     сессией/CSRF, без отдельной логики авторизации.
+  - "/api/system" - внутренний алиас на "cgi-bin/system" (копия
+    stats_system.sh, кладётся write_stats_system() в speedtest2.sh) -
+    футер веб-интерфейса (версия релиза/аптайм/CPU/MEM/статус mihomo).
+    GET/HEAD, без побочных эффектов - под той же общей сессией/CSRF, что
+    и остальные "/api/...".
   - "/api/..." (всё остальное) - алиасов нет, отвечает JSON с кодом 501,
     а не 404, чтобы фронтенд мог отличить "эндпоинт ещё не существует" от
     обрыва сети или опечатки в пути.
@@ -169,6 +174,7 @@ API_ALIASES = {
     "api/updates/prepare": ("cgi-bin/update", {"MST_UPDATE_ACTION": "prepare"}),
     "api/updates/apply": ("cgi-bin/update", {"MST_UPDATE_ACTION": "apply"}),
     "api/updates/discard": ("cgi-bin/update", {"MST_UPDATE_ACTION": "discard"}),
+    "api/system": ("cgi-bin/system", {}),
 }
 
 

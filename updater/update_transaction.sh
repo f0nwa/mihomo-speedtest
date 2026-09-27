@@ -598,8 +598,16 @@ transaction_apply() (
       FILE)
         tx_file=$((tx_file + 1)); tx_actual=$(target_file "$tx_dest")
         tx_verify_file "$tx_actual" "$tx_sha" "$tx_bytes" "$tx_mode" && continue
+        # Построчный прогресс для мини консоли раздела /updates (job.log) -
+        # пункт фидбека по макету "Панель управления": показываем только
+        # файлы, которые реально записываются (уже совпадающие пропущены
+        # continue'ом выше), а не общий чекпоинт на всю транзакцию.
+        echo "Запись файла: $tx_dest" >&2
         tx_publish "$WORK/tx-files/$tx_file" "$tx_actual" "$tx_sha" "$tx_bytes" "$tx_mode" || die 'ошибка публикации файла' ;;
-      REMOVE) tx_actual=$(target_file "$tx_src"); safe_path "$tx_actual"; rm -f "$tx_actual" || die 'ошибка удаления файла' ;;
+      REMOVE)
+        tx_actual=$(target_file "$tx_src"); safe_path "$tx_actual"
+        echo "Удаление файла: $tx_src" >&2
+        rm -f "$tx_actual" || die 'ошибка удаления файла' ;;
     esac
   done < "$WORK/records"
   tx_publish "$WORK/tx-installed.txt" "$INSTALLED_MANIFEST_PATH" "$(sha256_of "$WORK/tx-installed.txt")" "$(wc -c < "$WORK/tx-installed.txt" | tr -d ' ')" 0600 || die 'ошибка публикации установленного манифеста'
