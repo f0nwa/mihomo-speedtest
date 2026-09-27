@@ -241,7 +241,22 @@ bootstrap_needed() {
   return 1
 }
 
-if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && bootstrap_needed; then
+# Лёгкие действия (--stop-web/--start-web/--show-url/--version) - чисто
+# локальные операции (флаг STATS_HTTP_ENABLE в speedtest2.env, чтение уже
+# сохранённого installed-manifest.txt, init.d-скрипт) - им не нужен ни
+# полный набор файлов проекта, ни сеть. Раньше бутстрап-проверка выше
+# запускалась безусловно, до разбора аргументов (см. case в самом низу
+# файла) - поэтому "mihomo-speedtest stop-web" на роутере с неполным $DIR
+# неожиданно тащил весь релиз с GitHub вместо простого локального
+# переключения (см. CHANGELOG).
+bootstrap_skip_for_action() {
+  case "${1:-}" in
+    --stop-web | --start-web | --show-url | --version) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && bootstrap_needed; then
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   bootstrap_selfinstall || {
@@ -693,6 +708,23 @@ start_web_main() {
   fi
 }
 
+# Читает $INSTALLED_MANIFEST_PATH (тот же файл, что пишет
+# bootstrap_selfinstall и читает update.sh --check) и печатает установленную
+# версию релиза. Чисто локальная команда: не трогает сеть и не требует
+# полного набора файлов проекта (см. bootstrap_skip_for_action выше).
+version_main() {
+  installed_version=
+  if [ -f "$INSTALLED_MANIFEST_PATH" ]; then
+    installed_version=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_VERSION)
+  fi
+  if [ -n "$installed_version" ]; then
+    echo "версия релиза: $installed_version" >&2
+  else
+    echo "установленный релиз не отслеживается" >&2
+  fi
+  return 0
+}
+
 # Пробный прогон speedtest2.sh при установке/переустановке может занимать
 # от десятков секунд до нескольких минут (зависит от числа нод), а сам
 # speedtest2.sh обычным ходом ничего не пишет в консоль - весь его лог
@@ -858,6 +890,7 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then
     --stop-web) stop_web_main ;;
     --start-web) start_web_main ;;
     --show-url) show_url_main ;;
+    --version) version_main ;;
     *) main "$@" ;;
   esac
 fi
