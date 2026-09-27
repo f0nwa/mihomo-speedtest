@@ -34,18 +34,24 @@ function esc(s) {
   return s
 }
 
-function fmt_mb(bytes,   mb, frac) {
-  mb = int(bytes / 1048576)
-  frac = int((bytes % 1048576) * 10 / 1048576)
-  return mb "." frac
+# fmt_mbit(bytes) - байты/с в мегабиты/с (x8 / 1 000 000, как в
+# спидтестах) текстом с одним знаком после точки, с округлением.
+function fmt_mbit(bytes) {
+  return sprintf("%.1f", bytes * 8 / 1000000)
 }
 
-# fmt_mb_signed(bytes) - как fmt_mb(), но с явным знаком (+/-) спереди;
+# mib_to_mbit(txt) - строка "X.Y" в МиБ/с (формат speedtest_last.txt,
+# его пишет speedtest2.sh) в мегабиты/с текстом, как fmt_mbit().
+function mib_to_mbit(txt) {
+  return sprintf("%.1f", txt * 1048576 * 8 / 1000000)
+}
+
+# fmt_mbit_signed(bytes) - как fmt_mbit(), но с явным знаком (+/-) спереди;
 # нужно для дельты скорости в таблице "Доступность нод пула" (delta
 # бывает и отрицательной - нода сейчас медленнее своего среднего).
-function fmt_mb_signed(bytes,   ab) {
+function fmt_mbit_signed(bytes,   ab) {
   ab = (bytes < 0) ? -bytes : bytes
-  return (bytes < 0 ? "-" : "+") fmt_mb(ab)
+  return (bytes < 0 ? "-" : "+") fmt_mbit(ab)
 }
 
 # jsesc(s) — экранирование строки для встраивания в JS-строковый литерал
@@ -178,10 +184,10 @@ function percentile(arr, cnt, p,   idx) {
   return arr[idx]
 }
 
-# fmt_stat_val(v, mode) — mode="mb": байты в "X.Y МБ/с" через fmt_mb();
+# fmt_stat_val(v, mode) — mode="mb": байты/с в "X.Y Мбит/с" через fmt_mbit();
 # иначе (mode="int") — целое число как есть (счётчики нод).
 function fmt_stat_val(v, mode) {
-  return (mode == "mb") ? (fmt_mb(v) " МБ/с") : (v + 0)
+  return (mode == "mb") ? (fmt_mbit(v) " Мбит/с") : (v + 0)
 }
 
 # stat_row_html(name, sw_cls, mode, vals, cnt) — печатает одну группу
@@ -287,7 +293,7 @@ function render_node_history(path, run_n,
   print "<svg id=\"svg-hist\" viewBox=\"0 0 760 214\" xmlns=\"http://www.w3.org/2000/svg\">"
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top, left, top + h
   printf "<line class=\"axis-line\" x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\"/>\n", left, top + h, left + w, top + h
-  printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">%s МБ/с</text>\n", left - 6, top + 4, fmt_mb(hmax)
+  printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">%s Мбит/с</text>\n", left - 6, top + 4, fmt_mbit(hmax)
   printf "<text class=\"axis-text\" x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\">0</text>\n", left - 6, top + h + 4
   render_x_axis_dates(left, top, w, h, run_n)
 
@@ -324,8 +330,8 @@ function render_node_history(path, run_n,
       ix = p_idx[i]
       x = (run_n > 1) ? left + int((ix - 1) * w / (run_n - 1)) : left + int(w / 2)
       y = top + h - int(p_speed[i] * h / hmax)
-      printf "<circle class=\"node-dot\" cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"%s\" stroke-width=\"1\"><title>%s · %s МБ/с · %s</title></circle>\n", \
-        x, y, col, esc(iso[ix]), fmt_mb(p_speed[i]), esc(nm)
+      printf "<circle class=\"node-dot\" cx=\"%d\" cy=\"%d\" r=\"3\" fill=\"%s\" stroke-width=\"1\"><title>%s · %s Мбит/с · %s</title></circle>\n", \
+        x, y, col, esc(iso[ix]), fmt_mbit(p_speed[i]), esc(nm)
     }
     print "</g>"
 
@@ -449,7 +455,7 @@ function render_node_stability(path,
       delta = st_last_speed[k] - avg_speed
       delta_cls = (delta > 0) ? "delta-pos" : (delta < 0) ? "delta-neg" : ""
       dv = avg_speed
-      dtxt = fmt_mb(avg_speed) " МБ/с <span class=\"" delta_cls "\">(" fmt_mb_signed(delta) ")</span>"
+      dtxt = fmt_mbit(avg_speed) " Мбит/с <span class=\"" delta_cls "\">(" fmt_mbit_signed(delta) ")</span>"
     } else {
       dv = -1
       dtxt = "-"
@@ -835,8 +841,8 @@ print ".axis-tick{stroke:var(--border)}"
     stat_row_html("нод выше порога", "sw-good", "int", good, n)
     stat_row_html("победителей", "sw-winners", "int", winners, n)
     print "</div>"
-    printf "<p>Последний прогон (%s): канал %s МБ/с, порог %s МБ/с, живых %d из %d, отобрано %d.</p>\n", \
-      esc(iso[n]), fmt_mb(channel[n]), fmt_mb(threshold[n]), alive[n], total[n], winners[n]
+    printf "<p>Последний прогон (%s): канал %s Мбит/с, порог %s Мбит/с, живых %d из %d, отобрано %d.</p>\n", \
+      esc(iso[n]), fmt_mbit(channel[n]), fmt_mbit(threshold[n]), alive[n], total[n], winners[n]
     print "</div>"
 
     if (nodes != "") {
@@ -860,10 +866,10 @@ print ".axis-tick{stroke:var(--border)}"
       split(line, f, "\t")
       if (f[1] == "") continue
       if (!have_last) {
-        print "<table><tr><th>МБ/с</th><th>нода</th></tr>"
+        print "<table><tr><th>Мбит/с</th><th>нода</th></tr>"
         have_last = 1
       }
-      printf "<tr><td>%s</td><td>%s</td></tr>\n", esc(f[1]), esc(f[3])
+      printf "<tr><td>%s</td><td>%s</td></tr>\n", mib_to_mbit(f[1]), esc(f[3])
     }
     close(last)
   }
@@ -898,7 +904,7 @@ print ".axis-tick{stroke:var(--border)}"
   print "}"
   print "function xFor(idx){return cfg.n>1?cfg.left+(idx*cfg.w/(cfg.n-1)):cfg.left+cfg.w/2;}"
   print "function yFor(v){var m=cfg.max||1;return cfg.top+cfg.h-(v*cfg.h/m);}"
-print "function fmtVal(cfg,v){if(cfg.unit!==\"mb\")return v;var mb=Math.floor(v/1048576);var frac=Math.floor((v%1048576)*10/1048576);return mb+\".\"+frac+\" МБ/с\";}"
+print "function fmtVal(cfg,v){if(cfg.unit!==\"mb\")return v;return (v*8/1000000).toFixed(1)+\" Мбит/с\";}"
   print "function show(clientX,clientY){"
   print "if(!cfg.n)return;"
   print "var loc=svgPoint(clientX,clientY);"

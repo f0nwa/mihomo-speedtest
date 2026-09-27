@@ -96,6 +96,18 @@ bytes_to_mb() {
   awk -v b="$1" 'BEGIN { printf "%g", b / 1048576 }'
 }
 
+# Скорости (MIN_SPEED/MIN_FLOOR) в веб-интерфейсе - в Мбит/с (x8 /
+# 1 000 000, как в спидтестах), в speedtest2.env - по-прежнему байты/с.
+mbit_to_bytes() {
+  awk -v m="$1" 'BEGIN { printf "%.0f", m * 1000000 / 8 }'
+}
+
+bytes_to_mbit() {
+  # Два знака после точки, %g обрезает лишние нули (1048576 -> "8.39",
+  # 1250000 -> "10").
+  awk -v b="$1" 'BEGIN { printf "%g", int(b * 8 / 10000 + 0.5) / 100 }'
+}
+
 parse_body_fields() {
   # Разбирает $body (application/x-www-form-urlencoded) ОДНИМ проходом
   # awk вместо отдельного sed на каждое из 16 полей формы (было: sed
@@ -183,14 +195,14 @@ validate_settings_fields() {
   if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
     _add_err dl_timeout "Таймаут закачки должен быть целым числом от 1 до 120 секунд."
   fi
-  if ! is_decimal_in_range "$min_speed_mb" 0 excl 1000; then
-    _add_err min_speed_mb "Порог скорости должен быть числом больше 0 и не больше 1000 МБ/с."
+  if ! is_decimal_in_range "$min_speed_mb" 0 excl 10000; then
+    _add_err min_speed_mb "Порог скорости должен быть числом больше 0 и не больше 10000 Мбит/с."
   fi
   if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
     _add_err min_ratio "Доля канала должна быть числом больше 0 и не больше 1 (например 0.25)."
   fi
   if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
-    _add_err min_floor_mb "Абсолютный минимум порога должен быть числом от 0 МБ/с (0 = без минимума)."
+    _add_err min_floor_mb "Абсолютный минимум порога должен быть числом от 0 Мбит/с (0 = без минимума)."
   fi
   if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
     _add_err topn "Число нод в fast.yaml (TOPN) должно быть целым от 1 до 50."
@@ -255,8 +267,8 @@ print_settings_json() {
       -v keep_days="$HISTORY_KEEP_DAYS" \
       -v max_tested="$MAX_TESTED" \
       -v size_mb="$(bytes_to_mb "$SIZE")" -v dl_timeout="$DL_TIMEOUT" \
-      -v min_speed_mb="$(bytes_to_mb "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
-      -v min_floor_mb="$(bytes_to_mb "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
+      -v min_speed_mb="$(bytes_to_mbit "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
+      -v min_floor_mb="$(bytes_to_mbit "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
       -v min_winners="$MIN_WINNERS" -v stability_window="$STABILITY_WINDOW" \
       -v stability_drop_after="$STABILITY_DROP_AFTER" '
     function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
@@ -328,9 +340,9 @@ if [ "$method" = "POST" ]; then
     set_env_var EXTYPE "$extype"
     set_env_var SIZE "$(mb_to_bytes "$size_mb")"
     set_env_var DL_TIMEOUT "$dl_timeout"
-    set_env_var MIN_SPEED "$(mb_to_bytes "$min_speed_mb")"
+    set_env_var MIN_SPEED "$(mbit_to_bytes "$min_speed_mb")"
     set_env_var MIN_RATIO "$min_ratio"
-    set_env_var MIN_FLOOR "$(mb_to_bytes "$min_floor_mb")"
+    set_env_var MIN_FLOOR "$(mbit_to_bytes "$min_floor_mb")"
     set_env_var TOPN "$topn"
     set_env_var ENOUGH "$enough"
     set_env_var MIN_WINNERS "$min_winners"
@@ -446,13 +458,13 @@ $geo_filter_options</datalist>
 </div>
 <div class="card">
 <h2>Порог и число нод в fast.yaml</h2>
-<label for="min_speed_mb">Порог отбора (для текущего канала), МБ/с</label>
-<input type="number" min="0.1" max="1000" step="any" id="min_speed_mb" name="min_speed_mb" value="$(html_escape "$(bytes_to_mb "$MIN_SPEED")")">
+<label for="min_speed_mb">Порог отбора (для текущего канала), Мбит/с</label>
+<input type="number" min="0.1" max="10000" step="any" id="min_speed_mb" name="min_speed_mb" value="$(html_escape "$(bytes_to_mbit "$MIN_SPEED")")">
 <p class="hint">Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.</p>
 <label for="min_ratio">Динамический порог, доля от прямого канала</label>
 <input type="number" min="0.01" max="1" step="any" id="min_ratio" name="min_ratio" value="$(html_escape "$MIN_RATIO")">
-<label for="min_floor_mb">Абсолютный минимум порога, МБ/с (0 = без минимума)</label>
-<input type="number" min="0" step="any" id="min_floor_mb" name="min_floor_mb" value="$(html_escape "$(bytes_to_mb "$MIN_FLOOR")")">
+<label for="min_floor_mb">Абсолютный минимум порога, Мбит/с (0 = без минимума)</label>
+<input type="number" min="0" step="any" id="min_floor_mb" name="min_floor_mb" value="$(html_escape "$(bytes_to_mbit "$MIN_FLOOR")")">
 <label for="max_tested">Максимум кандидатов на скоростной тест (0 = без ограничения)</label>
 <input type="number" min="0" id="max_tested" name="max_tested" value="$(html_escape "$MAX_TESTED")">
 <label for="topn">Сколько нод класть в fast.yaml (TOPN)</label>

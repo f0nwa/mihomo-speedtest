@@ -130,18 +130,21 @@
     return c;
   }
 
-  // Байты -> МБ/с текстом, как bytes_to_mb() в stats_cgi.sh (%g - без
-  // лишних нулей после запятой), null/undefined -> "-".
-  function fmtMB(bytes) {
+  // Байты/с -> Мбит/с (x8 / 1 000 000, как в спидтестах) числом с одним
+  // знаком после точки (без лишнего нуля).
+  function bytesToMbit(bytes) {
+    return Math.round(bytes * 8 / 100000) / 10;
+  }
+
+  // Байты/с -> Мбит/с текстом, null/undefined -> "-".
+  function fmtMbit(bytes) {
     if (bytes === null || bytes === undefined) { return '-'; }
-    var v = bytes / 1048576;
-    var r = Math.round(v * 100) / 100;
-    return String(r);
+    return String(bytesToMbit(bytes));
   }
 
   function fmtSigned(bytes) {
     if (bytes === null || bytes === undefined) { return '-'; }
-    var s = fmtMB(Math.abs(bytes));
+    var s = fmtMbit(Math.abs(bytes));
     if (bytes > 0) { return '+' + s; }
     if (bytes < 0) { return '-' + s; }
     return s;
@@ -216,7 +219,7 @@
     var table = el('table');
     var thead = el('thead');
     var htr = el('tr');
-    ['Нода', 'Скорость, МБ/с', 'Статус'].forEach(function (t) {
+    ['Нода', 'Скорость, Мбит/с', 'Статус'].forEach(function (t) {
       htr.appendChild(el('th', null, t));
     });
     thead.appendChild(htr);
@@ -226,7 +229,7 @@
       var r = results[i];
       var tr = el('tr');
       tr.appendChild(el('td', null, r.name));
-      tr.appendChild(el('td', null, fmtMB(r.speed_bytes)));
+      tr.appendChild(el('td', null, fmtMbit(r.speed_bytes)));
       var ok = r.status === 'ok';
       tr.appendChild(el('td', ok ? 'status-alive' : 'status-absent', ok ? 'выше порога' : 'ниже порога'));
       tbody.appendChild(tr);
@@ -358,7 +361,7 @@
       var color = node.color || '#2a78d6';
       return {
         label: node.name,
-        data: node.values.map(function (v) { return v === null || v === undefined ? null : v / 1048576; }),
+        data: node.values.map(function (v) { return v === null || v === undefined ? null : bytesToMbit(v); }),
         borderColor: color,
         backgroundColor: color,
         pointRadius: 2.5,
@@ -382,7 +385,7 @@
             callbacks: {
               title: function (items) { return items.length ? items[0].label : ''; },
               label: function (item) {
-                return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' МБ/с';
+                return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' Мбит/с';
               }
             }
           }
@@ -402,7 +405,7 @@
           y: {
             beginAtZero: true,
             ticks: {
-              callback: function (value) { return value + ' МБ/с'; }
+              callback: function (value) { return value + ' Мбит/с'; }
             }
           }
         }
@@ -431,7 +434,7 @@
     var table = el('table');
     var thead = el('thead');
     var htr = el('tr');
-    [''].concat(['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, МБ/с', 'Средняя, МБ/с', 'Δ, МБ/с']).forEach(function (t) {
+    [''].concat(['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, Мбит/с', 'Средняя, Мбит/с', 'Δ, Мбит/с']).forEach(function (t) {
       htr.appendChild(el('th', null, t));
     });
     thead.appendChild(htr);
@@ -448,8 +451,8 @@
       tr.appendChild(el('td', st.cls, st.text));
       tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
       tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
-      tr.appendChild(el('td', null, fmtMB(r.last_speed_bytes)));
-      tr.appendChild(el('td', null, fmtMB(r.avg_speed_bytes)));
+      tr.appendChild(el('td', null, fmtMbit(r.last_speed_bytes)));
+      tr.appendChild(el('td', null, fmtMbit(r.avg_speed_bytes)));
       tr.appendChild(el('td', null, fmtSigned(r.delta_bytes)));
       tbody.appendChild(tr);
     }
@@ -470,7 +473,7 @@
     }
     row.appendChild(tile('ПРОГОНОВ В ИСТОРИИ', String(runsCount)));
     row.appendChild(tile('ЖИВЫХ НОД', lastRun ? (lastRun.alive + '/' + lastRun.total) : '-'));
-    row.appendChild(tile('КАНАЛ', lastRun ? (fmtMB(lastRun.channel_bytes) + ' МБ/с') : '-'));
+    row.appendChild(tile('КАНАЛ', lastRun ? (fmtMbit(lastRun.channel_bytes) + ' Мбит/с') : '-'));
     row.appendChild(tile('ОБНОВЛЕНИЕ', '-', 'kpiUpdateTile'));
     return row;
   }
@@ -496,8 +499,8 @@
       if (data.last_run) {
         var lr = data.last_run;
         var p = el('p', 'hint');
-        p.textContent = lr.iso + ' - канал: ' + fmtMB(lr.channel_bytes) + ' МБ/с, порог: ' +
-          fmtMB(lr.threshold_bytes) + ' МБ/с, живых нод: ' + lr.alive + '/' + lr.total +
+        p.textContent = lr.iso + ' - канал: ' + fmtMbit(lr.channel_bytes) + ' Мбит/с, порог: ' +
+          fmtMbit(lr.threshold_bytes) + ' Мбит/с, живых нод: ' + lr.alive + '/' + lr.total +
           ', победителей: ' + lr.winners;
         lastRunCard.appendChild(p);
       } else {
@@ -513,7 +516,7 @@
       if (data.last_measurement && data.last_measurement.length) {
         for (var m = 0; m < data.last_measurement.length; m++) {
           var meas = data.last_measurement[m];
-          lastMeasureCard.appendChild(el('p', 'hint', meas.name + ': ' + meas.speed_mb + ' ' + meas.unit));
+          lastMeasureCard.appendChild(el('p', 'hint', meas.name + ': ' + (meas.unit === 'МБ/с' ? (Math.round(meas.speed_mb * 1048576 * 8 / 100000) / 10 + ' Мбит/с') : (meas.speed_mb + ' ' + meas.unit))));
         }
       } else {
         lastMeasureCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
@@ -557,9 +560,9 @@
     extype: { label: 'Исключить типы нод целиком (через |)', type: 'text', placeholder: 'например trojan|ss', hint: 'Пусто = тестировать все типы, которые понимает mihomo.' },
     size_mb: { label: 'Размер файла для замера, МБ', type: 'number', min: 1, max: 100, step: 'any', hint: 'Меньше 10 МБ занижает результат - треть времени уходит на TTFB.' },
     dl_timeout: { label: 'Таймаут закачки, сек', type: 'number', min: 1, max: 120 },
-    min_speed_mb: { label: 'Порог отбора (для текущего канала), МБ/с', type: 'number', min: 0.1, max: 1000, step: 'any', hint: 'Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.' },
+    min_speed_mb: { label: 'Порог отбора (для текущего канала), Мбит/с', type: 'number', min: 0.1, max: 10000, step: 'any', hint: 'Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.' },
     min_ratio: { label: 'Динамический порог, доля от прямого канала', type: 'number', min: 0.01, max: 1, step: 'any' },
-    min_floor_mb: { label: 'Абсолютный минимум порога, МБ/с (0 = без минимума)', type: 'number', min: 0, step: 'any' },
+    min_floor_mb: { label: 'Абсолютный минимум порога, Мбит/с (0 = без минимума)', type: 'number', min: 0, step: 'any' },
     topn: { label: 'Сколько нод класть в fast.yaml (TOPN)', type: 'number', min: 1, max: 50 },
     enough: { label: 'Хватит нод выше порога - дальше не мерить', type: 'number', min: 1, max: 100 },
     min_winners: { label: 'Минимум нод в fast.yaml, даже ниже порога', type: 'number', min: 0, max: 50, hint: 'Если рабочих нод меньше TOPN - добор идёт по убыванию скорости, пока не наберётся этот минимум.' },
