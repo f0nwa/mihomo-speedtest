@@ -3,6 +3,35 @@
 # Использует WORK, MANIFEST_TMP, PLAN_AWK, SHA_TOOL и функции CLI.
 
 target_file() { printf '%s%s\n' "$TARGET_ROOT" "$1"; }
+# config_path - фактический файл рабочего конфига Mihomo. Обычно это сам
+# $MIHOMO_DIR/config.yaml. Сторонние панели (XKeen UI) держат профили в
+# $MIHOMO_DIR/profiles/*.yaml и переключают активный символической ссылкой
+# config.yaml -> profiles/<имя>.yaml - тогда возвращается цель ссылки, чтобы
+# снимок, резервная копия, миграция и откат работали с файлом профиля, а сама
+# ссылка оставалась нетронутой. Допускается ровно одна ссылка (сам
+# config.yaml) и только на обычный файл внутри $MIHOMO_DIR без "..", "." и
+# других ссылок на пути (safe_path); всё остальное - отказ, как и раньше.
+config_path() {
+  cfg_dir=$(target_file "$MIHOMO_DIR")
+  cfg_link=$cfg_dir/config.yaml
+  safe_path "$cfg_dir"
+  if [ ! -L "$cfg_link" ]; then printf '%s\n' "$cfg_link"; return 0; fi
+  cfg_to=$(readlink "$cfg_link") || die 'не удалось прочитать ссылку config.yaml'
+  case $cfg_to in
+    "$cfg_dir"/*) cfg_real=$cfg_to ;;
+    "$MIHOMO_DIR"/*) cfg_real=$(target_file "$cfg_to") ;;
+    /*|'') die "config.yaml ссылается за пределы $MIHOMO_DIR: $cfg_to" ;;
+    *) cfg_real=$cfg_dir/$cfg_to ;;
+  esac
+  case ${cfg_real#"$cfg_dir"/} in
+    ''|.|..|./*|../*|*/.|*/..|*/./*|*/../*|*//*|*'|'*|*[[:cntrl:]]*|*.mst-update-new)
+      die "недопустимая цель ссылки config.yaml: $cfg_to" ;;
+  esac
+  [ "$cfg_real" != "$cfg_link" ] || die "недопустимая цель ссылки config.yaml: $cfg_to"
+  safe_path "$cfg_real"
+  [ -f "$cfg_real" ] || die "ссылка config.yaml указывает на отсутствующий файл: $cfg_to"
+  printf '%s\n' "$cfg_real"
+}
 prepare_init() {
   TARGET_ROOT=${UPDATE_TARGET_ROOT:-}
   if [ -n "$TARGET_ROOT" ]; then
@@ -68,7 +97,8 @@ build_snapshot() {
       printf '%s\t%s\t%s\n' "$logical" "$file_sum" "$file_mode" >> "$WORK/local.tsv"
     fi
   done < "$WORK/records"
-  inspect_file "$(target_file "$MIHOMO_DIR/config.yaml")" config >> "$WORK/snapshot.tsv"
+  config_actual=$(config_path) || exit 1
+  inspect_file "$config_actual" config >> "$WORK/snapshot.tsv"
   inspect_file "$INSTALLED_MANIFEST_PATH" installed-manifest >> "$WORK/snapshot.tsv"
   inspect_file "$UPDATE_STATE_DIR/config-schema-version" config-schema >> "$WORK/snapshot.tsv"
   inspect_file "$UPDATE_STATE_DIR/config-sha256" config-sha256 >> "$WORK/snapshot.tsv"
@@ -315,7 +345,8 @@ check_config_source_snapshot() {
 prepare_config_candidate() {
   CONFIG_PAYLOAD=$WORK
   config_tools
-  cp "$(target_file "$MIHOMO_DIR/config.yaml")" "$WORK/config-source.yaml" || die 'не удалось прочитать рабочий конфиг'
+  config_actual=$(config_path) || exit 1
+  cp "$config_actual" "$WORK/config-source.yaml" || die 'не удалось прочитать рабочий конфиг'
   check_config_source_snapshot
   sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
     --output "$WORK/candidate.yaml" --report "$WORK/migration-report.txt" > "$WORK/migration.log" 2>&1 || die 'не удалось собрать кандидат конфига; подробный вывод скрыт'

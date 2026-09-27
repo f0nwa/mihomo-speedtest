@@ -95,7 +95,7 @@ safe_path() {
   path_check=$1
   case $path_check in /*) ;; *) die 'путь должен быть абсолютным' ;; esac
   while [ "$path_check" != / ]; do
-    [ ! -L "$path_check" ] || die 'символическая ссылка в управляемом пути'
+    [ ! -L "$path_check" ] || die "символическая ссылка в управляемом пути: $path_check"
     path_check=${path_check%/*}; [ -n "$path_check" ] || path_check=/
     if [ -e "$path_check" ] && [ ! -d "$path_check" ]; then die 'родитель пути не является каталогом'; fi
   done

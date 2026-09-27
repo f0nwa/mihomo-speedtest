@@ -17,7 +17,7 @@ tx_logical_path() {
 }
 tx_record_destination() {
   case $1:$2 in
-    CONFIG:active-config) target_file "$MIHOMO_DIR/config.yaml" ;;
+    CONFIG:active-config) config_path ;;
     SCHEMA:config-schema-version) printf '%s\n' "$UPDATE_STATE_DIR/config-schema-version" ;;
     HASH:config-sha256) printf '%s\n' "$UPDATE_STATE_DIR/config-sha256" ;;
     STATE:installed-manifest) printf '%s\n' "$INSTALLED_MANIFEST_PATH" ;;
@@ -26,7 +26,14 @@ tx_record_destination() {
   esac
 }
 tx_context() {
+  # $1=1 - комплект содержит CONFIG: фиксируем фактический файл конфига
+  # (цель ссылки config.yaml, см. config_path()). Если панель переключила
+  # профиль после обновления, откат не запишет старый конфиг в чужой профиль:
+  # контекст не совпадёт и комплект будет отклонён.
   printf 'ROOT=%s\nSTATE=%s\nINSTALLED=%s\n' "$TARGET_ROOT" "$UPDATE_STATE_DIR" "$INSTALLED_MANIFEST_PATH"
+  [ "${1:-0}" = 1 ] || return 0
+  tx_ctx_config=$(config_path) || return 1
+  printf 'CONFIG=%s\n' "$tx_ctx_config"
 }
 tx_verify_file() {
   safe_path "$1"
@@ -45,8 +52,11 @@ transaction_validate_bundle() (
     safe_path "$tx_bundle/$tx_meta"
     [ -f "$tx_bundle/$tx_meta" ] || exit 1
   done
-  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file "$MIHOMO_DIR/config.yaml")" ] || exit 1
-  tx_context > "$WORK/tx-context-check"
+  tx_cfg=$(config_path) || exit 1
+  [ "$INSTALLED_MANIFEST_PATH" != "$tx_cfg" ] || exit 1
+  tx_ctx_has_config=0
+  if awk -F'|' '$1=="CONFIG"{found=1} END{exit !found}' "$tx_bundle/list.txt"; then tx_ctx_has_config=1; fi
+  tx_context "$tx_ctx_has_config" > "$WORK/tx-context-check" || exit 1
   cmp -s "$WORK/tx-context-check" "$tx_bundle/context.txt" || exit 1
   tx_integrity=$(cat "$tx_bundle/integrity.txt")
   [ "${#tx_integrity}" = 64 ] || exit 1
@@ -65,7 +75,7 @@ transaction_validate_bundle() (
     $3=="missing" && ($4!="-" || $5!="0" || $6!="-") {exit 1}
     END {if(state!=1 || config!=schema || schema!=hash) exit 1}' "$tx_bundle/list.txt" || exit 1
   : > "$WORK/tx-reserved-check"
-  for tx_reserved in "$(target_file "$MIHOMO_DIR/config.yaml")" "$INSTALLED_MANIFEST_PATH" "$UPDATE_STATE_DIR/config-schema-version" "$UPDATE_STATE_DIR/config-sha256"; do
+  for tx_reserved in "$tx_cfg" "$INSTALLED_MANIFEST_PATH" "$UPDATE_STATE_DIR/config-schema-version" "$UPDATE_STATE_DIR/config-sha256"; do
     safe_path "$tx_reserved"; safe_path "$tx_reserved.mst-update-new"
     printf '%s\n%s\n' "$tx_reserved" "$tx_reserved.mst-update-new" >> "$WORK/tx-reserved-check"
   done
@@ -284,7 +294,8 @@ tx_health_config() (
 )
 tx_default_health() (
   pidof mihomo >/dev/null 2>&1 || exit 1
-  tx_health_config "$(target_file "$MIHOMO_DIR/config.yaml")" || exit 1
+  tx_health_cfg=$(config_path) || exit 1
+  tx_health_config "$tx_health_cfg" || exit 1
   curl -q --config - < "$WORK/tx-curl-config" >/dev/null 2>&1
   tx_rc=$?; rm -f "$WORK/tx-curl-config"; exit "$tx_rc"
 )
@@ -472,7 +483,8 @@ transaction_apply() (
   trap 'tx_cancel_action_children; exit 1' HUP INT TERM
   safe_path "$UPDATE_STATE_DIR"
   safe_path "$INSTALLED_MANIFEST_PATH"
-  [ "$INSTALLED_MANIFEST_PATH" != "$(target_file "$MIHOMO_DIR/config.yaml")" ] || die 'config.yaml не является файлом состояния обновлятора'
+  tx_apply_cfg=$(config_path) || exit 1
+  [ "$INSTALLED_MANIFEST_PATH" != "$tx_apply_cfg" ] || die 'config.yaml не является файлом состояния обновлятора'
   safe_path "$INSTALLED_MANIFEST_PATH.mst-update-new"
   [ ! -e "$INSTALLED_MANIFEST_PATH.mst-update-new" ] || die 'временный путь манифеста занят'
   for tx_name in transaction.txt rollback.pending rollback rollback.previous; do safe_path "$UPDATE_STATE_DIR/$tx_name"; done
@@ -495,7 +507,7 @@ transaction_apply() (
     [ "$INSTALLED_MANIFEST_PATH.mst-update-new" != "$tx_collision_actual" ] || die 'временный путь манифеста совпадает с назначением плана'
   done < "$WORK/records"
   mkdir "$WORK/tx-bundle" "$WORK/tx-bundle/backups" "$WORK/tx-bundle/engine" "$WORK/tx-files" || die 'не удалось подготовить транзакцию в RAM'
-  tx_context > "$WORK/tx-bundle/context.txt"
+  tx_context "${migration_required:-0}" > "$WORK/tx-bundle/context.txt" || die 'не удалось определить файл конфига'
   : > "$WORK/tx-bundle/list.txt"
   : > "$WORK/tx-bundle/actions.txt"
   tx_num=0 tx_file=0 tx_changed=0 tx_web=0 tx_space=32768
@@ -530,7 +542,7 @@ transaction_apply() (
     esac
   done < "$WORK/records"
   if [ "${migration_required:-0}" = 1 ]; then
-    tx_config=$(target_file "$MIHOMO_DIR/config.yaml")
+    tx_config=$(config_path) || exit 1
     [ -f "$tx_config" ] && [ ! -L "$tx_config" ] || die 'исходный конфиг отсутствует'
     tx_config_mode=$(mode_of "$tx_config")
     tx_timeout_valid "${UPDATE_ACTION_TIMEOUT:-15}" && tx_timeout_valid "${UPDATE_HEALTH_TIMEOUT:-15}" || die 'неверный таймаут завершающих действий'
