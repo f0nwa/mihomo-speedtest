@@ -34,6 +34,7 @@ FILE|web|web/render_stats.awk|/opt/etc/mihomo-speedtest/render_stats.awk|0644|aw
 FILE|web|web/stats_cgi.sh|/opt/etc/mihomo-speedtest/stats_cgi.sh|0755|sh
 FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
+FILE|web|web/stats_system.sh|/opt/etc/mihomo-speedtest/stats_system.sh|0755|sh
 FILE|web|web/stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|0644|py
 FILE|web|web/stats_auth.py|/opt/etc/mihomo-speedtest/stats_auth.py|0644|py
 FILE|web|web/stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|0755|sh
