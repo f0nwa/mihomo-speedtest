@@ -394,7 +394,7 @@ cat <<HTML
 :root{--bg:#17191b;--card:#1e2124;--card-border:#33383c;--text:#e7e6e2;--muted:#8b9096;--shadow:none;--accent:#35c7c7;--danger:#d1453b}
 *{box-sizing:border-box}
 body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
-.wrap{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
 header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
 h1{font-size:19px;margin:0}
 .meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}

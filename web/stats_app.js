@@ -148,9 +148,9 @@
   }
 
   function statusLabel(status) {
-    if (status === 'alive') { return { text: 'жива', cls: 'status-alive' }; }
-    if (status === 'down') { return { text: 'недоступна', cls: 'status-down' }; }
-    return { text: 'нет данных', cls: 'status-absent' };
+    if (status === 'alive') { return { text: 'жива', cls: 'status-alive', sw: 'sw-alive' }; }
+    if (status === 'down') { return { text: 'недоступна', cls: 'status-down', sw: 'sw-down' }; }
+    return { text: 'нет данных', cls: 'status-absent', sw: 'sw-absent' };
   }
 
   // ----- кнопка "Запустить сейчас" (уже полностью рабочая часть, шаг 1) -----
@@ -431,7 +431,7 @@
     var table = el('table');
     var thead = el('thead');
     var htr = el('tr');
-    ['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, МБ/с', 'Средняя, МБ/с', 'Δ, МБ/с'].forEach(function (t) {
+    [''].concat(['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, МБ/с', 'Средняя, МБ/с', 'Δ, МБ/с']).forEach(function (t) {
       htr.appendChild(el('th', null, t));
     });
     thead.appendChild(htr);
@@ -440,8 +440,11 @@
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       var tr = el('tr');
-      tr.appendChild(el('td', null, r.name));
       var st = statusLabel(r.status);
+      var swTd = el('td');
+      swTd.appendChild(el('span', 'sw ' + st.sw));
+      tr.appendChild(swTd);
+      tr.appendChild(el('td', null, r.name));
       tr.appendChild(el('td', st.cls, st.text));
       tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
       tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
@@ -452,6 +455,24 @@
     }
     table.appendChild(tbody);
     return table;
+  }
+
+  function buildKpiRow(runsCount, lastRun) {
+    var row = el('div', 'kpi-row');
+    function tile(label, value, id) {
+      var t = el('div', 'kpi');
+      if (id) { t.id = id; }
+      t.appendChild(el('div', 'kpi-label', label));
+      var v = el('div', 'kpi-value', value);
+      if (id) { v.id = id + 'Value'; }
+      t.appendChild(v);
+      return t;
+    }
+    row.appendChild(tile('ПРОГОНОВ В ИСТОРИИ', String(runsCount)));
+    row.appendChild(tile('ЖИВЫХ НОД', lastRun ? (lastRun.alive + '/' + lastRun.total) : '-'));
+    row.appendChild(tile('КАНАЛ', lastRun ? (fmtMB(lastRun.channel_bytes) + ' МБ/с') : '-'));
+    row.appendChild(tile('ОБНОВЛЕНИЕ', '-', 'kpiUpdateTile'));
+    return row;
   }
 
   function renderStats() {
@@ -467,6 +488,9 @@
 
       var meta = el('p', 'hint', 'Обновлено: ' + (data.generated || '-') + ' · прогонов в истории: ' + runsCount);
       app.appendChild(meta);
+
+      app.appendChild(buildKpiRow(runsCount, data.last_run));
+      refreshUpdatesBadge();
 
       var lastRunCard = card('Последний прогон');
       if (data.last_run) {
@@ -692,8 +716,6 @@
 
   function refreshUpdatesBadge() {
     fetchJson('/api/updates/status').then(function (data) {
-      var badge = updatesBadgeEl();
-      if (!badge) { return; }
       var lc = data && data.last_check;
       // 'missing' - тоже "есть что поставить": релиз, добавляющий только
       // новые файлы (без единого изменённого), иначе не показал бы бейдж/
@@ -702,8 +724,19 @@
         lc.plan.files.some(function (f) {
           return f.state === 'new' || f.state === 'modified' || f.state === 'changed' || f.state === 'missing';
         }));
-      badge.hidden = !available;
-    })['catch'](function () { /* бейдж - необязательная подсказка, сетевая ошибка не должна ломать страницу */ });
+      var badge = updatesBadgeEl();
+      if (badge) { badge.hidden = !available; }
+      // KPI-плитка "ОБНОВЛЕНИЕ" на /stats (buildKpiRow) - тот же расчёт
+      // available, что и у бейджа выше, без второго независимого правила
+      // (см. комментарий про 'missing' - тот баг уже случился один раз
+      // из-за двух копий одной и той же проверки).
+      var kpiTile = document.getElementById('kpiUpdateTile');
+      if (kpiTile) {
+        kpiTile.classList.toggle('kpi-danger', available);
+        var kpiValue = document.getElementById('kpiUpdateTileValue');
+        if (kpiValue) { kpiValue.textContent = available ? 'ЕСТЬ ОБНОВЛЕНИЕ' : 'АКТУАЛЬНО'; }
+      }
+    })['catch'](function () { /* бейдж/плитка - необязательная подсказка, сетевая ошибка не должна ломать страницу */ });
   }
 
   var UPDATE_JOB_POLL_MS = 2000;

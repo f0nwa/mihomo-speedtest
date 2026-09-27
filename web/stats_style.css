@@ -16,7 +16,7 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
-.wrap{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
 header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 h1{font-size:19px;margin:0;letter-spacing:.4px}
 .meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
@@ -24,6 +24,11 @@ nav{display:flex;gap:4px}
 nav a{color:var(--text);text-decoration:none;font-size:13px;padding:6px 10px 4px;border-radius:0;border-bottom:2px solid transparent}
 nav a:hover{background:var(--card-border)}
 nav a.active{background:transparent;border-bottom-color:var(--accent)}
+.kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--card-border);border-top:3px solid var(--accent);padding:14px 16px}
+.kpi.kpi-danger{border-top-color:var(--danger)}
+.kpi-label{font-size:10px;letter-spacing:1px;color:var(--muted)}
+.kpi-value{font-size:22px;font-weight:600;margin-top:8px;font-variant-numeric:tabular-nums}
 .theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:0;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
 .card{background:var(--card);border:1px solid var(--card-border);border-radius:0;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
 h2{font-size:14.5px;margin:0 0 8px;font-weight:600}
@@ -46,6 +51,9 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;p
 .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-bottom:8px;font-size:12px;color:var(--muted)}
 .legend-item{display:inline-flex;align-items:center;gap:5px}
 .sw{display:inline-block;width:10px;height:10px;border-radius:0}
+.sw.sw-alive{background:var(--accent)}
+.sw.sw-down{background:var(--danger)}
+.sw.sw-absent{background:var(--muted)}
 /* График по нодам (buildNodeChart() в stats_app.js) - Chart.js рисует
    сам на canvas внутри .chart-wrap (оси, таймлайн, тултип); тут только
    размер контейнера - canvas растягивается на всю его ширину/высоту
