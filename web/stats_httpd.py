@@ -8,10 +8,9 @@ stats_www). Ставится install.sh как $DIR/stats_httpd.py; start_backen
 docs/plans/2026-09-12-web-spa-migration-design.md, решение по
 python3-зависимости - вариант 2, деградация) это ОСНОВНОЙ сервер: только
 он умеет чистые URL (/, /stats, /settings) и /api/* (см. ниже).
-"busybox httpd" остаётся резервным вариантом на роутерах без python3 -
-start_backend() переходит на него автоматически, если этот файл не найден
-или сам python3 не установлен; тогда работают только старые адреса
-/stats.html и /cgi-bin/*, без чистых URL.
+Резервного "busybox httpd" больше нет: веб-интерфейс требует python3
+(см. start_backend() в stats_service.sh). Старая HTML-страница
+/stats.html удалена 2026-09-28, render_stats() удаляет её остатки.
 
 Поддерживает ту часть CLI busybox httpd, которой пользуется этот проект:
   -p BIND:PORT   адрес и порт
@@ -48,8 +47,8 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     шага 4"): GET отдаёт текущие значения полей, POST - результат
     валидации/сохранения.
   - "/api/stats" - внутренний алиас на статический "stats.json" в
-    docroot, который render_stats() в speedtest2.sh пишет рядом со
-    stats.html (тот же awk, режим -v format=json - см. шаг 2). Не CGI -
+    docroot, который пишет render_stats() в speedtest2.sh (render_stats.awk).
+    Не CGI -
     обычная раздача файла, данные всегда посчитаны заранее, а не по
     запросу.
   - "/api/progress" - внутренний алиас на статический "progress.json" в
@@ -93,10 +92,7 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     файл в docroot, ни в один из путей выше, - отдаёт "index.html"
     (SPA-shell) с кодом 200, если он есть в docroot (SPA-фоллбек: клиентский
     роутер сам решает, что показать, по location.pathname). Если
-    index.html ещё не установлен (роутер не обновлял install.sh) - как и
-    раньше, для корня подставляется "stats.html", если он на месте, а для
-    остальных путей - обычный 404. Ничего не ломает для тех, у кого этих
-    новых файлов ещё нет.
+    index.html нет в docroot - обычный 404.
 """
 import http.server
 import json
@@ -445,13 +441,8 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             # rel уже нормализован _normalize_rel() (или является одним из
             # API_ALIASES) - None здесь означает корень.
             if rel is None:
-                for cand in ("index.html", "stats.html"):
-                    p = os.path.join(docroot, cand)
-                    if os.path.isfile(p):
-                        return p
-                # Ни одного из двух нет - подставляем index.html: он не
-                # существует, но по нему дальше корректно посчитается
-                # url_path и решится 404 в общем порядке.
+                # Корень - всегда SPA-shell. Если index.html нет, дальше
+                # по общему порядку решится 404.
                 return os.path.join(docroot, "index.html")
             full = os.path.normpath(os.path.join(docroot, rel))
             if full != docroot and not full.startswith(docroot + os.sep):

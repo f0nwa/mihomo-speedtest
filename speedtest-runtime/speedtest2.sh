@@ -83,8 +83,8 @@ NODE_STATS_UPDATE=${NODE_STATS_UPDATE:-$DIR/node_stats_update.awk}
 STABILITY_WINDOW=${STABILITY_WINDOW:-200}          # длина окна "недавних" прогонов на ноду (символы A/D/.), ~месяц при прогоне раз в 3 часа
 STABILITY_DROP_AFTER=${STABILITY_DROP_AFTER:-$HISTORY_KEEP_RUNS}  # прогонов подряд без ноды в пуле -> строка удаляется из node_stability.tsv (0 = не удалять)
 
-STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # страница статистики (раздаётся отдельным веб-сервисом, см. STATS_HTTP_* ниже)
-STATS_JSON=${STATS_JSON:-$DIR/stats_www/stats.json}   # тот же дашборд в JSON (см. render_stats.awk -v format=json, шаг 2 SPA-миграции) - раздаётся как /api/stats
+STATS_JSON=${STATS_JSON:-$DIR/stats_www/stats.json}   # данные статистики (render_stats.awk) - раздаётся веб-сервисом как /api/stats
+STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # устаревшая HTML-страница (удалена 2026-09-28): больше не пишется, render_stats() удаляет оставшуюся от старых версий
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
 STATS_PROGRESS=${STATS_PROGRESS:-$DIR/stats_www/progress.json}   # прогресс скоростного теста по нодам текущего прогона (см. write_progress() ниже) - шаг 1 задачи "видно по нодам при прогоне", пока без раздачи через веб-сервис (см. TODO.md)
 RENDER_PROGRESS=${RENDER_PROGRESS:-$DIR/render_progress.awk}
@@ -456,16 +456,15 @@ write_stats_static() {
   # $STATS_APP_SOURCE/$STATS_CHARTJS_SOURCE, ставятся install.sh рядом со
   # speedtest2.sh) в раздаваемый каталог - см.
   # docs/plans/2026-09-12-web-spa-migration-design.md. Файлы статические
-  # (без подстановки значений из $ENV, в отличие от stats.html из
-  # render_stats()) - copy как есть, исполняемый бит не нужен.
+  # (без подстановки значений из $ENV) - copy как есть, исполняемый бит
+  # не нужен.
   # $STATS_CHARTJS_SOURCE - вендоренная UMD-сборка Chart.js для графика по
   # нодам (buildNodeChart() в stats_app.js), не наш код - тоже просто
   # копируется как есть, отдельной логики не требует. Как и
   # write_stats_cgi()/write_stats_run() - отсутствие источника или
   # неудачная запись только логируют WARN и НЕ прерывают ensure_stats_httpd()
-  # (return 0 в любом случае): stats_httpd.py просто продолжит отдавать "/"
-  # как stats.html (или 404 на новых путях), как было до этой функции -
-  # см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
+  # (return 0 в любом случае): без index.html stats_httpd.py отдаёт 404
+  # - см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
   # покажет "chart.js не загрузился", см. buildNodeChart() в stats_app.js).
   for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS" "$STATS_CHARTJS_SOURCE:$STATS_CHARTJS_JS"; do
     src=${pair%%:*}
@@ -591,7 +590,7 @@ ensure_stats_httpd() {
     echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
     url_host=$(stats_httpd_advertise_host "$STATS_HTTP_BIND")
     [ -n "$url_host" ] || url_host=$STATS_HTTP_BIND
-    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats.html"
+    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats"
   else
     say "WARN: не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
   fi
@@ -677,7 +676,7 @@ render_stats() {
   # прогоны speedtest2.sh (cron, --force) не поднимают, не проверяют и не
   # перезапускают HTTP-бэкенд. Это отдельная забота stats_service.sh
   # (supervisor с собственным respawn/backoff, см. design). render_stats()
-  # отвечает только за атомарную публикацию stats.html/stats.json - как и
+  # отвечает только за атомарную публикацию stats.json - как и
   # write_progress() отдельно отвечает за progress.json.
   #
   # С порции 3 stats_cgi.sh (после сохранения серверных настроек) тоже
@@ -689,47 +688,37 @@ render_stats() {
   # переиспользуются никем) сейчас не вызываются ни из одного места в
   # проекте и оставлены только как задел под будущую отдельную чистку,
   # а не потому что design запрещает их убрать.
-  statsdir=${STATS_HTML%/*}
+  statsdir=${STATS_JSON%/*}
   if [ ! -d "$statsdir" ]; then
-    say "WARN: каталог $statsdir не найден, stats.html не записан"
+    say "WARN: каталог $statsdir не найден, stats.json не записан"
     return 0
   fi
+  # Старый HTML-интерфейс (stats.html) удалён 2026-09-28 - убираем файл,
+  # оставшийся от прежних версий, чтобы по /stats.html не открывалась
+  # навсегда застывшая статистика. Одна запись в /opt и только если файл есть.
+  if [ -f "$STATS_HTML" ]; then
+    rm -f "$STATS_HTML" 2>/dev/null || say "WARN: не удалось удалить устаревший $STATS_HTML"
+  fi
   if [ ! -f "$RENDER_STATS" ]; then
-    say "WARN: $RENDER_STATS не найден, stats.html не обновлён"
+    say "WARN: $RENDER_STATS не найден, stats.json не обновлён"
     return 0
   fi
   generated_ts=$(date '+%Y-%m-%d %H:%M:%S')
-  if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
-       -v stability="$HISTORY_STABILITY" \
-       -v generated="$generated_ts" \
-       -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.html" 2> "$WORK/stats.err"; then
-    say "WARN: render_stats.awk завершился с ошибкой, stats.html не обновлён"
-    [ -s "$WORK/stats.err" ] && sed -n '1,3p' "$WORK/stats.err" >> "$RUN_LOG"
-    return 0
-  fi
-  if [ ! -s "$WORK/stats.html" ]; then
-    say "WARN: render_stats.awk вернул пустой файл, stats.html не обновлён"
-    return 0
-  fi
-  publish_file "$WORK/stats.html" "$STATS_HTML" || say "WARN: stats.html не записан"
-
-  # stats.json - те же данные для /api/stats (см. шаг 2 SPA-миграции и
-  # маршрут "api/stats" в stats_httpd.py) - тот же вход, та же метка
-  # времени, что и у stats.html выше, отдельный awk-прогон с -v format=json.
-  # Ошибка/пустой результат здесь - только WARN, как и для stats.html:
-  # /api/stats на роутерах без python3-бэкенда всё равно не используется,
-  # а на новом бэкенде app.js сам покажет отсутствие данных.
+  # stats.json - данные для /api/stats (маршрут "api/stats" в
+  # stats_httpd.py). Ошибка/пустой результат - только WARN: app.js сам
+  # покажет отсутствие данных, а прогон спидтеста от этого не страдает.
+  # Явный формат нужен старому web-компоненту при обновлении только runtime.
   if ! awk -v last="$LAST" -v nodes="$HISTORY_NODES" -v cap="$STATS_NODE_CAP" \
        -v stability="$HISTORY_STABILITY" \
        -v generated="$generated_ts" \
        -v format=json \
        -f "$RENDER_STATS" "$HISTORY_RUNS" > "$WORK/stats.json" 2> "$WORK/stats.json.err"; then
-    say "WARN: render_stats.awk (JSON) завершился с ошибкой, stats.json не обновлён"
+    say "WARN: render_stats.awk завершился с ошибкой, stats.json не обновлён"
     [ -s "$WORK/stats.json.err" ] && sed -n '1,3p' "$WORK/stats.json.err" >> "$RUN_LOG"
     return 0
   fi
   if [ ! -s "$WORK/stats.json" ]; then
-    say "WARN: render_stats.awk (JSON) вернул пустой файл, stats.json не обновлён"
+    say "WARN: render_stats.awk вернул пустой файл, stats.json не обновлён"
     return 0
   fi
   publish_file "$WORK/stats.json" "$STATS_JSON" || say "WARN: stats.json не записан"
@@ -770,7 +759,7 @@ update_node_stability() {
 record_history() {
   # Дописывает сводку прогона в speedtest_runs.tsv и историю нод-победителей
   # в speedtest_history.tsv, применяет ротацию по HISTORY_KEEP_RUNS/HISTORY_KEEP_DAYS,
-  # затем перегенерирует stats.html. Вызывается из main() после успешной
+  # затем перегенерирует stats.json. Вызывается из main() после успешной
   # публикации fast.yaml - сам по себе не критичен для работы замерщика:
   # любая ошибка здесь - WARN в лог, а не остановка.
   channel=$1; threshold=$2; total=$3; alive=$4; tested=$5; good=$6; winners=$7

@@ -1,6 +1,6 @@
 #!/bin/sh
-# CGI-скрипт формы настройки статистики speedtest2 (см. README.md, раздел
-# про stats_www/cgi-bin/config). Ставится install.sh в $DIR/stats_cgi.sh;
+# CGI-скрипт настроек веб-интерфейса (JSON для /api/settings, см.
+# API_ALIASES в stats_httpd.py и renderSettings() в stats_app.js). Ставится install.sh в $DIR/stats_cgi.sh;
 # в раздаваемый каталог (STATS_CGI_SCRIPT, обычно $DIR/stats_www/cgi-bin/config)
 # его копирует write_stats_cgi() из speedtest2.sh при каждом запуске/
 # перезапуске независимой службы (prepare() в stats_service.sh, порция 3 -
@@ -12,7 +12,7 @@
 # родителя: stats_service.sh экспортирует DIR и ENV перед запуском веб-
 # сервиса, поэтому сорс "$DIR/speedtest2.sh" ниже подхватывает те же
 # настройки (включая текущий speedtest2.env), что и обычный прогон по cron -
-# в т.ч. пересчитывает все зависящие от DIR пути (HISTORY_RUNS, STATS_HTML
+# в т.ч. пересчитывает все зависящие от DIR пути (HISTORY_RUNS, STATS_JSON
 # и т.д.), а не только те, что перечислены тут.
 
 export MST_LIB_ONLY=1
@@ -55,10 +55,6 @@ urldecode() {
       }
       printf "%s", out
     }'
-}
-
-html_escape() {
-  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
 
 is_uint() {
@@ -144,14 +140,11 @@ set_env_var() {
 }
 
 _add_err() {
-  # $1=условное имя поля для JSON-пути /api/settings, $2=текст сообщения
-  # без HTML-разметки. Пишет
-  # сразу в обе глобальные переменные - err (HTML, с <br> между
-  # сообщениями, как было раньше) и err_fields (по строке
-  # "поле|сообщение" на ошибку, без HTML-разметки) - у обеих один и тот
-  # же вызов validate_settings_fields() ниже как единственный источник
-  # правил.
-  err="${err}$2<br>"
+  # $1=условное имя поля для JSON-ответа /api/settings, $2=текст сообщения.
+  # err - признак «есть ошибки» (непустой) и сводный текст, err_fields -
+  # по строке "поле|сообщение" на ошибку для JSON (print_settings_json()).
+  err="${err}$2
+"
   err_fields="${err_fields}$1|$2
 "
 }
@@ -171,12 +164,9 @@ validate_settings_fields() {
   # dl_timeout, min_speed_mb, min_ratio, min_floor_mb, topn, enough,
   # min_winners, stability_window, stability_drop_after и max_tested -
   # берутся из одноимённых shell-переменных,
-  # устанавливаемых ДО вызова этой функции: сегодня - urldecode() из тела
-  # POST HTML-формы и API /api/settings). Ни $ENV, ни другие файлы не трогает -
-  # только заполняет err/err_fields (см. _add_err()) и возвращает 0, если
-  # ошибок нет, иначе 1. Один набор правил на оба вызывающих пути - при
-  # подключении JSON API в шаге 4 их не дублировать, а звать эту же
-  # функцию.
+  # устанавливаемых ДО вызова этой функции - urldecode() из тела POST
+  # /api/settings). Ни $ENV, ни другие файлы не трогает - только заполняет
+  # err/err_fields (см. _add_err()) и возвращает 0, если ошибок нет, иначе 1.
   err=""
   err_fields=""
 
@@ -245,10 +235,9 @@ print_settings_json() {
   # JSON-ответ для /api/settings (шаг 4, см.
   # docs/plans/2026-09-12-web-spa-migration-design.md) - включается
   # переменной окружения API_JSON=1, которую stats_httpd.py добавляет
-  # только для алиаса "/api/settings" (см. API_ALIASES в stats_httpd.py) -
-  # обычный "/cgi-bin/config" её не получает и продолжает отдавать HTML
-  # форму как раньше. GET - текущие значения полей (те же переменные,
-  # что подставляются в HTML-форму ниже - $STATS_NODE_CAP/$BLOCK/...).
+  # только для алиаса "/api/settings" (см. API_ALIASES в stats_httpd.py).
+  # С 2026-09-28 HTML-формы нет, и JSON отдаётся всегда, независимо от
+  # API_JSON. GET - текущие значения полей ($STATS_NODE_CAP/$BLOCK/...).
   # POST - результат validate_settings_fields()/сохранения выше:
   # {"ok":true} либо {"ok":false,"errors":{"поле":"сообщение",...}}
   # (errors собран из err_fields - см. _add_err()).
@@ -312,7 +301,6 @@ GEOFILTER_CANDIDATES
 }
 
 method=${REQUEST_METHOD:-GET}
-msg=""
 err=""
 
 if [ "$method" = "POST" ]; then
@@ -368,7 +356,7 @@ if [ "$method" = "POST" ]; then
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
     # перечитываем свежесохранённые значения и применяем сразу, не дожидаясь
-    # следующего прогона по cron: перегенерируем stats.html (новый NODE_CAP)
+    # следующего прогона по cron: перегенерируем stats.json (новый NODE_CAP)
     # немедленно. render_stats() с порции 2 сама больше не трогает
     # HTTP-процесс - если поменялись логин/пароль, веб-сервис перезапускает
     # независимая служба через явный reconfigure (порция 3), а не эта форма
@@ -379,7 +367,6 @@ if [ "$method" = "POST" ]; then
     RUN_LOG=$WORK/cgi.log
     render_stats
     rm -rf "$WORK"
-    msg="Настройки сохранены."
 
   fi
 fi
@@ -387,10 +374,8 @@ fi
 # Кандидаты гео-фильтра из текущего config.yaml - те же, что install.sh
 # предложил бы при переустановке (providers.awk ищет exclude-filter у
 # proxy-providers). Файла может не быть или providers.awk не найти в нём
-# провайдеров - тогда просто нет подсказок (пустой geo_filter_options /
-# geo_filter_candidates_raw), поле в форме/API остаётся обычным текстовым.
-# Нужно и HTML-пути (datalist ниже), и JSON-пути (print_settings_json) -
-# посчитано один раз здесь, до ветвления по API_JSON.
+# провайдеров - тогда просто нет подсказок (пустой
+# geo_filter_candidates_raw), список кандидатов в JSON пуст.
 BLOCK_COUNT=0
 MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG_YAML=$MIHOMO_DIR/config.yaml
@@ -398,125 +383,17 @@ if [ -f "$CONFIG_YAML" ] && [ -n "${UPDATE_PROVIDERS_AWK:-}" ] && [ -f "$UPDATE_
   block_candidates=$(awk -v CONFIG="$CONFIG_YAML" -v CONFDIR="$MIHOMO_DIR" -f "$UPDATE_PROVIDERS_AWK" "$CONFIG_YAML" 2>/dev/null | grep -E '^BLOCK_(COUNT|[0-9]+)=')
   [ -n "$block_candidates" ] && eval "$block_candidates"
 fi
-geo_filter_options=""
 geo_filter_candidates_raw=""
 i=1
 while [ "$i" -le "$BLOCK_COUNT" ]; do
   eval "cand=\$BLOCK_$i"
-  geo_filter_options="$geo_filter_options<option value=\"$(html_escape "$cand")\">
-"
   geo_filter_candidates_raw="${geo_filter_candidates_raw}${cand}
 "
   i=$((i + 1))
 done
 
-if [ -n "${API_JSON:-}" ]; then
-  print_settings_json
-  exit 0
-fi
-
-echo "Content-Type: text/html; charset=utf-8"
-echo
-
-cat <<HTML
-<!doctype html><meta charset="utf-8">
-<title>speedtest2 - настройка статистики</title>
-<style>
-:root{--bg:#17191b;--card:#1e2124;--card-border:#33383c;--text:#e7e6e2;--muted:#8b9096;--shadow:none;--accent:#35c7c7;--danger:#d1453b}
-*{box-sizing:border-box}
-body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
-.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
-h1{font-size:19px;margin:0}
-.meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
-.theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:0;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
-.card{background:var(--card);border:1px solid var(--card-border);border-radius:0;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
-h2{font-size:14.5px;margin:0 0 8px;font-weight:600}
-label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
-label:first-child{margin-top:0}
-input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 9px;border:1px solid var(--card-border);border-radius:0;background:var(--bg);color:var(--text);font-size:14px}
-.hint{color:var(--muted);font-size:12px;margin:4px 0 0}
-.row-checkbox{display:flex;align-items:center;gap:6px;margin-top:12px}
-.row-checkbox label{margin:0}
-button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:0;background:var(--accent);color:#12181a;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
-.msg-ok{background:#16a34a22;border:1px solid #16a34a;border-radius:0;padding:8px 12px;margin-bottom:16px;font-size:13px}
-.msg-err{background:#d1453b22;border:1px solid var(--danger);border-radius:0;padding:8px 12px;margin-bottom:16px;font-size:13px}
-</style>
-<div class="wrap">
-<header>
-<div><h1>Настройка статистики</h1><p class="meta">speedtest2</p></div>
-<div style="display:flex;gap:8px;flex:0 0 auto">
-<a class="theme-btn" href="../stats.html">К статистике</a>
-</div>
-</header>
-HTML
-
-[ -n "$msg" ] && printf '<p class="msg-ok">%s</p>\n' "$(html_escape "$msg")"
-[ -n "$err" ] && printf '<p class="msg-err">%s</p>\n' "$err"
-
-cat <<HTML
-<form method="post">
-<div class="card">
-<h2>Гео-фильтр (BLOCK)</h2>
-<label for="geo_filter">Слова для исключения нод через | (не регулярное выражение)</label>
-<input type="text" id="geo_filter" name="geo_filter" list="geo_filter_options" value="$(html_escape "$BLOCK")" autocomplete="off">
-<datalist id="geo_filter_options">
-$geo_filter_options</datalist>
-<p class="hint">Нода пропускается, если её имя содержит любое из слов, регистр не важен. Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter из текущего config.yaml (префикс (?i) при сохранении убирается).</p>
-</div>
-<div class="card">
-<h2>Как тестируем ноды</h2>
-<label for="extype">Исключить типы нод целиком (через |)</label>
-<input type="text" id="extype" name="extype" value="$(html_escape "$EXTYPE")" placeholder="например trojan|ss" autocomplete="off">
-<p class="hint">Пусто = тестировать все типы, которые понимает mihomo.</p>
-<label for="size_mb">Размер файла для замера, МБ</label>
-<input type="number" min="1" max="100" step="any" id="size_mb" name="size_mb" value="$(html_escape "$(bytes_to_mb "$SIZE")")">
-<p class="hint">Меньше 10 МБ занижает результат - треть времени уходит на TTFB.</p>
-<label for="dl_timeout">Таймаут закачки, сек</label>
-<input type="number" min="1" max="120" id="dl_timeout" name="dl_timeout" value="$(html_escape "$DL_TIMEOUT")">
-</div>
-<div class="card">
-<h2>Порог и число нод в fast.yaml</h2>
-<label for="min_speed_mb">Порог отбора (для текущего канала), Мбит/с</label>
-<input type="number" min="0.1" max="10000" step="any" id="min_speed_mb" name="min_speed_mb" value="$(html_escape "$(bytes_to_mbit "$MIN_SPEED")")">
-<p class="hint">Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.</p>
-<label for="min_ratio">Динамический порог, доля от прямого канала</label>
-<input type="number" min="0.01" max="1" step="any" id="min_ratio" name="min_ratio" value="$(html_escape "$MIN_RATIO")">
-<label for="min_floor_mb">Абсолютный минимум порога, Мбит/с (0 = без минимума)</label>
-<input type="number" min="0" step="any" id="min_floor_mb" name="min_floor_mb" value="$(html_escape "$(bytes_to_mbit "$MIN_FLOOR")")">
-<label for="max_tested">Максимум кандидатов на скоростной тест (0 = без ограничения)</label>
-<input type="number" min="0" id="max_tested" name="max_tested" value="$(html_escape "$MAX_TESTED")">
-<label for="topn">Сколько нод класть в fast.yaml (TOPN)</label>
-<input type="number" min="1" max="50" id="topn" name="topn" value="$(html_escape "$TOPN")">
-<label for="enough">Хватит нод выше порога - дальше не мерить</label>
-<input type="number" min="1" max="100" id="enough" name="enough" value="$(html_escape "$ENOUGH")">
-<label for="min_winners">Минимум нод в fast.yaml, даже ниже порога</label>
-<input type="number" min="0" max="50" id="min_winners" name="min_winners" value="$(html_escape "$MIN_WINNERS")">
-<p class="hint">Если рабочих нод меньше TOPN - добор идёт по убыванию скорости, пока не наберётся этот минимум.</p>
-</div>
-<div class="card">
-<h2>Стабильность нод</h2>
-<label for="stability_window">Длина окна "недавних" прогонов</label>
-<input type="number" min="1" max="5000" id="stability_window" name="stability_window" value="$(html_escape "$STABILITY_WINDOW")">
-<p class="hint">В прогонах, не в днях - 200 при прогоне раз в 3 часа - это около месяца. Влияет только на таблицу "Доступность нод пула" на stats.html.</p>
-<label for="stability_drop_after">Удалять ноду после стольких прогонов подряд без неё в пуле (0 = не удалять)</label>
-<input type="number" min="0" id="stability_drop_after" name="stability_drop_after" value="$(html_escape "$STABILITY_DROP_AFTER")">
-</div>
-<div class="card">
-<h2>График по нодам</h2>
-<label for="node_cap">Число нод на графике (1-8)</label>
-<input type="number" min="1" max="8" id="node_cap" name="node_cap" value="$(html_escape "$STATS_NODE_CAP")">
-<p class="hint">Больше 8 не поддерживается - столько цветов в палитре легенды.</p>
-</div>
-<div class="card">
-<h2>Хранение истории</h2>
-<label for="keep_runs">Хранить прогонов (0 = не ограничивать)</label>
-<input type="number" min="0" id="keep_runs" name="keep_runs" value="$(html_escape "$HISTORY_KEEP_RUNS")">
-<label for="keep_days">Хранить дней (0 = не ограничивать)</label>
-<input type="number" min="0" id="keep_days" name="keep_days" value="$(html_escape "$HISTORY_KEEP_DAYS")">
-<p class="hint">Нельзя занулить оба сразу.</p>
-</div>
-<button class="submit" type="submit">Сохранить</button>
-</form>
-</div>
-HTML
+# Ответ всегда JSON (GET - текущие значения, POST - итог сохранения).
+# HTML-форма настроек удалена 2026-09-28 вместе с остальным старым
+# HTML-интерфейсом: stats_httpd.py и так перенаправлял GET /cgi-bin/config
+# на /settings и отвечал 410 на POST туда, так что форма была недостижима.
+print_settings_json

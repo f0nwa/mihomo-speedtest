@@ -698,7 +698,7 @@ print_web_url() {
   fi
   host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
   [ -n "$host" ] || host="<не удалось определить IP - смотрите ip addr на роутере>"
-  echo "веб-интерфейс статистики: http://$host:${STATS_HTTP_PORT:-8899}/stats.html" >&2
+  echo "веб-интерфейс статистики: http://$host:${STATS_HTTP_PORT:-8899}/stats" >&2
 }
 
 show_url_main() {

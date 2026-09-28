@@ -8,7 +8,7 @@
 # supervisor: запускает HTTP-бэкенд в foreground, ждёт его завершения и
 # при неожиданном выходе перезапускает с нарастающей задержкой (backoff).
 # Не запускает speedtest, не меняет историю замеров и не генерирует
-# stats.html/stats.json - этим занимается speedtest2.sh (render_stats()).
+# stats.json - этим занимается speedtest2.sh (render_stats()).
 #
 # Переиспользует функции speedtest2.sh (say(), publish_file(),
 # write_stats_cgi(), write_stats_run(), write_stats_update(),
