@@ -1129,6 +1129,7 @@
   }
 
   var UPDATE_JOB_POLL_MS = 2000;
+  var UPDATE_RELOAD_DELAY_MS = 1500;
   var updateJobPollTimer = null;
 
   function stopUpdateJobPolling() {
@@ -1138,12 +1139,16 @@
   // onUpdate получает целиком ответ /api/updates/status (а не только
   // data.job) - мини консоли (renderUpdatesProgress) на каждый тик нужен
   // ещё и data.log, второй отдельный fetch на то же самое был бы лишним.
-  function startUpdateJobPolling(onUpdate) {
+  // onError (необязательный) вызывается при неудачном опросе: во время
+  // применения обновления веб-служба перезапускается, и несколько опросов
+  // подряд закономерно не получают ответа - страница должна показать это,
+  // а не молча висеть на «Выполняется...». Опрос при этом продолжается.
+  function startUpdateJobPolling(onUpdate, onError) {
     stopUpdateJobPolling();
     function tick() {
       fetchJson('/api/updates/status').then(function (data) {
         onUpdate(data || {});
-      })['catch'](function () { /* временная заминка - опрос продолжится следующим тиком */ });
+      })['catch'](function (err) { if (onError) { onError(err); } });
     }
     tick();
     updateJobPollTimer = setInterval(tick, UPDATE_JOB_POLL_MS);
@@ -1216,8 +1221,13 @@
     var consolePre = el('pre', 'update-console');
     c.appendChild(consolePre);
     app.appendChild(c);
+    var offline = false;
     startUpdateJobPolling(function (data) {
       renderConsoleLog(consolePre, data.log);
+      if (offline) {
+        offline = false;
+        status.className = 'hint'; status.textContent = 'Веб-служба снова на связи, выполняется...';
+      }
       var job = data.job;
       if (!job || job.action !== action) { return; }
       if (job.state === 'queued' || job.state === 'running') { return; }
@@ -1231,15 +1241,26 @@
         handlePrepareDone(job, c);
         return;
       }
-      status.className = 'msg-ok'; status.textContent = 'Обновление применено.';
+      status.className = 'msg-ok'; status.textContent = 'Обновление применено. Страница сейчас перезагрузится с новой версией интерфейса...';
       // Пункт фидбека по макету: last_check.plan к этому моменту ещё
-      // относится к состоянию ДО применения обновления, поэтому просто
-      // refreshUpdatesBadge() продолжил бы показывать бейдж как "есть
-      // обновление" до тех пор, пока пользователь не нажмёт "Проверить
-      // сейчас" вручную. Перепроверяем сами - тем же запросом, что и
-      // кнопка "Проверить сейчас" - и только потом обновляем бейдж/плитку.
-      fetchJson('/api/updates/check', { method: 'POST' }).then(function () { refreshUpdatesBadge(); })
-        ['catch'](function () { refreshUpdatesBadge(); });
+      // относится к состоянию ДО применения обновления, поэтому без
+      // перепроверки раздел и бейдж продолжили бы показывать "есть
+      // обновление" до ручного "Проверить сейчас". Перепроверяем тем же
+      // запросом, что и кнопка, и только потом перезагружаем страницу:
+      // в браузере до сих пор работает СТАРЫЙ app.js/style.css, а новые
+      // файлы веб-интерфейса подхватятся только перезагрузкой (сервер
+      // отдаёт их с Cache-Control: no-store). После перезагрузки
+      // renderUpdates() покажет итог по job.json (карточка «Последнее
+      // обновление»), так что результат не теряется.
+      var reload = function () { setTimeout(function () { location.reload(); }, UPDATE_RELOAD_DELAY_MS); };
+      fetchJson('/api/updates/check', { method: 'POST' }).then(reload, reload);
+    }, function () {
+      if (offline) { return; }
+      offline = true;
+      status.className = 'hint';
+      status.textContent = action === 'apply'
+        ? 'Нет ответа от веб-службы - при обновлении она перезапускается. Ожидаем, страница продолжит сама...'
+        : 'Нет ответа от веб-службы, повторяем запрос...';
     });
   }
 
@@ -1358,6 +1379,17 @@
       // "кнопка обновить должна быть вверху, там же где и проверка
       // обновлений") вместо прежних двух отдельных карточек.
       var summary = card('Обновления');
+      // Итог последнего применения (job.json живёт в /tmp до следующей
+      // операции или перезагрузки роутера): после автоматической
+      // перезагрузки страницы по окончании обновления пользователь сразу
+      // видит, что оно встало, или почему не встало.
+      if (job && job.action === 'apply' && job.state === 'done') {
+        summary.appendChild(el('p', 'msg-ok', 'Последнее обновление применено' +
+          (job.finished_at ? ' ' + job.finished_at : '') + '.'));
+      } else if (job && job.action === 'apply' && job.state === 'error') {
+        summary.appendChild(el('p', 'msg-err', 'Последнее обновление не применено' +
+          (job.finished_at ? ' (' + job.finished_at + ')' : '') + ': ' + (job.error || 'неизвестная ошибка')));
+      }
       if (lc && lc.ok) {
         // Одна короткая фраза по available (та же проверка, что показывает
         // кнопку "Обновить"): либо доступна новая версия N, либо N уже
