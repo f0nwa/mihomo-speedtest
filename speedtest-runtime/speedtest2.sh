@@ -960,10 +960,16 @@ main_curl() {
   if [ -n "$MAIN_CURL_CFG" ]; then curl -K "$MAIN_CURL_CFG" "$@"; else curl "$@"; fi
 }
 
-# urlencode - все байты строки в %XX (имена нод бывают с пробелами,
-# эмодзи и скобками; кодировать лишнее безопасно).
+# urlencode - процентное кодирование всего, кроме [A-Za-z0-9._~-] (имена нод
+# бывают с пробелами, эмодзи и скобками). Только awk в побайтовом режиме
+# (LC_ALL=C): минимальный BusyBox od на Keenetic не знает -t/-A, и прежняя
+# версия через od давала пустую строку - запросы уходили на /proxies/.
 urlencode() {
-  printf '%s' "$1" | od -An -v -tx1 | awk '{ for (i = 1; i <= NF; i++) printf "%%%s", toupper($i) }'
+  printf '%s\n' "$1" | LC_ALL=C awk '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    NR > 1 { printf "%%0A" }
+    { for (i = 1; i <= length($0); i++) { c = substr($0, i, 1)
+        if (c ~ /[A-Za-z0-9._~-]/) printf "%s", c; else printf "%%%02X", ord[c] } }'
 }
 
 json_escape() {
@@ -975,6 +981,8 @@ json_escape() {
 # экранированные символы дают заведомо несовпадающее имя.
 wg_group_members() {
   main_curl -f -s -m 5 "http://$API_MAIN/proxies/$(urlencode "$WG_GROUP")" > "$WORK/wg-group.json" 2>/dev/null || return 1
+  # Ответ списка всех прокси (/proxies/ при пустом имени) - не наша группа.
+  grep -q '"proxies":{' "$WORK/wg-group.json" && return 1
   awk 'BEGIN { RS = "\001" }
   {
     s = $0; i = index(s, "\"all\":[")
@@ -991,10 +999,13 @@ wg_group_members() {
         d = substr(s, i + 1, 1)
         if (d == "u") {
           h = tolower(substr(s, i + 2, 4))
-          out = out ((h == "003c") ? "<" : (h == "003e") ? ">" : (h == "0026") ? "&" : "\001")
+          ch = (h == "003c") ? "<" : (h == "003e") ? ">" : (h == "0026") ? "&" : "\001"
+          out = out ch
           i += 6; continue
         }
-        out = out ((d == "n" || d == "t" || d == "r") ? "\001" : d); i += 2; continue
+        # BusyBox awk читает "out ((...))" как вызов функции out - через переменную.
+        ch = (d == "n" || d == "t" || d == "r") ? "\001" : d
+        out = out ch; i += 2; continue
       }
       if (c == "\"") { print out; q = 0; i++; continue }
       out = out c; i++
