@@ -1,6 +1,10 @@
 # Готовит ноды для замера скорости.
 # Читает clash-yaml, нормализует отступы и заменяет имена техническими nNNNN.
 # Inline-map намеренно не разбирается: при нём скрипт завершается с кодом 2.
+# WGFILE (необязательно): WireGuard/AmneziaWG-ноды (type: wireguard) не
+# печатаются в пул второго ядра (stdout), а перечисляются в WGFILE строками
+# "idx<TAB>исходное имя" - их проверяют на уже работающем экземпляре в
+# основном ядре (один ключ - один клиент). В MAPFILE и NODEDIR они остаются.
 BEGIN {
   cnt = 0; inp = 0; ind = -1; in_node = 0; parse_error = 0
   nb = split(BLOCK, bl, "|")
@@ -18,9 +22,10 @@ function reset_node() {
   gotname = 0
   gottype = 0
   in_node = 0
+  ntype = ""
 }
 
-function flush(   i, j, sh, line, pfx, idx, f, pad, lname) {
+function flush(   i, j, sh, line, pfx, idx, f, pad, lname, is_wg) {
   if (!in_node || n == 0) { reset_node(); return }
   if (!gotname || !gottype) {
     print "prep.awk: proxy node is missing name or type" > "/dev/stderr"
@@ -37,6 +42,7 @@ function flush(   i, j, sh, line, pfx, idx, f, pad, lname) {
 
   cnt++
   idx = sprintf("n%04d", cnt)
+  is_wg = (WGFILE != "" && ntype == "wireguard")
   f = NODEDIR "/" idx ".yaml"
   sh = ind - 2
   for (i = 0; i < n; i++) {
@@ -48,6 +54,7 @@ function flush(   i, j, sh, line, pfx, idx, f, pad, lname) {
       line = pad line
     }
     print line > f
+    if (is_wg) continue
     if (i == nameline) {
       pfx = line
       sub(/name:.*/, "name: " idx, pfx)
@@ -56,6 +63,7 @@ function flush(   i, j, sh, line, pfx, idx, f, pad, lname) {
   }
   close(f)
   print idx "\t" bname > MAPFILE
+  if (is_wg) print idx "\t" bname > WGFILE
   reset_node()
 }
 
@@ -109,6 +117,7 @@ function flush(   i, j, sh, line, pfx, idx, f, pad, lname) {
     sub(/^[ \t]*type:[ \t]*/, "", tv)
     gsub(/[ \t]+$/, "", tv)
     gottype = 1
+    if (ntype == "") ntype = tv
     for (t = 1; t <= nt; t++) if (tv == tp[t]) bad = 1
   }
 

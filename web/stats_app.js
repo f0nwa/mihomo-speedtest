@@ -153,6 +153,8 @@
   function statusLabel(status) {
     if (status === 'alive') { return { text: 'жива', cls: 'status-alive', sw: 'sw-alive' }; }
     if (status === 'down') { return { text: 'недоступна', cls: 'status-down', sw: 'sw-down' }; }
+    // skipped - WG/AWG-нода в пуле, но не проверена (нет входа замера в основном ядре)
+    if (status === 'skipped') { return { text: 'не проверена', cls: 'status-absent', sw: 'sw-absent' }; }
     return { text: 'нет данных', cls: 'status-absent', sw: 'sw-absent' };
   }
 

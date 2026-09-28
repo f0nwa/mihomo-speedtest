@@ -361,7 +361,7 @@ function sparkline(win,   i, ch, out, cls) {
   out = ""
   for (i = 1; i <= length(win); i++) {
     ch = substr(win, i, 1)
-    cls = (ch == "A") ? "hist-ok" : (ch == "D") ? "hist-bad" : "hist-gap"
+    cls = (ch == "A") ? "hist-ok" : (ch == "D") ? "hist-bad" : (ch == "S") ? "hist-skip" : "hist-gap"
     out = out "<span class=\"" cls "\"></span>"
   }
   return out
@@ -447,6 +447,8 @@ function render_node_stability(path,
     ch = (wlen > 0) ? substr(win, wlen, 1) : "."
     if (ch == "A") { cls = "st-ok"; label = "жива"; srt = 2 }
     else if (ch == "D") { cls = "st-bad"; label = "не отвечает"; srt = 1 }
+    # S - WG/AWG-нода в пуле, но не проверена (нет входа замера в основном ядре)
+    else if (ch == "S") { cls = "st-gap"; label = "не проверена"; srt = 0 }
     else { cls = "st-gap"; label = "нет в пуле"; srt = 0 }
 
     pctv = st_pct[k]
@@ -658,7 +660,7 @@ function json_node_stability(path,
     win = s_window[k]
     wlen = length(win)
     ch = (wlen > 0) ? substr(win, wlen, 1) : "."
-    status = (ch == "A") ? "alive" : (ch == "D") ? "down" : "absent"
+    status = (ch == "A") ? "alive" : (ch == "D") ? "down" : (ch == "S") ? "skipped" : "absent"
     pctv = s_pct[k]
 
     has_avg = (s_speed_samples[k] > 0)
@@ -797,10 +799,11 @@ print ".axis-tick{stroke:var(--border)}"
   print ".st-gap{background:var(--muted)}"
   print ".delta-pos{color:var(--line-good)}"
   print ".delta-neg{color:var(--danger)}"
-  print ".hist-ok,.hist-bad,.hist-gap{display:inline-block;width:5px;height:12px;margin-right:1px;border-radius:0;vertical-align:middle}"
+  print ".hist-ok,.hist-bad,.hist-gap,.hist-skip{display:inline-block;width:5px;height:12px;margin-right:1px;border-radius:0;vertical-align:middle}"
   print ".hist-ok{background:var(--line-good)}"
   print ".hist-bad{background:var(--danger)}"
   print ".hist-gap{background:var(--border)}"
+  print ".hist-skip{background:var(--muted)}"
   print "</style>"
   print "<div class=\"wrap\">"
   print "<header>"

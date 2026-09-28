@@ -33,7 +33,17 @@ LOG_FLUSHED=0
 
 MIXED_PORT=7899
 API=127.0.0.1:9099
-API_MAIN=127.0.0.1:9090
+API_MAIN=127.0.0.1:9090   # уточняется по external-controller рабочего конфига, см. main_api_init()
+# WireGuard/AmneziaWG (один ключ - один клиент) проверяются не во втором ядре,
+# а на уже работающем экземпляре ноды в основном: служебная группа и вход
+# из config.example.yaml (порция 1 плана 2026-09-28-wg-main-core-speedtest).
+WG_GROUP=MST-SPEEDTEST
+WG_FAST_GROUP=MST-FAST-WG   # победитель среди WG/AWG - участник '⚡ Быстрый пул'
+WG_LISTENER=mst-speedtest
+WG_PORT=7896
+MAIN_CONFIG=${MAIN_CONFIG:-$MIHOMO_DIR/config.yaml}
+MAIN_CURL_CFG=
+MAIN_API_OK=0
 
 SIZE=10485760         # сколько качать с каждой ноды, байт. Меньше 10 МБ занижает: на 3 МБ
                       # треть времени уходит на TTFB и та же нода показывает 4.5 вместо 12 МБ/с
@@ -769,7 +779,7 @@ update_node_stability() {
   [ -f "$statold" ] || statold=/dev/null
   if ! awk -v iso="$(date '+%Y-%m-%d %H:%M:%S')" -v window_len="$STABILITY_WINDOW" \
        -v drop_after="$STABILITY_DROP_AFTER" -v mapfile="$WORK/map.txt" \
-       -v alivefile="$WORK/alive.txt" -v speedfile="$WORK/res.txt" \
+       -v alivefile="$WORK/alive.txt" -v speedfile="$WORK/res.txt" -v skipfile="$WORK/wg_skip.txt" \
        -f "$NODE_STATS_UPDATE" "$statold" \
        > "$WORK/stability.new" 2> "$WORK/stability.err"; then
     say "WARN: node_stats_update.awk завершился с ошибкой, node_stability.tsv не обновлён"
@@ -900,16 +910,227 @@ prepare_nodes() {
     echo 0 > "$WORK/cnt.txt"
     return 0
   fi
-  awk -v NODEDIR="$WORK/nodes" -v MAPFILE="$WORK/map.txt" \
+  : > "$WORK/wg.txt"
+  awk -v NODEDIR="$WORK/nodes" -v MAPFILE="$WORK/map.txt" -v WGFILE="$WORK/wg.txt" \
       -v CNTFILE="$WORK/cnt.txt" -v BLOCK="$BLOCK" -v EXTYPE="$EXTYPE" \
       -f "$PREP" $conv_sources > "$WORK/all.yaml" 2> "$WORK/prep.err"
 }
 
 reload_provider() {
-  curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/fast" >/dev/null 2>&1
+  main_curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/fast" >/dev/null 2>&1
+}
+
+# --- API основного ядра и WireGuard/AmneziaWG через него ---
+
+# main_api_init - адрес и secret API основного ядра из рабочего конфига
+# (external-controller/secret - только однострочные значения верхнего
+# уровня). secret уходит в заголовок через файл настроек curl (-K) с правами
+# 0600, а не в аргументы (их видно в ps). MAIN_API_OK=1, если адрес
+# определён; без external-controller остаётся API_MAIN по умолчанию.
+main_api_init() {
+  MAIN_API_OK=0
+  MAIN_CURL_CFG=$WORK/main-api.curl
+  ( umask 077; : > "$MAIN_CURL_CFG" ) || { MAIN_CURL_CFG=; return 1; }
+  [ -f "$MAIN_CONFIG" ] || return 1
+  main_vals=$(awk '
+    function val(s) { sub(/^[^:]*:[ \t]*/, "", s); sub(/[ \t]+#.*$/, "", s); sub(/[ \t\r]+$/, "", s)
+      if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2); return s }
+    /^external-controller:/ { c = val($0) }
+    /^secret:/ { k = val($0) }
+    END { printf "%s\t%s", c, k }' "$MAIN_CONFIG") || return 1
+  main_ctl=${main_vals%%"$(printf '\t')"*}
+  main_secret=${main_vals#*"$(printf '\t')"}
+  [ -n "$main_ctl" ] || return 1
+  main_port=${main_ctl##*:}
+  case $main_port in ''|*[!0-9]*) return 1 ;; esac
+  case $main_ctl in
+    :*|0.0.0.0:*|'[::]:'*|'::':*) main_host=127.0.0.1 ;;
+    *) main_host=${main_ctl%:*} ;;
+  esac
+  case $main_host in ''|*[!A-Za-z0-9.:\[\]-]*) return 1 ;; esac
+  if [ -n "$main_secret" ]; then
+    case $main_secret in *'"'*|*'\'*) return 1 ;; esac
+    printf 'header = "Authorization: Bearer %s"\n' "$main_secret" > "$MAIN_CURL_CFG" || return 1
+  fi
+  API_MAIN=$main_host:$main_port
+  MAIN_API_OK=1
+}
+
+main_curl() {
+  if [ -n "$MAIN_CURL_CFG" ]; then curl -K "$MAIN_CURL_CFG" "$@"; else curl "$@"; fi
+}
+
+# urlencode - все байты строки в %XX (имена нод бывают с пробелами,
+# эмодзи и скобками; кодировать лишнее безопасно).
+urlencode() {
+  printf '%s' "$1" | od -An -v -tx1 | awk '{ for (i = 1; i <= NF; i++) printf "%%%s", toupper($i) }'
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# wg_group_members - имена из поля "all" группы WG_GROUP основного ядра, по
+# одному в строке. \u-экранирование Go (<, >, &) раскрывается, прочие
+# экранированные символы дают заведомо несовпадающее имя.
+wg_group_members() {
+  main_curl -f -s -m 5 "http://$API_MAIN/proxies/$(urlencode "$WG_GROUP")" > "$WORK/wg-group.json" 2>/dev/null || return 1
+  awk 'BEGIN { RS = "\001" }
+  {
+    s = $0; i = index(s, "\"all\":[")
+    if (!i) exit 1
+    i += 7; n = length(s); q = 0
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (!q) {
+        if (c == "]") { found = 1; break }
+        if (c == "\"") { q = 1; out = "" }
+        i++; continue
+      }
+      if (c == "\\") {
+        d = substr(s, i + 1, 1)
+        if (d == "u") {
+          h = tolower(substr(s, i + 2, 4))
+          out = out ((h == "003c") ? "<" : (h == "003e") ? ">" : (h == "0026") ? "&" : "\001")
+          i += 6; continue
+        }
+        out = out ((d == "n" || d == "t" || d == "r") ? "\001" : d); i += 2; continue
+      }
+      if (c == "\"") { print out; q = 0; i++; continue }
+      out = out c; i++
+    }
+  }
+  END { exit !found }' "$WORK/wg-group.json"
+}
+
+# wg_prepare - из $WORK/wg.txt (idx<TAB>имя, prep.awk) отбирает ноды, которые
+# можно проверить через основное ядро ($WORK/wg_ok.txt), остальные - в
+# $WORK/wg_skip.txt (idx) с причиной в логе. Второе ядро такие ноды не
+# получает никогда - второй клиент с тем же ключом ломает соединение.
+wg_prepare() {
+  : > "$WORK/wg_ok.txt"; : > "$WORK/wg_skip.txt"
+  [ -s "$WORK/wg.txt" ] || return 0
+  wg_reason=
+  if ! grep -q "^  - name: $WG_LISTENER\$" "$MAIN_CONFIG" 2>/dev/null; then
+    wg_reason="в рабочем конфиге нет входа $WG_LISTENER (нужна миграция конфига через обновление)"
+  elif [ "$MAIN_API_OK" != 1 ]; then
+    wg_reason="не удалось определить адрес или secret API основного ядра"
+  elif command -v netstat >/dev/null 2>&1 && ! netstat -ltn 2>/dev/null | awk -v p=":$WG_PORT" 'substr($4, length($4) - length(p) + 1) == p { f = 1 } END { exit !f }'; then
+    wg_reason="вход 127.0.0.1:$WG_PORT не слушает (основное ядро не перезапущено после миграции?)"
+  elif ! wg_group_members > "$WORK/wg-members.txt"; then
+    wg_reason="группа $WG_GROUP недоступна через API основного ядра"
+  fi
+  if [ -n "$wg_reason" ]; then
+    cut -f1 "$WORK/wg.txt" > "$WORK/wg_skip.txt"
+    say "WARN: WireGuard/AmneziaWG-ноды ($(wc -l < "$WORK/wg.txt" | tr -d ' ')) не проверяются: $wg_reason"
+    return 0
+  fi
+  while IFS="$(printf '\t')" read -r wg_idx wg_name; do
+    [ -n "$wg_idx" ] || continue
+    wg_dups=$(awk -F '\t' -v n="$wg_name" '$2 == n { c++ } END { print c + 0 }' "$WORK/map.txt")
+    wg_members=$(grep -cxF -- "$wg_name" "$WORK/wg-members.txt" 2>/dev/null) || wg_members=0
+    if [ "$wg_dups" -gt 1 ]; then
+      wg_why="имя встречается в пуле несколько раз"
+    elif [ "$wg_members" != 1 ]; then
+      wg_why="нет в группе $WG_GROUP основного ядра (другое имя, например префикс провайдера?)"
+    else
+      printf '%s\t%s\n' "$wg_idx" "$wg_name" >> "$WORK/wg_ok.txt"
+      continue
+    fi
+    echo "$wg_idx" >> "$WORK/wg_skip.txt"
+    say "WARN: WG-нода не проверяется: $wg_name - $wg_why"
+  done < "$WORK/wg.txt"
+}
+
+wg_delay_one() {
+  main_curl -s -m $((DELAY_TIMEOUT_MS / 1000 + 3)) \
+    "http://$API_MAIN/proxies/$(urlencode "$1")/delay?url=$DELAY_URL&timeout=$DELAY_TIMEOUT_MS" 2>/dev/null \
+    | sed -n 's/.*"delay":\([0-9][0-9]*\).*/\1/p'
+}
+
+# wg_delays - задержка WG-нод через основное ядро; первый запрос прогревает
+# туннель (рукопожатие), в зачёт идёт второй. Дописывает "delay idx" в
+# $WORK/alive.raw, как fetch_delays() для второго ядра.
+wg_delays() {
+  while IFS="$(printf '\t')" read -r wg_idx wg_name; do
+    [ -n "$wg_idx" ] || continue
+    wg_delay_one "$wg_name" > /dev/null
+    wg_d=$(wg_delay_one "$wg_name")
+    [ "${wg_d:-0}" -gt 0 ] 2>/dev/null && echo "$wg_d $wg_idx" >> "$WORK/alive.raw"
+  done < "$WORK/wg_ok.txt"
+  return 0
+}
+
+# wg_group_now - поле "now" (текущий выбор) группы $1 основного ядра.
+wg_group_now() {
+  main_curl -f -s -m 5 "http://$API_MAIN/proxies/$(urlencode "$1")" 2>/dev/null | awk 'BEGIN { RS = "\001" }
+  {
+    i = index($0, "\"now\":\"")
+    if (!i) exit 1
+    s = substr($0, i + 7); out = ""
+    for (j = 1; j <= length(s); j++) {
+      c = substr(s, j, 1)
+      if (c == "\\") { out = out substr(s, j + 1, 1); j++; continue }
+      if (c == "\"") { print out; found = 1; exit }
+      out = out c
+    }
+  }
+  END { exit !found }'
+}
+
+# wg_publish_fast - WG/AWG-ноды не пишутся в fast.yaml (второй клиент с тем
+# же ключом), вместо этого лучшая из прошедших порог $1 выбирается в группе
+# WG_FAST_GROUP, которая входит в '⚡ Быстрый пул'. Нет прошедших порог:
+# REJECT, если текущий выбор проверялся в этом прогоне и не прошёл (не
+# ответил или ниже порога); не дошедший до замера выбор не трогаем.
+wg_publish_fast() {
+  [ -s "$WORK/wg_ok.txt" ] || return 0
+  if ! wg_now=$(wg_group_now "$WG_FAST_GROUP"); then
+    say "WARN: группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (нужна миграция конфига)"
+    return 0
+  fi
+  wg_best=$(awk -v min="$1" -v okfile="$WORK/wg_ok.txt" '
+    BEGIN { FS = "\t"; while ((getline l < okfile) > 0) { split(l, f, "\t"); nm[f[1]] = f[2] } FS = " " }
+    ($2 in nm) && $1 >= min && $1 > best { best = $1; name = nm[$2] }
+    END { if (name != "") print name }' "$WORK/res.txt")
+  if [ -n "$wg_best" ]; then
+    if [ "$wg_now" = "$wg_best" ] || wg_select_in "$WG_FAST_GROUP" "$wg_best"; then
+      say "WG: $wg_best -> '⚡ Быстрый пул' (группа $WG_FAST_GROUP)"
+    else
+      say "WARN: не удалось выбрать $wg_best в группе $WG_FAST_GROUP"
+    fi
+    return 0
+  fi
+  [ "$wg_now" != REJECT ] || return 0
+  wg_now_idx=$(awk -F '\t' -v n="$wg_now" '$2 == n { print $1; exit }' "$WORK/wg_ok.txt")
+  [ -n "$wg_now_idx" ] || return 0
+  wg_now_state=$(awk -v k="$wg_now_idx" -v min="$1" -v alive="$WORK/alive.txt" '
+    BEGIN { while ((getline l < alive) > 0) { split(l, a, " "); if (a[2] == k) up = 1 } }
+    $2 == k { tested = 1; if ($1 < min) slow = 1 }
+    END { print (!up || (tested && slow)) ? "fail" : "keep" }' "$WORK/res.txt")
+  if [ "$wg_now_state" = fail ]; then
+    wg_select_in "$WG_FAST_GROUP" REJECT && say "WG: $wg_now не прошёл замер - убран из '⚡ Быстрый пул'"
+  fi
+  return 0
+}
+
+wg_select_in() {
+  main_curl -f -s -m 3 -X PUT -H 'Content-Type: application/json' \
+    --data-binary "{\"name\":\"$(json_escape "$2")\"}" \
+    "http://$API_MAIN/proxies/$(urlencode "$1")" >/dev/null 2>&1
+}
+
+wg_select() {
+  main_curl -f -s -m 3 -X PUT -H 'Content-Type: application/json' \
+    --data-binary "{\"name\":\"$(json_escape "$1")\"}" \
+    "http://$API_MAIN/proxies/$(urlencode "$WG_GROUP")" >/dev/null 2>&1
 }
 
 write_test_config() {
+  # Пул второго ядра - map2.txt (без WireGuard/AmneziaWG, см. main()); без
+  # него (вызов вне main) - весь map.txt.
+  pool2=$WORK/map2.txt
+  [ -f "$pool2" ] || pool2=$WORK/map.txt
   # T содержит весь пул, но используется только для последовательного
   # переключения нод во время замера скорости. Группы D0001... разбивают
   # массовый delay-check на небольшие последовательные партии: внутри
@@ -922,11 +1143,11 @@ write_test_config() {
       print "    proxies:"
     }
     { print "      - " $1 }
-  ' "$WORK/map.txt" > "$WORK/delay_groups.yaml"
+  ' "$pool2" > "$WORK/delay_groups.yaml"
 
   awk -v size="$DELAY_BATCH_SIZE" '
     (NR - 1) % size == 0 { printf "D%04d\n", ++group }
-  ' "$WORK/map.txt" > "$WORK/delay_groups.txt"
+  ' "$pool2" > "$WORK/delay_groups.txt"
 
   {
     echo "mixed-port: $MIXED_PORT"
@@ -1063,6 +1284,17 @@ if [ "$TOTAL" -lt 1 ]; then
   say "WARN: ни одной ноды не разобрано, fast.yaml не трогаю"; exit 0
 fi
 
+# WireGuard/AmneziaWG (wg.txt) во второе ядро не попадают вовсе: пул второго
+# ядра - map2.txt; их проверяет основное ядро (wg_prepare/wg_delays ниже).
+main_api_init || true
+awk -F '\t' -v wgfile="$WORK/wg.txt" '
+  BEGIN { while ((getline l < wgfile) > 0) { split(l, f, "\t"); wg[f[1]] = 1 } }
+  !($1 in wg)' "$WORK/map.txt" > "$WORK/map2.txt"
+WG_TOTAL=$(wc -l < "$WORK/wg.txt" | tr -d ' ')
+POOL2=$(wc -l < "$WORK/map2.txt" | tr -d ' ')
+: > "$WORK/alive.raw"
+
+if [ "$POOL2" -gt 0 ]; then
 # 2. конфиг для тестового ядра
 write_test_config
 
@@ -1088,6 +1320,19 @@ if ! fetch_delays; then
   say "WARN: групповая проверка задержки не выполнена, fast.yaml не трогаю"
   exit 0
 fi
+else
+  say "второе ядро не запускается: в пуле только WireGuard/AmneziaWG-ноды"
+fi
+
+# 4a. WireGuard/AmneziaWG - через основное ядро (вход $WG_LISTENER, группа $WG_GROUP)
+if [ "$WG_TOTAL" -gt 0 ]; then
+  wg_prepare
+  wg_delays
+  say "WireGuard/AmneziaWG: $WG_TOTAL в пуле, проверяются через основное ядро: $(wc -l < "$WORK/wg_ok.txt" | tr -d ' ')"
+else
+  : > "$WORK/wg_ok.txt"; : > "$WORK/wg_skip.txt"
+fi
+sort -n "$WORK/alive.raw" > "$WORK/alive.txt"
 ALIVE=$(wc -l < "$WORK/alive.txt")
 say "нод в пуле: $TOTAL, живых: $ALIVE"
 : > "$WORK/res.txt"
@@ -1121,9 +1366,16 @@ write_progress 1
 GOOD=0
 : > "$WORK/good_names.txt"
 while read -r D IDX; do
-  select_proxy "$IDX" || continue
+  WG_NAME=$(awk -F '\t' -v k="$IDX" '$1 == k { print $2 }' "$WORK/wg_ok.txt")
+  if [ -n "$WG_NAME" ]; then
+    wg_select "$WG_NAME" || { say "WARN: не удалось выбрать $WG_NAME в группе $WG_GROUP основного ядра"; continue; }
+    SPEED_PORT=$WG_PORT
+  else
+    select_proxy "$IDX" || continue
+    SPEED_PORT=$MIXED_PORT
+  fi
   METRICS=$(curl -s -m "$DL_TIMEOUT" -o /dev/null -w '%{http_code} %{speed_download}' \
-            -x "http://127.0.0.1:$MIXED_PORT" "$SPEED_URL" 2>/dev/null)
+            -x "http://127.0.0.1:$SPEED_PORT" "$SPEED_URL" 2>/dev/null)
   HTTP_STATUS=${METRICS%% *}
   SP_RAW=${METRICS#* }
   SP=$(accepted_speed "$HTTP_STATUS" "$SP_RAW")
@@ -1144,11 +1396,25 @@ write_progress 0
 update_node_stability
 
 # 6. отбор победителей и сборка fast.yaml
-select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS"
+# WG/AWG-ноды в fast.yaml не пишутся: полное определение подняло бы в
+# основном ядре второго клиента с тем же ключом, а псевдоним direct +
+# dialer-proxy на роутере шёл мимо туннеля (задержка 33 мс против 126 мс).
+# Победитель среди них попадает в пул через группу WG_FAST_GROUP (wg_publish_fast).
+awk -v wgfile="$WORK/wg.txt" '
+  BEGIN { while ((getline l < wgfile) > 0) { split(l, f, "\t"); wg[f[1]] = 1 } }
+  !($2 in wg)' "$WORK/res.txt" > "$WORK/res_fast.txt"
+if [ -s "$WORK/wg_ok.txt" ]; then
+  while read -r WSP WIDX; do
+    WNM=$(awk -F '\t' -v k="$WIDX" '$1 == k { print $2 }' "$WORK/wg_ok.txt")
+    [ -n "$WNM" ] && say "WG: $((WSP/1048576)).$(( (WSP%1048576)*10/1048576 )) МБ/с  $WNM"
+  done < "$WORK/res.txt"
+fi
+wg_publish_fast "$EFFECTIVE_MIN"
+select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS"
 WIN=$(wc -l < "$WORK/win.txt")
 BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
-  say "WARN: порог $((EFFECTIVE_MIN/1048576)) МБ/с не прошёл никто, оставляю прежний fast.yaml"
+  say "WARN: порог $((EFFECTIVE_MIN/1048576)) МБ/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
   best_line=$(sort -rn "$WORK/res.txt" | head -1)
   best_sp=${best_line%% *}
   best_idx=${best_line#* }

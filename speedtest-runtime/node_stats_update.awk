@@ -24,6 +24,9 @@
 #   пробел) - только ноды, реально прошедшие speed-тест этого прогона;
 #   опционально - пустой/отсутствующий файл просто не добавляет ни одной
 #   ноде замера скорости в этом прогоне ("копим только когда есть замер").
+# skipfile: опционально - строки "idx" нод, которые в этом прогоне не
+#   проверялись вовсе (WireGuard/AmneziaWG без входа/группы замера в
+#   основном ядре, см. speedtest2.sh): символ окна S, runs_seen не растёт.
 # window_len: максимальная длина поля window (пустое/некорректное - 200).
 # drop_after: нода, отсутствующая в пуле drop_after прогонов подряд
 #   (consec_absent >= drop_after), в вывод не попадает - удаляется из
@@ -43,7 +46,7 @@
 # first_seen/last_seen/last_in_pool - строки "YYYY-MM-DD HH:MM:SS"
 # (last_seen пусто, если нода ни разу не отвечала). window - до
 # window_len символов, один на прогон: A (жива), D (в пуле, не ответила),
-# . (не в пуле); новый символ дописывается справа, старые обрезаются
+# S (в пуле, не проверена), . (не в пуле); новый символ дописывается справа, старые обрезаются
 # слева. Дубли имён в map.txt (разные idx, одно имя) схлопываются в одну
 # ноду - то же допущение, что и у speedtest_history.tsv; среди дублей
 # среди живых берётся минимальная задержка.
@@ -72,6 +75,13 @@ BEGIN {
     if (!(name in alive_delay) || delay < alive_delay[name]) alive_delay[name] = delay
   }
   close(alivefile)
+
+  if (skipfile != "") {
+    while ((getline kline < skipfile) > 0) {
+      if (kline in idx_name) skipped[idx_name[kline]] = 1
+    }
+    close(skipfile)
+  }
 
   if (speedfile != "") {
     while ((getline sline < speedfile) > 0) {
@@ -108,7 +118,7 @@ END {
     name = pool_order[i]
     is_new = !(name in have_old)
     first_seen = is_new ? iso : old_first[name]
-    runs_seen = (is_new ? 0 : old_runs_seen[name]) + 1
+    runs_seen = (is_new ? 0 : old_runs_seen[name]) + ((name in skipped) && !(name in alive_delay) ? 0 : 1)
     runs_alive = is_new ? 0 : old_runs_alive[name]
     delay_sum = is_new ? 0 : old_delay_sum[name]
     delay_samples = is_new ? 0 : old_delay_samples[name]
@@ -124,6 +134,8 @@ END {
       delay_samples++
       last_seen = iso
       win = win "A"
+    } else if (name in skipped) {
+      win = win "S"
     } else {
       win = win "D"
     }
