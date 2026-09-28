@@ -4,7 +4,12 @@ BEGIN {
   scalar_indent=-1
   split("log-level allow-lan redir-port tproxy-port port socks-port mixed-port bind-address find-process-mode unified-delay external-controller external-ui external-ui-url secret authentication skip-auth-prefixes lan-allowed-ips lan-disallowed-ips ipv6 profile sniffer routing-mark", list, " ")
   for (i in list) local_key[list[i]]=1
-  managed["anchors"]=managed["proxies"]=managed["proxy-providers"]=managed["proxy-groups"]=managed["rule-providers"]=managed["rules"]=managed["dns"]=1
+  managed["anchors"]=managed["proxies"]=managed["proxy-providers"]=managed["proxy-groups"]=managed["rule-providers"]=managed["rules"]=managed["dns"]=managed["listeners"]=1
+  # Служебный вход mihomo-speedtest (замер WG/AWG через основное ядро) берётся
+  # из шаблона; одноимённый вход источника заменяется, чужой вход на его
+  # порту или такой же порт в локальных ключах - отказ.
+  SERVICE_LISTENER="mst-speedtest"; SERVICE_PORT="7896"
+  split("port mixed-port socks-port redir-port tproxy-port", port_keys, " ")
 }
 function bad() { failed=1; exit 1 }
 function trim(s) { sub(/^[ \t]+/,"",s); sub(/[ \t\r]+$/,"",s); return s }
@@ -42,6 +47,34 @@ function save_provider(name,part) {
   providers=providers part
   subnames=subnames (nprov++ ? ", " : "") name
   print "PRESERVED|subscription|" name > REPORT
+}
+function unquote(v) {v=trim(v);if(v ~ /^".*"$/ || v ~ /^\047.*\047$/) v=substr(v,2,length(v)-2);return v}
+# Свои входы пользователя: только блочные записи "  - ключ: ..." с
+# вложенными строками на 4+ пробела. Служебный вход не переносится.
+function extract_listeners(text, a,n,j,s,entry,name,port) {
+  n=split(text,a,"\n")
+  if(a[1] !~ /^listeners:[ ]*(\[\])?[ ]*$/) bad()
+  if(a[1] ~ /\[\]/) return
+  entry=""
+  for(j=2;j<=n;j++) {
+    s=a[j]
+    if(s ~ /^[ ]*$/ || s ~ /^#/ || s ~ /^  #/) continue
+    if(s ~ /^  - [A-Za-z0-9_-]+:/) {
+      if(entry!="") save_listener(entry,name,port)
+      entry=s "\n";name="";port=""
+    } else if(s ~ /^    / && entry!="") entry=entry s "\n"
+    else bad()
+    if(s ~ /^(  - |    )name:/) {name=s;sub(/^[ -]*name:/,"",name);name=unquote(name)}
+    if(s ~ /^(  - |    )port:/) {port=s;sub(/^[ -]*port:/,"",port);port=unquote(port)}
+  }
+  if(entry!="") save_listener(entry,name,port)
+}
+function save_listener(entry,name,port) {
+  if(name=="" || name ~ /[|]/ || listener_seen[name]++) bad()
+  if(name==SERVICE_LISTENER) return
+  if(port==SERVICE_PORT) bad()
+  listenertext=listenertext entry
+  nlisteners++
 }
 function static_names(text, side,a,n,j,s,value) {
   n=split(text,a,"\n")
@@ -121,7 +154,7 @@ function marker_count(text,name, a,n,j,k) {
   for(j=1;j<=n;j++) if(is_marker(a[j],name)) k++
   return k
 }
-function render(text, section, a,n,j,s,subsection,proxies,dns) {
+function render(text, section, a,n,j,s,subsection,proxies,dns,listeners) {
   n=split(text,a,"\n")
   for(j=1;j<n;j++) {
     s=a[j]
@@ -130,8 +163,10 @@ function render(text, section, a,n,j,s,subsection,proxies,dns) {
     if(is_marker(s,"STATIC_PROXIES:BEGIN")) {print s > OUT;printf "%s",statictext > OUT;proxies=1;continue}
     if(is_marker(s,"STATIC_PROXIES:END")) {proxies=0;print s > OUT;continue}
     if(is_marker(s,"STATIC_DNS:BEGIN")) {print s > OUT;printf "%s",sections[1,"dns"] > OUT;dns=1;continue}
+    if(is_marker(s,"STATIC_LISTENERS:BEGIN")) {print s > OUT;printf "%s",listenertext > OUT;listeners=1;continue}
+    if(is_marker(s,"STATIC_LISTENERS:END")) {listeners=0;print s > OUT;continue}
     if(is_marker(s,"STATIC_DNS:END")) {dns=0;print s > OUT;continue}
-    if(subsection || proxies || dns) continue
+    if(subsection || proxies || dns || listeners) continue
     if(s ~ /^  sub-names: &sub-names /) s="  sub-names: &sub-names [" subnames "]"
     print ((section=="proxy-groups" || section=="anchors") ? remap_refs(s) : s) > OUT
   }
@@ -142,9 +177,9 @@ END {
   if(sections[1,"proxies"] !~ /^proxies:[ ]*(\[\])?[ ]*\n/) exit 1
   if (!seen[1,"proxy-providers"] || !seen[1,"proxies"] || !seen[2,"anchors"] || !seen[2,"proxy-groups"]) exit 1
   template="";for(j=1;j<=nkeys[2];j++) template=template sections[2,order[2,j]]
-  split("SUBSCRIPTIONS STATIC_PROXIES STATIC_DNS",markers," ")
-  for(j=1;j<=3;j++) if(marker_count(template,markers[j] ":BEGIN")!=1 || marker_count(template,markers[j] ":END")!=1) exit 1
-  for(j=1;j<=3;j++) if(marker_position(template,markers[j] ":BEGIN")>marker_position(template,markers[j] ":END")) exit 1
+  split("SUBSCRIPTIONS STATIC_PROXIES STATIC_DNS STATIC_LISTENERS",markers," ")
+  for(j=1;j<=4;j++) if(marker_count(template,markers[j] ":BEGIN")!=1 || marker_count(template,markers[j] ":END")!=1) exit 1
+  for(j=1;j<=4;j++) if(marker_position(template,markers[j] ":BEGIN")>marker_position(template,markers[j] ":END")) exit 1
   if(sections[2,"anchors"] !~ /\n  sub-names: &sub-names /) exit 1
   if(marker_position(sections[1,"dns"],"STATIC_DNS:END")) sections[1,"dns"]=substr(sections[1,"dns"],1,marker_position(sections[1,"dns"],"STATIC_DNS:END")-1)
   sub(/\n[ \n]*$/,"\n",sections[1,"dns"])
@@ -159,6 +194,14 @@ END {
   }
   sub(/\n[ \n]*$/,"\n",statictext)
   print "PRESERVED|section|proxies" > REPORT
+  if(seen[1,"listeners"]) extract_listeners(sections[1,"listeners"])
+  if(failed) exit 1
+  if(nlisteners) print "PRESERVED|section|listeners" > REPORT
+  for(j=1;j<=5;j++) if(seen[1,port_keys[j]]) {
+    v=sections[1,port_keys[j]];sub(/^[^:]*:/,"",v);sub(/\n.*/,"",v)
+    if(unquote(v)==SERVICE_PORT) bad()
+  }
+  if(failed) exit 1
   if(seen[1,"dns"]) print "PRESERVED|section|dns" > REPORT
   # DNS-маркеры в преамбуле относятся к последнему локальному ключу шаблона.
   for(j=1;j<=nkeys[2];j++) {

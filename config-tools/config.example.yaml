@@ -99,6 +99,9 @@ proxy-groups:
   - name: '⚡ Быстрый пул'
     type: url-test
     use: [fast]
+    # MST-FAST-WG - лучшая WireGuard/AmneziaWG-нода по замеру speedtest2.sh
+    # (в fast.yaml такие ноды не пишутся: второй клиент с тем же ключом).
+    proxies: [MST-FAST-WG]
     url: "https://www.gstatic.com/generate_204"
     interval: 60
     tolerance: 50
@@ -276,6 +279,35 @@ proxy-groups:
   - name: other
     <<: *select-default
     icon: https://www.svgrepo.com/show/12922/growth.svg
+
+  # Служебная группа mihomo-speedtest: через неё и вход mst-speedtest ниже
+  # спидтест проверяет WireGuard/AmneziaWG-ноды на уже работающем экземпляре
+  # ноды в этом ядре (второй клиент с тем же ключом ломает соединение). Рабочий
+  # трафик её не использует; вручную не выбирать.
+  - name: MST-SPEEDTEST
+    type: select
+    include-all: true
+    hidden: true
+
+  # Служебная группа mihomo-speedtest: победитель замера среди
+  # WireGuard/AmneziaWG-нод, участник '⚡ Быстрый пул'. Спидтест выбирает в ней
+  # ноду через API; REJECT - "победителя нет", пул такую группу не выбирает.
+  - name: MST-FAST-WG
+    type: select
+    proxies: [REJECT]
+    include-all: true
+    hidden: true
+
+# --- Входы ---
+listeners:
+  # --- STATIC_LISTENERS:BEGIN --- (необязательно: свои входы; переносятся при обновлении и повторной настройке)
+  # --- STATIC_LISTENERS:END ---
+  # Служебный вход mihomo-speedtest: только 127.0.0.1, весь трафик - в MST-SPEEDTEST.
+  - name: mst-speedtest
+    type: mixed
+    listen: 127.0.0.1
+    port: 7896
+    proxy: MST-SPEEDTEST
 
 # --- НАСТРОЙКИ GEO-ДАННЫХ ---
 geox-url:

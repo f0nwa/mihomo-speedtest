@@ -25,6 +25,12 @@
 # Использование:
 #   awk -v urls_out=PATH [-v proxies_out=PATH] [-v dns_out=PATH] -f existing_config.awk config.yaml
 #
+# listeners_out: если задан и в исходном config.yaml есть свои входы в
+# верхнеуровневом listeners:, в файл пишутся их записи как есть (блочные
+# "  - ..." с вложенными строками), без маркеров STATIC_LISTENERS,
+# комментариев и служебного входа mst-speedtest (его всегда даёт шаблон:
+# замер WireGuard/AmneziaWG через основное ядро).
+#
 # dns_out: если задан и в исходном config.yaml есть верхнеуровневый блок
 # dns: (свои настройки DNS), в этот файл записывается его содержимое
 # целиком (включая саму строку "dns:") как есть, без разбора вложенных
@@ -36,6 +42,12 @@ BEGIN {
   in_header = 0; header_indent = -1; ua_key_indent = -1
   in_proxies = 0; in_proxies_capture = 0; proxies_text = ""; proxies_placeholder = 0
   in_dns = 0; dns_text = ""
+  in_listeners = 0; listeners_text = ""; listener_entry = ""; listener_name = ""
+}
+
+function flush_listener() {
+  if (listener_entry != "" && listener_name != "mst-speedtest") listeners_text = listeners_text listener_entry
+  listener_entry = ""; listener_name = ""
 }
 
 function flush_provider() {
@@ -111,12 +123,29 @@ in_proxies && in_proxies_capture {
   if ($0 ~ /CHANGE_ME/ || $0 ~ /example\.com/) proxies_placeholder = 1
 }
 
+/^listeners:[ \t]*$/ { flush_provider(); in_pp = 0; in_proxies = 0; in_dns = 0; in_listeners = 1; next }
+in_listeners && /^[^ \t#]/ { flush_listener(); in_listeners = 0 }
+in_listeners {
+  if ($0 ~ /^[ \t]*$/ || $0 ~ /^#/ || $0 ~ /^  #/) next
+  if ($0 ~ /^  - /) { flush_listener(); listener_entry = $0 "\n" }
+  else if (listener_entry != "") listener_entry = listener_entry $0 "\n"
+  if ($0 ~ /^(  - |    )name:/) {
+    listener_name = $0
+    sub(/^[ -]*name:[ \t]*/, "", listener_name)
+    gsub(/^["\047]|["\047][ \t]*$/, "", listener_name)
+    sub(/[ \t]+$/, "", listener_name)
+  }
+  next
+}
+
 /^dns:[ \t]*$/ { flush_provider(); in_pp = 0; in_proxies = 0; in_dns = 1; dns_text = $0 "\n"; next }
 in_dns && /^[^ \t#]/ { in_dns = 0 }
 in_dns { dns_text = dns_text $0 "\n" }
 
 END {
   flush_provider()
+  if (in_listeners) flush_listener()
+  if (listeners_out != "" && listeners_text != "") printf "%s", listeners_text > listeners_out
   if (proxies_out != "" && proxies_text != "" && !proxies_placeholder) {
     printf "%s", proxies_text > proxies_out
   }

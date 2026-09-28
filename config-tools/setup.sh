@@ -346,10 +346,13 @@ main() {
 
   static_file=""
   dns_file=""
+  listeners_file=""
   if [ -f "$CONFIG" ]; then
     candidate=$(mktemp "${TMPDIR:-/tmp}/setup_static.XXXXXX")
     dns_candidate=$(mktemp "${TMPDIR:-/tmp}/setup_dns.XXXXXX")
+    listeners_candidate=$(mktemp "${TMPDIR:-/tmp}/setup_listeners.XXXXXX")
     awk -v urls_out=/dev/null -v proxies_out="$candidate" -v dns_out="$dns_candidate" \
+        -v listeners_out="$listeners_candidate" \
         -f "$SELFDIR/existing_config.awk" "$CONFIG" 2>/dev/null || true
     if [ -s "$candidate" ]; then
       count=$(grep -c '^  - name:' "$candidate" 2>/dev/null || echo 0)
@@ -366,6 +369,13 @@ main() {
       dns_file=$dns_candidate
     fi
     [ "$dns_file" = "$dns_candidate" ] || rm -f "$dns_candidate"
+    # Свои входы (listeners) переносятся как есть; служебный вход
+    # mst-speedtest (замер WireGuard/AmneziaWG через основное ядро) даёт шаблон.
+    if [ -s "$listeners_candidate" ]; then
+      echo "найдены свои входы (listeners) в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
+      listeners_file=$listeners_candidate
+    fi
+    [ "$listeners_file" = "$listeners_candidate" ] || rm -f "$listeners_candidate"
   fi
 
   if [ -f "$CONFIG" ]; then
@@ -375,17 +385,30 @@ main() {
       rm -f "$specs_file"
       [ -z "$static_file" ] || rm -f "$static_file"
       [ -z "$dns_file" ] || rm -f "$dns_file"
+      [ -z "$listeners_file" ] || rm -f "$listeners_file"
       return 1
     }
     echo "старый конфиг сохранён в $backup" >&2
   fi
 
   rendered=$(mktemp "${TMPDIR:-/tmp}/setup_config.XXXXXX")
-  awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" -v mihomo_dir="$MIHOMO_DIR" \
-      -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered"
+  render_rc=0
+  awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" \
+      -v listeners_file="$listeners_file" -v mihomo_dir="$MIHOMO_DIR" \
+      -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered" || render_rc=$?
   rm -f "$specs_file"
   [ -z "$static_file" ] || rm -f "$static_file"
   [ -z "$dns_file" ] || rm -f "$dns_file"
+  [ -z "$listeners_file" ] || rm -f "$listeners_file"
+  if [ "$render_rc" != 0 ]; then
+    rm -f "$rendered"
+    if [ "$render_rc" = 3 ]; then
+      echo "свой вход в listeners текущего $CONFIG занимает порт 7896 служебного входа mst-speedtest (замер WireGuard/AmneziaWG); смените порт своего входа и повторите, $CONFIG не тронут" >&2
+    else
+      echo "не удалось собрать новый config.yaml из шаблона, $CONFIG не тронут" >&2
+    fi
+    return 1
+  fi
 
   mtest_log=$(mktemp "${TMPDIR:-/tmp}/setup_mtest.XXXXXX")
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$rendered" >"$mtest_log" 2>&1; then

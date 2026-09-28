@@ -21,6 +21,11 @@
 #   задан/пуст — между маркерами ничего не добавляется, и никакого
 #   dns: в итоговом config.yaml не будет (шаблон по умолчанию его не
 #   содержит).
+# listeners_file: необязательно - свои входы пользователя (записи
+#   "  - ..." без маркеров, как отдаёт existing_config.awk -v listeners_out=)
+#   для подстановки между маркерами STATIC_LISTENERS. Служебный вход
+#   mst-speedtest (замер WireGuard/AmneziaWG через основное ядро) всегда из
+#   шаблона; свой вход на его порту 7896 - отказ с кодом 3.
 # mihomo_dir: необязательно — абсолютный каталог самой Mihomo (по
 #   умолчанию /opt/etc/mihomo), подставляется в путь fast-провайдера
 #   ("path: /opt/etc/mihomo/fast.yaml" вместо "path: ./fast.yaml" в
@@ -63,6 +68,20 @@ BEGIN {
       have_dns = 1
     }
     close(dns_file)
+  }
+
+  have_listeners = 0
+  listeners_content = ""
+  if (listeners_file != "") {
+    while ((getline line < listeners_file) > 0) {
+      if (line ~ /^(  - |    )port:[ \t]*["\047]?7896["\047]?[ \t]*$/) {
+        print "render_config.awk: свой вход в listeners занимает порт 7896 служебного входа mst-speedtest" > "/dev/stderr"
+        exit 3
+      }
+      listeners_content = listeners_content line "\n"
+      have_listeners = 1
+    }
+    close(listeners_file)
   }
 
   in_sub = 0
@@ -109,6 +128,17 @@ in_sub { next }
 }
 /^  # --- STATIC_PROXIES:END ---/ { in_static = 0; print; next }
 in_static { next }
+
+/^  # --- STATIC_LISTENERS:BEGIN ---/ {
+  print
+  if (have_listeners) {
+    printf "%s", listeners_content
+    in_listeners_static = 1
+  }
+  next
+}
+/^  # --- STATIC_LISTENERS:END ---/ { in_listeners_static = 0; print; next }
+in_listeners_static { next }
 
 /^# --- STATIC_DNS:BEGIN ---/ {
   print

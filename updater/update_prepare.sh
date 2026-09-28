@@ -342,6 +342,21 @@ check_config_source_snapshot() {
   config_snapshot_hash=$(awk -F'|' '$1=="config"&&$2=="regular"{print $3}' "$WORK/snapshot.tsv")
   [ -n "$config_snapshot_hash" ] && [ "$config_snapshot_hash" = "$(sha256_of "$WORK/config-source.yaml")" ] || die 'копия исходного конфига не соответствует снимку плана'
 }
+# Служебный вход mst-speedtest (замер WireGuard/AmneziaWG через основное ядро,
+# см. config.example.yaml). Если миграция добавляет его впервые, порт 7896
+# должен быть свободен: иначе mihomo после перезапуска не поднимет вход.
+# Вход уже был в исходном конфиге - порт держит само ядро, это не конфликт.
+check_service_listener_port() {
+  grep -q '^  - name: mst-speedtest$' "$WORK/config-source.yaml" && return 0
+  grep -q '^  - name: mst-speedtest$' "$WORK/candidate.yaml" || return 0
+  if ! command -v netstat >/dev/null 2>&1; then
+    say 'WARN: нет netstat - не проверить, свободен ли порт 7896 служебного входа mst-speedtest' >&2
+    return 0
+  fi
+  if netstat -ltnu 2>/dev/null | awk '$4 ~ /[:.]7896$/ {busy=1} END {exit !busy}'; then
+    die 'порт 7896 для служебного входа mst-speedtest (замер WireGuard/AmneziaWG) уже занят другой программой; освободите его и повторите'
+  fi
+}
 prepare_config_candidate() {
   CONFIG_PAYLOAD=$WORK
   config_tools
@@ -351,6 +366,7 @@ prepare_config_candidate() {
   sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
     --output "$WORK/candidate.yaml" --report "$WORK/migration-report.txt" > "$WORK/migration.log" 2>&1 || die 'не удалось собрать кандидат конфига; подробный вывод скрыт'
   awk -v OLD="$WORK/config-source.yaml" -v NEW="$WORK/candidate.yaml" -f "$WORK/migration-tools/config_diff.awk" > "$WORK/config-diff.json" || die 'не удалось построить структурный diff'
+  check_service_listener_port
   run_config_test
   config_confirm_required=0
   config_baseline=missing
