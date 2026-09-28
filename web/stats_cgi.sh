@@ -155,6 +155,15 @@ _add_err() {
 "
 }
 
+normalize_block() {
+  # BLOCK - список подстрок через | (см. prep.awk), не regex: убираем
+  # пробелы вокруг | и по краям и префикс "(?i)" у кусков (след копирования
+  # exclude-filter из config.yaml). Та же функция есть в web/stats_cgi.sh.
+  printf '%s\n' "$1" | sed -e 's/[[:space:]]*|[[:space:]]*/|/g' \
+    -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    -e 's/^(?i)//' -e 's/|(?i)/|/g'
+}
+
 validate_settings_fields() {
   # Проверяет уже раскодированные значения полей формы настройки (16
   # штук: node_cap, keep_runs, keep_days, geo_filter, extype, size_mb,
@@ -188,6 +197,15 @@ validate_settings_fields() {
   fi
   if [ -z "$geo_filter" ]; then
     _add_err geo_filter "Гео-фильтр обязателен - без него подписка может подставить российскую ноду."
+  else
+    case $geo_filter in
+      *"
+"*) _add_err geo_filter "Гео-фильтр не должен содержать перевод строки." ;;
+      '|'*|*'|'|*'||'*) _add_err geo_filter "В гео-фильтре есть пустые куски: лишний | в начале, в конце или два подряд." ;;
+    esac
+    if [ "${#geo_filter}" -gt 4000 ]; then
+      _add_err geo_filter "Гео-фильтр должен быть не длиннее 4000 символов."
+    fi
   fi
   if ! is_decimal_in_range "$size_mb" 1 incl 100; then
     _add_err size_mb "Размер файла для замера должен быть числом от 1 до 100 МБ."
@@ -316,7 +334,7 @@ if [ "$method" = "POST" ]; then
   max_tested=$(urldecode "$RAW_max_tested")
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
-  geo_filter=$(urldecode "$RAW_geo_filter")
+  geo_filter=$(normalize_block "$(urldecode "$RAW_geo_filter")")
   extype=$(urldecode "$RAW_extype")
   size_mb=$(urldecode "$RAW_size_mb")
   dl_timeout=$(urldecode "$RAW_dl_timeout")
@@ -439,11 +457,11 @@ cat <<HTML
 <form method="post">
 <div class="card">
 <h2>Гео-фильтр (BLOCK)</h2>
-<label for="geo_filter">Регулярное выражение для исключения нод</label>
+<label for="geo_filter">Слова для исключения нод через | (не регулярное выражение)</label>
 <input type="text" id="geo_filter" name="geo_filter" list="geo_filter_options" value="$(html_escape "$BLOCK")" autocomplete="off">
 <datalist id="geo_filter_options">
 $geo_filter_options</datalist>
-<p class="hint">Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter, найденные в текущем config.yaml.</p>
+<p class="hint">Нода пропускается, если её имя содержит любое из слов, регистр не важен. Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter из текущего config.yaml (префикс (?i) при сохранении убирается).</p>
 </div>
 <div class="card">
 <h2>Как тестируем ноды</h2>

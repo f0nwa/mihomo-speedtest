@@ -8,7 +8,10 @@
 BEGIN {
   cnt = 0; inp = 0; ind = -1; in_node = 0; parse_error = 0
   nb = split(BLOCK, bl, "|")
-  for (i = 1; i <= nb; i++) bl[i] = tolower(bl[i])
+  # "(?i)" в начале куска - след копирования exclude-filter из config.yaml:
+  # здесь это не regex, регистр и так не учитывается, поэтому префикс
+  # отбрасывается (иначе кусок искался бы буквально как "(?i)russia").
+  for (i = 1; i <= nb; i++) { bl[i] = tolower(bl[i]); sub(/^[(][?]i[)]/, "", bl[i]) }
   if (EXTYPE == "") EXTYPE = "trojan"
   nt = split(EXTYPE, tp, "|")
   reset_node()

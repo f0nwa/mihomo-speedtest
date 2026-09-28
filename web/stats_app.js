@@ -551,6 +551,346 @@
     });
   }
 
+  // ----- гео-фильтр спидтеста (BLOCK): карточка "Какие ноды не проверять" -----
+  // Дизайн: docs/superpowers/specs/2026-09-28-block-filter-ui-design.md.
+  // BLOCK - не regex, а список подстрок через | (см. prep.awk): нода
+  // пропускается, если её имя содержит любое слово без учёта регистра.
+  // Блок между метками GEO-LOGIC-BEGIN/END - чистые функции без DOM;
+  // tests/test_stats_geo_filter.sh вырезает его и проверяет в node.
+  // GEO-LOGIC-BEGIN
+  function geoCountry(code, flag, ru, en, extra, common) {
+    return { code: code, flag: flag, ru: ru, words: [flag, en, ru].concat(extra || []), common: !!common };
+  }
+
+  // Наборы слов - только флаг и полные названия (у "других" стран ещё
+  // столица/хаб): голые 2-3-буквенные коды совпадали бы внутри чужих
+  // имён ("RU" - Brussels, Peru; "USA" - Jerusalem). У России - ещё
+  // привычные метки нод из шаблона (MSK/SPB оставлены сознательно).
+  var GEO_CATALOG = [
+    geoCountry('RU', '🇷🇺', 'Россия', 'Russia', ['RU-', 'RU_', 'Moscow', 'Москва', 'MSK', 'SPB', 'СПб'], true),
+    geoCountry('UA', '🇺🇦', 'Украина', 'Ukraine', [], true),
+    geoCountry('KZ', '🇰🇿', 'Казахстан', 'Kazakhstan', [], true),
+    geoCountry('TR', '🇹🇷', 'Турция', 'Turkey', ['Türkiye'], true),
+    geoCountry('IL', '🇮🇱', 'Израиль', 'Israel', [], true),
+    geoCountry('IN', '🇮🇳', 'Индия', 'India', [], true),
+    geoCountry('JP', '🇯🇵', 'Япония', 'Japan', [], true),
+    geoCountry('KR', '🇰🇷', 'Корея', 'Korea', [], true),
+    geoCountry('MY', '🇲🇾', 'Малайзия', 'Malaysia', [], true),
+    geoCountry('AU', '🇦🇺', 'Австралия', 'Australia', [], true),
+    geoCountry('ZA', '🇿🇦', 'ЮАР', 'South Africa', [], true),
+    geoCountry('NG', '🇳🇬', 'Нигерия', 'Nigeria', [], true),
+    geoCountry('BR', '🇧🇷', 'Бразилия', 'Brazil', [], true),
+    geoCountry('AR', '🇦🇷', 'Аргентина', 'Argentina', [], true),
+    geoCountry('CL', '🇨🇱', 'Чили', 'Chile', [], true),
+    geoCountry('CO', '🇨🇴', 'Колумбия', 'Colombia', [], true),
+    geoCountry('PE', '🇵🇪', 'Перу', 'Peru', [], true),
+    geoCountry('MX', '🇲🇽', 'Мексика', 'Mexico', [], true),
+    geoCountry('US', '🇺🇸', 'США', 'United States', []),
+    geoCountry('CA', '🇨🇦', 'Канада', 'Canada', []),
+    geoCountry('GB', '🇬🇧', 'Великобритания', 'United Kingdom', ['London']),
+    geoCountry('DE', '🇩🇪', 'Германия', 'Germany', ['Frankfurt']),
+    geoCountry('NL', '🇳🇱', 'Нидерланды', 'Netherlands', ['Amsterdam']),
+    geoCountry('FR', '🇫🇷', 'Франция', 'France', ['Paris']),
+    geoCountry('FI', '🇫🇮', 'Финляндия', 'Finland', ['Helsinki']),
+    geoCountry('SE', '🇸🇪', 'Швеция', 'Sweden', ['Stockholm']),
+    geoCountry('PL', '🇵🇱', 'Польша', 'Poland', ['Warsaw']),
+    geoCountry('EE', '🇪🇪', 'Эстония', 'Estonia', ['Tallinn']),
+    geoCountry('LV', '🇱🇻', 'Латвия', 'Latvia', ['Riga']),
+    geoCountry('LT', '🇱🇹', 'Литва', 'Lithuania', ['Vilnius']),
+    geoCountry('CH', '🇨🇭', 'Швейцария', 'Switzerland', ['Zurich']),
+    geoCountry('AT', '🇦🇹', 'Австрия', 'Austria', ['Vienna']),
+    geoCountry('SG', '🇸🇬', 'Сингапур', 'Singapore', []),
+    geoCountry('HK', '🇭🇰', 'Гонконг', 'Hong Kong', [])
+  ];
+
+  function geoLc(s) { return String(s).toLowerCase(); }
+
+  // Строка BLOCK (или exclude-filter из config.yaml) -> слова: режем по |,
+  // срезаем пробелы и префикс "(?i)" (в BLOCK он не нужен и ломал поиск).
+  function geoSplit(s) {
+    return String(s || '').split('|').map(function (t) {
+      return t.trim().replace(/^\(\?i\)/, '').trim();
+    }).filter(function (t) { return t !== ''; });
+  }
+
+  // Текст поля "Свои слова": по слову на строку (| внутри строки тоже делит).
+  function geoCustomList(text) {
+    return geoSplit(String(text || '').replace(/\r?\n/g, '|'));
+  }
+
+  // Страна отмечена, если в строке есть её флаг; все её слова уходят из
+  // "своих", остальные слова остаются как есть.
+  function geoParse(s) {
+    var tokens = geoSplit(s);
+    var have = {}, sel = {}, used = {};
+    tokens.forEach(function (t) { have[geoLc(t)] = true; });
+    GEO_CATALOG.forEach(function (c) {
+      if (have[geoLc(c.flag)]) {
+        sel[c.code] = true;
+        c.words.forEach(function (w) { used[geoLc(w)] = true; });
+      }
+    });
+    return {
+      sel: sel,
+      custom: tokens.filter(function (t) { return !used[geoLc(t)]; }),
+      hadRegex: /(^|\|)\s*\(\?i\)/.test(String(s || ''))
+    };
+  }
+
+  // Слова отмеченных стран (в порядке каталога), затем свои; дубликаты
+  // без учёта регистра убираются.
+  function geoBuild(sel, customList) {
+    var seen = {}, out = [];
+    function add(t) {
+      var k = geoLc(t);
+      if (k && !seen[k]) { seen[k] = true; out.push(t); }
+    }
+    GEO_CATALOG.forEach(function (c) { if (sel[c.code]) { c.words.forEach(add); } });
+    customList.forEach(add);
+    return out;
+  }
+
+  // Замечания к фильтру. kind: 'err' - сервер не примет, 'important' -
+  // Россия не выбрана, 'warn' - слово, скорее всего, работает не так,
+  // как задумано, 'info' - к сведению. Сохранять мешает только 'err'.
+  function geoWarnings(sel, customList, hadRegex) {
+    var out = [], owner = {};
+    GEO_CATALOG.forEach(function (c) {
+      c.words.forEach(function (w) { if (!owner[geoLc(w)]) { owner[geoLc(w)] = c; } });
+    });
+    if (geoBuild(sel, customList).length === 0) {
+      out.push({ kind: 'err', text: 'Фильтр пуст - сохранить нельзя.' });
+    }
+    if (!sel.RU) {
+      out.push({ kind: 'important', text: 'Россия не выбрана - российская нода может выиграть замер по пингу.' });
+    }
+    customList.forEach(function (t) {
+      if (/[\\^$*+?()[\]{}]/.test(t)) {
+        out.push({ kind: 'warn', text: '«' + t + '» похоже на регулярное выражение. Символы ищутся буквально, так что правило, скорее всего, не сработает.' });
+      } else if (/^[A-Za-z]{1,3}$/.test(t)) {
+        var isRu = geoLc(t) === 'ru';
+        out.push({ kind: 'warn', text: '«' + t + '» слишком короткое: совпадёт и там, где эти буквы стоят внутри слова' +
+          (isRu ? ' (Brussels, Peru, Truckee).' + (sel.RU ? ' Для России уже есть RU- и RU_.' : '') : '.') });
+      }
+      var o = owner[geoLc(t)];
+      if (o && sel[o.code]) {
+        out.push({ kind: 'info', text: '«' + t + '» уже входит в страну «' + o.ru + '» - строку можно удалить.' });
+      }
+    });
+    if (hadRegex) {
+      out.push({ kind: 'info', text: 'Префикс (?i) убран: здесь это не регулярное выражение, регистр и так не важен, а с префиксом первое слово не находилось.' });
+    }
+    return out;
+  }
+  // GEO-LOGIC-END
+
+  var GEO_WARN_TAGS = { err: 'ОШИБКА', important: 'ВАЖНО', warn: 'ВНИМАНИЕ', info: 'ИНФО' };
+
+  // Карточка формы настроек. Готовую строку кладёт в скрытое поле
+  // geo_filter - API /api/settings и серверная валидация не меняются.
+  function buildGeoFilterCard(saved, candidates) {
+    var c = card('Какие ноды не проверять');
+    c.appendChild(el('p', 'hint', 'Спидтест пропускает ноду, если в её имени есть любое из слов ниже. Регистр не важен. ' +
+      'Обязательно исключите Россию - иначе российская нода может выиграть замер по пингу. ' +
+      'На основное ядро (config.yaml) эта настройка не влияет.'));
+
+    var hidden = el('input');
+    hidden.type = 'hidden';
+    hidden.name = 'geo_filter';
+    hidden.id = 'geo_filter';
+    c.appendChild(hidden);
+
+    var savedSet = {};
+    geoSplit(saved).forEach(function (t) { savedSet[geoLc(t)] = true; });
+    var st = { sel: {}, loadedRegex: false };
+    var boxes = {};
+
+    // --- кнопки "Заполнить из config.yaml" / "Вернуть сохранённое" ---
+    var tools = el('div', 'geo-tools');
+    var candSelect = null;
+    candidates = candidates || [];
+    if (candidates.length) {
+      if (candidates.length > 1) {
+        candSelect = el('select');
+        candSelect.setAttribute('aria-label', 'Вариант exclude-filter из config.yaml');
+        candidates.forEach(function (cand, i) {
+          var o = el('option', null, 'Вариант ' + (i + 1) + ': ' + (cand.length > 60 ? cand.slice(0, 60) + '…' : cand));
+          o.value = String(i);
+          candSelect.appendChild(o);
+        });
+        tools.appendChild(candSelect);
+      }
+      var fillBtn = el('button', 'small', 'Заполнить из config.yaml');
+      fillBtn.type = 'button';
+      fillBtn.addEventListener('click', function () {
+        var cand = candidates[candSelect ? Number(candSelect.value) : 0];
+        load(cand, 'Форма заполнена из exclude-filter в config.yaml. Проверьте итог и сохраните.');
+      });
+      tools.appendChild(fillBtn);
+    }
+    var resetBtn = el('button', 'small muted', 'Вернуть сохранённое');
+    resetBtn.type = 'button';
+    resetBtn.addEventListener('click', function () { load(saved, 'Возвращено сохранённое значение.'); });
+    tools.appendChild(resetBtn);
+    c.appendChild(tools);
+
+    var flash = el('p', 'msg-ok geo-flash');
+    flash.hidden = true;
+    c.appendChild(flash);
+
+    // --- страны ---
+    var searchLabel = el('label', null, 'Страны');
+    searchLabel.setAttribute('for', 'geo_search');
+    c.appendChild(searchLabel);
+    var search = el('input', 'geo-search');
+    search.type = 'text';
+    search.id = 'geo_search';
+    search.placeholder = 'Найти страну: Россия, Japan…';
+    search.autocomplete = 'off';
+    c.appendChild(search);
+
+    function group(title, list) {
+      var head = el('div', 'geo-group-title');
+      var grid = el('div', 'geo-grid');
+      list.forEach(function (country) {
+        var lab = el('label', 'geo-country');
+        var cb = el('input');
+        cb.type = 'checkbox';
+        cb.addEventListener('change', function () {
+          if (cb.checked) { st.sel[country.code] = true; } else { delete st.sel[country.code]; }
+          flash.hidden = true;
+          update();
+        });
+        lab.appendChild(cb);
+        lab.appendChild(el('span', 'geo-flag', country.flag));
+        lab.appendChild(el('span', 'geo-name', country.ru));
+        lab.appendChild(el('span', 'geo-code', country.code));
+        grid.appendChild(lab);
+        boxes[country.code] = { cb: cb, label: lab, country: country };
+      });
+      c.appendChild(head);
+      c.appendChild(grid);
+      return { title: title, head: head, grid: grid, list: list };
+    }
+    var groups = [
+      group('Обычно исключают', GEO_CATALOG.filter(function (x) { return x.common; })),
+      group('Другие страны', GEO_CATALOG.filter(function (x) { return !x.common; }))
+    ];
+    var noMatch = el('p', 'hint', 'Страна не найдена в списке - её можно добавить словом в поле ниже.');
+    noMatch.hidden = true;
+    c.appendChild(noMatch);
+
+    search.addEventListener('input', function () {
+      var q = geoLc(search.value.trim());
+      var shown = 0;
+      groups.forEach(function (g) {
+        var inGroup = 0;
+        g.list.forEach(function (country) {
+          var hit = !q || geoLc(country.code).indexOf(q) >= 0 ||
+            country.words.some(function (w) { return geoLc(w).indexOf(q) >= 0; });
+          boxes[country.code].label.hidden = !hit;
+          if (hit) { inGroup++; }
+        });
+        g.head.hidden = g.grid.hidden = inGroup === 0;
+        shown += inGroup;
+      });
+      noMatch.hidden = shown > 0;
+    });
+
+    // --- свои слова и замечания ---
+    var cols = el('div', 'geo-cols');
+    var left = el('div');
+    var taLabel = el('label', null, 'Свои слова - по одному на строку');
+    taLabel.setAttribute('for', 'geo_custom');
+    left.appendChild(taLabel);
+    var customTa = el('textarea');
+    customTa.id = 'geo_custom';
+    customTa.rows = 7;
+    customTa.addEventListener('input', function () { flash.hidden = true; update(); });
+    left.appendChild(customTa);
+    left.appendChild(el('p', 'hint', 'Например: whitelist, Обход, RU- . Слово ищется как есть, без регулярных выражений.'));
+    var right = el('div');
+    right.appendChild(el('label', null, 'Проверка'));
+    var warnBox = el('div');
+    right.appendChild(warnBox);
+    cols.appendChild(left);
+    cols.appendChild(right);
+    c.appendChild(cols);
+
+    // --- итог ---
+    var summary = el('div', 'geo-summary');
+    var countLine = el('div');
+    summary.appendChild(countLine);
+    var chips = el('div', 'geo-chips');
+    summary.appendChild(chips);
+    var removedLine = el('div', 'geo-chips');
+    summary.appendChild(removedLine);
+    summary.appendChild(el('p', 'hint', '+ и пунктир - слово добавится, зачёркнутое - исчезнет по сравнению с сохранённым.'));
+    var details = el('details');
+    details.appendChild(el('summary', null, 'Строка BLOCK, которая запишется в speedtest2.env'));
+    var pre = el('pre');
+    details.appendChild(pre);
+    summary.appendChild(details);
+    c.appendChild(summary);
+
+    function update() {
+      var custom = geoCustomList(customTa.value);
+      var tokens = geoBuild(st.sel, custom);
+      hidden.value = tokens.join('|');
+
+      Object.keys(boxes).forEach(function (code) {
+        var b = boxes[code];
+        b.cb.checked = !!st.sel[code];
+        b.label.classList.toggle('on', !!st.sel[code]);
+      });
+      groups.forEach(function (g) {
+        var n = g.list.filter(function (x) { return st.sel[x.code]; }).length;
+        g.head.textContent = g.title + ' · выбрано ' + n + ' из ' + g.list.length;
+      });
+
+      while (warnBox.firstChild) { warnBox.removeChild(warnBox.firstChild); }
+      var hadRegex = st.loadedRegex || /\(\?i\)/.test(customTa.value);
+      var warns = geoWarnings(st.sel, custom, hadRegex);
+      if (!warns.length) { warnBox.appendChild(el('p', 'geo-warn', 'Замечаний нет.')); }
+      warns.forEach(function (w) {
+        var row = el('div', 'geo-warn ' + w.kind);
+        row.appendChild(el('span', 'geo-warn-tag', GEO_WARN_TAGS[w.kind]));
+        row.appendChild(el('span', null, w.text));
+        warnBox.appendChild(row);
+      });
+
+      countLine.textContent = 'Будут пропущены ноды, в имени которых есть (слов: ' + tokens.length + '):';
+      while (chips.firstChild) { chips.removeChild(chips.firstChild); }
+      var nowSet = {};
+      tokens.forEach(function (t) {
+        nowSet[geoLc(t)] = true;
+        var isNew = !savedSet[geoLc(t)];
+        chips.appendChild(el('span', 'geo-chip' + (isNew ? ' new' : ''), (isNew ? '+ ' : '') + t));
+      });
+      while (removedLine.firstChild) { removedLine.removeChild(removedLine.firstChild); }
+      var removed = geoSplit(saved).filter(function (t) { return !nowSet[geoLc(t)]; });
+      removedLine.hidden = removed.length === 0;
+      if (removed.length) {
+        removedLine.appendChild(el('span', 'hint', 'Исчезнут:'));
+        removed.forEach(function (t) { removedLine.appendChild(el('span', 'geo-chip removed', t)); });
+      }
+      pre.textContent = "BLOCK='" + hidden.value + "'";
+    }
+
+    function load(value, msg) {
+      var p = geoParse(value);
+      st.sel = p.sel;
+      st.loadedRegex = p.hadRegex;
+      customTa.value = p.custom.join('\n');
+      flash.textContent = msg || '';
+      flash.hidden = !msg;
+      update();
+    }
+
+    load(saved, null);
+    return c;
+  }
+
   // ----- раздел "Настройки" (/api/settings) -----
 
   // Описание полей формы - в том же порядке и с теми же подписями/
@@ -558,7 +898,6 @@
   // группировка по карточкам ниже повторяет прежнюю разбивку.
   var FIELD_DEFS = {
     max_tested: { label: 'Максимум кандидатов на скоростной тест', type: 'number', min: 0, hint: 'Берём первые живые ноды по возрастанию технического времени ответа второго ядра. 0 = без ограничения.' },
-    geo_filter: { label: 'Регулярное выражение для исключения нод', type: 'text', hint: 'Обязательное поле - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Подсказки в списке - варианты exclude-filter, найденные в текущем config.yaml.', datalist: 'geo_filter_options' },
     extype: { label: 'Исключить типы нод целиком (через |)', type: 'text', placeholder: 'например trojan|ss', hint: 'Пусто = тестировать все типы, которые понимает mihomo.' },
     size_mb: { label: 'Размер файла для замера, МБ', type: 'number', min: 1, max: 100, step: 'any', hint: 'Меньше 10 МБ занижает результат - треть времени уходит на TTFB.' },
     dl_timeout: { label: 'Таймаут закачки, сек', type: 'number', min: 1, max: 120 },
@@ -576,7 +915,7 @@
   };
 
   var CARDS = [
-    { title: 'Гео-фильтр (BLOCK)', fields: ['geo_filter'] },
+    { geo: true }, // своя карточка - buildGeoFilterCard()
     { title: 'Как тестируем ноды', fields: ['extype', 'max_tested', 'size_mb', 'dl_timeout'] },
     { title: 'Порог и число нод в fast.yaml', fields: ['min_speed_mb', 'min_ratio', 'min_floor_mb', 'topn', 'enough', 'min_winners'] },
     { title: 'Стабильность нод', fields: ['stability_window', 'stability_drop_after'] },
@@ -584,7 +923,7 @@
     { title: 'Хранение истории', fields: ['keep_runs', 'keep_days'] }
   ];
 
-  function buildField(name, value, geoCandidates) {
+  function buildField(name, value) {
     var def = FIELD_DEFS[name];
     var wrap = document.createDocumentFragment();
     var label = el('label', null, def.label);
@@ -601,21 +940,7 @@
     }
     if (def.placeholder) { input.placeholder = def.placeholder; }
     input.value = value === undefined || value === null ? '' : value;
-    if (def.datalist) {
-      input.setAttribute('list', def.datalist);
-      input.autocomplete = 'off';
-    }
     wrap.appendChild(input);
-    if (def.datalist === 'geo_filter_options') {
-      var dl = el('datalist');
-      dl.id = 'geo_filter_options';
-      (geoCandidates || []).forEach(function (c) {
-        var opt = document.createElement('option');
-        opt.value = c;
-        dl.appendChild(opt);
-      });
-      wrap.appendChild(dl);
-    }
     if (def.hint) { wrap.appendChild(el('p', 'hint', def.hint)); }
     return wrap;
   }
@@ -632,9 +957,13 @@
     var form = document.createElement('form');
 
     CARDS.forEach(function (cardDef) {
+      if (cardDef.geo) {
+        form.appendChild(buildGeoFilterCard(values.geo_filter || '', values.geo_filter_candidates));
+        return;
+      }
       var c = card(cardDef.title);
       cardDef.fields.forEach(function (name) {
-        c.appendChild(buildField(name, values[name], values.geo_filter_candidates));
+        c.appendChild(buildField(name, values[name]));
       });
       form.appendChild(c);
     });

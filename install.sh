@@ -267,7 +267,26 @@ fi
 
 . "$SELFDIR/version_check.sh"
 
+normalize_block() {
+  # BLOCK - список подстрок через | (см. prep.awk), не regex: убираем
+  # пробелы вокруг | и по краям и префикс "(?i)" у кусков (след копирования
+  # exclude-filter из config.yaml). Та же функция есть в web/stats_cgi.sh.
+  printf '%s\n' "$1" | sed -e 's/[[:space:]]*|[[:space:]]*/|/g' \
+    -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    -e 's/^(?i)//' -e 's/|(?i)/|/g'
+}
+
 resolve_block() {
+  resolve_block_raw || return 1
+  BLOCK=$(normalize_block "$BLOCK")
+  if [ -z "$BLOCK" ]; then
+    echo "пустой фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+    return 1
+  fi
+  return 0
+}
+
+resolve_block_raw() {
   if [ -n "${BLOCK:-}" ]; then
     BLOCK_SOURCE="переменная окружения"
     return 0
