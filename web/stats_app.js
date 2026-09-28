@@ -432,6 +432,56 @@
     return wrap;
   }
 
+  // Фильтр «Доступности нод пула» по статусу. Работает только в
+  // браузере по уже полученному /api/stats. Выбор хранится здесь, вне
+  // DOM: renderStats() пересоздаёт карточку при каждой загрузке и после
+  // завершения прогона, а фильтр должен пережить перерисовку. Сбрасывается
+  // только перезагрузкой страницы.
+  var STABILITY_GROUPS = [
+    { key: 'alive', label: 'жива', sw: 'sw-alive' },
+    { key: 'down', label: 'недоступна', sw: 'sw-down' },
+    { key: 'other', label: 'нет данных / не проверена', sw: 'sw-absent' }
+  ];
+  var stabilityFilter = { alive: true, down: true, other: true };
+
+  function stabilityGroup(status) {
+    return status === 'alive' || status === 'down' ? status : 'other';
+  }
+
+  function buildStabilityFilter(rows, table, emptyHint) {
+    var wrap = el('div', 'stability-filter');
+    var counts = { alive: 0, down: 0, other: 0 };
+    rows.forEach(function (r) { counts[stabilityGroup(r.status)]++; });
+    function apply() {
+      var trs = table.tBodies[0].rows;
+      var shown = 0;
+      for (var i = 0; i < trs.length; i++) {
+        var visible = !!stabilityFilter[trs[i].getAttribute('data-group')];
+        trs[i].hidden = !visible;
+        if (visible) { shown++; }
+      }
+      table.hidden = shown === 0;
+      emptyHint.hidden = shown !== 0;
+    }
+    STABILITY_GROUPS.forEach(function (g) {
+      var label = el('label', 'stability-filter-item');
+      var cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = !!stabilityFilter[g.key];
+      cb.setAttribute('data-group', g.key);
+      cb.addEventListener('change', function () {
+        stabilityFilter[g.key] = cb.checked;
+        apply();
+      });
+      label.appendChild(cb);
+      label.appendChild(el('span', 'sw ' + g.sw));
+      label.appendChild(document.createTextNode(g.label + ' (' + counts[g.key] + ')'));
+      wrap.appendChild(label);
+    });
+    apply();
+    return wrap;
+  }
+
   function buildStabilityTable(rows) {
     var table = el('table');
     var thead = el('thead');
@@ -445,6 +495,7 @@
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       var tr = el('tr');
+      tr.setAttribute('data-group', stabilityGroup(r.status));
       var st = statusLabel(r.status);
       var swTd = el('td');
       swTd.appendChild(el('span', 'sw ' + st.sw));
@@ -536,7 +587,11 @@
 
       var stabilityCard = card('Доступность нод пула');
       if (data.node_stability && data.node_stability.length) {
-        stabilityCard.appendChild(buildStabilityTable(data.node_stability));
+        var stabilityTable = buildStabilityTable(data.node_stability);
+        var stabilityEmpty = el('p', 'hint', 'Нет нод с выбранными статусами.');
+        stabilityCard.appendChild(buildStabilityFilter(data.node_stability, stabilityTable, stabilityEmpty));
+        stabilityCard.appendChild(stabilityTable);
+        stabilityCard.appendChild(stabilityEmpty);
       } else {
         stabilityCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
       }
