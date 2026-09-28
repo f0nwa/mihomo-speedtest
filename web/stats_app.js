@@ -884,7 +884,7 @@
         // обновление до N" даже когда кнопка "Обновить" уже неактивна
         // (available=false, версия N уже установлена) - владелец сообщил,
         // что так читается как противоречие. available уже вычислен выше
-        // (та же проверка, что отключает кнопку "Обновить") - используем
+        // (та же проверка, что показывает кнопку "Обновить") - используем
         // её и здесь, а не только для кнопки.
         var versionMsg = 'Последняя проверка: ' + lc.checked_at + '. Доступная версия релиза: ' + lc.plan.release_version + '.';
         versionMsg += available ? ' Есть обновление.' : ' Уже установлено, обновление не требуется.';
@@ -899,13 +899,14 @@
       checkBtn.type = 'button';
       var updateBtn = el('button', 'submit', 'Обновить');
       updateBtn.type = 'button';
-      updateBtn.disabled = !available;
+      // "Обновить" показывается только когда есть обновление (available);
+      // при актуальной версии и после неудачной проверки кнопки нет вовсе.
       checkBtn.addEventListener('click', function () {
         checkBtn.disabled = true; updateBtn.disabled = true;
         fetchJson('/api/updates/check', { method: 'POST' }).then(function () { renderUpdates(); refreshUpdatesBadge(); })
           ['catch'](function (err) {
             showFormMessage(summary, 'Не удалось проверить: ' + err.message, 'err');
-            checkBtn.disabled = false; updateBtn.disabled = !available;
+            checkBtn.disabled = false; updateBtn.disabled = false;
           });
       });
       updateBtn.addEventListener('click', function () {
@@ -917,16 +918,16 @@
         fetchJson('/api/updates/prepare', { method: 'POST' }).then(function (resp) {
           if (!resp.started) {
             showFormMessage(summary, 'Уже выполняется другая операция обновления.', 'err');
-            checkBtn.disabled = false; updateBtn.disabled = !available;
+            checkBtn.disabled = false; updateBtn.disabled = false;
             return;
           }
           renderUpdatesProgress('prepare');
         })['catch'](function (err) {
           showFormMessage(summary, 'Не удалось начать подготовку: ' + err.message, 'err');
-          checkBtn.disabled = false; updateBtn.disabled = !available;
+          checkBtn.disabled = false; updateBtn.disabled = false;
         });
       });
-      row.appendChild(checkBtn); row.appendChild(updateBtn);
+      row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }
       summary.appendChild(row);
       app.appendChild(summary);
       // Вместо полного списка файлов - текст релиза(ов) "что нового" (п.4
