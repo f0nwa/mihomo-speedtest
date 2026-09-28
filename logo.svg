@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <title>Cat speedometer — variant 08</title>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#151c23"/>
+      <stop offset="1" stop-color="#0e151b"/>
+    </linearGradient>
+    <linearGradient id="dial" x1="0" y1="1" x2="1" y2="0">
+      <stop stop-color="#8e969e"/>
+      <stop offset="1" stop-color="#e5e7e9"/>
+    </linearGradient>
+  </defs>
+  <rect id="background-tile" x="0.5" y="0.5" width="199" height="199" rx="35" fill="url(#background)" stroke="#26323c" stroke-width="0.5"/>
+  <g transform="translate(-14 -3)" fill="#fff">
+    <g id="speed-lines" fill="none" stroke="#fff" stroke-width="7.5" stroke-linecap="round">
+      <path d="M50 140.5H65"/>
+    </g>
+    <path id="cat-head" fill-rule="evenodd" d="M75 92.5 87.4 46.7Q89 38.7 95.4 44.3L112.5 60.8H140L158.8 45.3Q164.7 41.4 165.6 48.7L170 88C172.4 109.7 185.2 122.3 188.4 140.6Q189 147.6 186.8 143.3C174.3 114.6 151.8 102.3 130.8 103.7 110.7 104.2 96.1 114.2 87.6 125Q85.2 128.2 81 128.2H40A3.75 3.75 0 0 1 40 120.7H82A5.725 5.725 0 0 0 82 109.25H48A3.75 3.75 0 0 1 48 101.75H86.9A3.275 3.275 0 0 0 86.9 95.2H77Q74.4 95.2 75 92.5ZM113.6 79.1C106 79.1 106 95.2 113.6 95.2 121.1 95.2 121.1 79.1 113.6 79.1ZM148 79.1C140.6 79.1 140.6 95.2 148 95.2 155.5 95.2 155.5 79.1 148 79.1Z"/>
+    <path id="speedometer-arc" fill="url(#dial)" d="M74.2 163.3C78.8 139.4 94 120.7 114.3 113.3 131.1 107.1 148.8 110.4 162 120.4L153.8 127.3C141.9 119 130 118.1 117.8 122.2 100.4 128 88 142.5 81.3 163.3Z"/>
+    <path id="needle" d="M163 125.6 138 164.6A8.85 8.85 0 1 1 125.4 152.6Z"/>
+  </g>
+</svg>
