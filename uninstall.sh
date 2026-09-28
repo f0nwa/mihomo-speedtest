@@ -45,6 +45,7 @@ INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
 INITD_SCRIPT=${INITD_SCRIPT:-$INITD_DIR/S80speedtest-stats}
 STATS_SERVICE_RUNTIME_DIR=${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}
 STATS_AUTH_RUNTIME_DIR=${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}
+LIVE_LOG_DIR=${LIVE_LOG_DIR:-/tmp/mihomo-speedtest-live}   # живой журнал вкладки «Журнал» (см. say() в speedtest2.sh)
 STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}
 UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-$DIR/.update}
 INSTALLED_MANIFEST_PATH=${INSTALLED_MANIFEST_PATH:-$UPDATE_STATE_DIR/installed-manifest.txt}
@@ -309,6 +310,7 @@ remove_project_files() {
   rm -f "$INITD_SCRIPT"
   rm -rf "$STATS_SERVICE_RUNTIME_DIR"
   rm -rf "$STATS_AUTH_RUNTIME_DIR"
+  rm -rf "$LIVE_LOG_DIR"
   rm -rf "$STATS_UPDATE_RUNTIME_DIR"
   rm -rf "$DIR/__pycache__"
   rm -rf "$UPDATE_STATE_DIR"

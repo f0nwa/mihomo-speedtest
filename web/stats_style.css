@@ -82,6 +82,8 @@ th{color:var(--muted);font-weight:600}
 .update-console{max-height:280px;overflow:auto;overflow-wrap:anywhere;background:#11151c;color:#d7dee6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;padding:12px;border-radius:0;border:1px solid var(--card-border);margin:8px 0}
 .update-console .log-line{white-space:pre-wrap}
 .update-console .log-line.err{color:#ff8a80}
+.update-console.live-log{max-height:70vh;min-height:240px}
+.update-console .log-line.sep{color:#8b97a6}
 .release-notes{max-height:320px;overflow:auto;white-space:pre-wrap;font-size:13px}
 .file-state-current{color:var(--muted)}
 .file-state-new{color:#2a78d6}

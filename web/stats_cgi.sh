@@ -17,6 +17,7 @@
 
 export MST_LIB_ONLY=1
 [ -n "$DIR" ] && [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
+LOG_TAG=settings   # метка строк формы настроек в живом журнале (см. say() в speedtest2.sh)
 MAX_TESTED=${MAX_TESTED:-40}
 
 if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then

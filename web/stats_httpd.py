@@ -82,6 +82,10 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     футер веб-интерфейса (версия релиза/аптайм/CPU/MEM/статус mihomo).
     GET/HEAD, без побочных эффектов - под той же общей сессией/CSRF, что
     и остальные "/api/...".
+  - "/api/log" - живой журнал для вкладки «Журнал» (GET, параметры gen и
+    offset), обрабатывается прямо здесь, см. live_log_poll(). Пока его
+    опрашивают, say() в speedtest2.sh пишет копию строк в /tmp; без
+    опроса дольше LIVE_LOG_IDLE секунд сбор прекращается.
   - "/api/..." (всё остальное) - алиасов нет, отвечает JSON с кодом 501,
     а не 404, чтобы фронтенд мог отличить "эндпоинт ещё не существует" от
     обрыва сети или опечатки в пути.
@@ -109,6 +113,220 @@ import stats_auth
 AUTH_COOKIE = "mst_session"
 AUTH_BODY_LIMIT = 16 * 1024
 PUBLIC_ASSETS = {"index.html", "style.css", "app.js", "chart.js", "favicon.ico"}
+
+
+# ----- живой журнал (вкладка «Журнал», GET /api/log) -----
+#
+# Пока страница «Журнал» открыта, она раз в пару секунд опрашивает
+# /api/log. Каждый запрос обновляет mtime файла-маркера viewer в
+# LIVE_LOG_DIR; пока маркер есть, say() в speedtest2.sh дублирует свои
+# строки в live.log. Если запросов нет дольше LIVE_LOG_IDLE секунд,
+# родительский процесс сервера (service_actions() ниже) удаляет маркер и
+# все файлы журнала - сбор прекращается. Всё лежит только в /tmp (tmpfs),
+# в /opt ничего не пишется (см. AGENTS.md про флешку).
+#
+# Файлы в LIVE_LOG_DIR:
+#   viewer   - маркер «есть зрители», mtime = время последнего опроса;
+#   gen      - идентификатор поколения журнала; меняется при создании и
+#              при обрезке, клиент по нему понимает, что нужно начать заново;
+#   seed     - затравка, пишется один раз на поколение: хвост постоянного
+#              speedtest.log и журнала идущего прогона (при обрезке - хвост
+#              обрезанного live.log), чтобы страница не открывалась пустой;
+#   live.log - новые строки, say() только дописывает в конец;
+#   lock     - flock для сериализации запросов (сервер форкается на запрос).
+#
+# Размер: если live.log вырос больше LIVE_LOG_LIMIT, он атомарно
+# переименовывается (новые строки say() пойдут в новый файл, ничего не
+# теряется), его хвост становится новой затравкой, поколение меняется.
+
+import fcntl
+import glob
+import time
+
+LIVE_LOG_LIMIT = int(os.environ.get("LIVE_LOG_LIMIT", "65536"))
+LIVE_LOG_IDLE = int(os.environ.get("LIVE_LOG_IDLE", "30"))
+LIVE_LOG_READ_MAX = 32 * 1024
+LIVE_LOG_SEED_HISTORY_LINES = 40
+LIVE_LOG_SEED_RUN_LINES = 200
+LIVE_LOG_SEED_MAX = 16 * 1024
+
+
+def live_log_dir():
+    d = os.environ.get("LIVE_LOG_DIR")
+    if d:
+        return d
+    return os.path.join(os.environ.get("TMPROOT", "/tmp"), "mihomo-speedtest-live")
+
+
+def _live_paths(d):
+    return {
+        "viewer": os.path.join(d, "viewer"),
+        "gen": os.path.join(d, "gen"),
+        "seed": os.path.join(d, "seed"),
+        "log": os.path.join(d, "live.log"),
+        "lock": os.path.join(d, "lock"),
+        "rot": os.path.join(d, "live.log.rot"),
+    }
+
+
+def _unlink(path):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _read_tail_lines(path, n, max_bytes=LIVE_LOG_SEED_MAX):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read()
+    except OSError:
+        return []
+    if size > max_bytes:
+        # первая строка почти наверняка обрезана посередине
+        data = data.split(b"\n", 1)[1] if b"\n" in data else b""
+    return data.splitlines()[-n:]
+
+
+def _history_log_path():
+    if os.environ.get("LOG"):
+        return os.environ["LOG"]
+    return os.path.join(os.environ.get("DIR", "/opt/etc/mihomo-speedtest"), "speedtest.log")
+
+
+def _run_log_paths():
+    # WORK идущего прогона - $TMPROOT/mst.$$ (см. speedtest2.sh); его
+    # speedtest.log попадает в постоянный журнал только в конце прогона.
+    root = os.environ.get("TMPROOT", "/tmp")
+    return sorted(glob.glob(os.path.join(root, "mst.[0-9]*", "speedtest.log")))
+
+
+def _build_seed():
+    out = []
+    lines = _read_tail_lines(_history_log_path(), LIVE_LOG_SEED_HISTORY_LINES)
+    if lines:
+        out.append("--- последние записи speedtest.log ---".encode("utf-8"))
+        out.extend(lines)
+    for p in _run_log_paths():
+        lines = _read_tail_lines(p, LIVE_LOG_SEED_RUN_LINES)
+        if lines:
+            out.append("--- идущий прогон ---".encode("utf-8"))
+            out.extend(lines)
+    out.append("--- дальше - новые сообщения ---".encode("utf-8"))
+    return b"\n".join(out) + b"\n"
+
+
+def _write_file(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def _new_gen():
+    return os.urandom(8).hex()
+
+
+def _decode(data):
+    return data.decode("utf-8", errors="replace")
+
+
+def live_log_cleanup(d=None, idle=None, now=None, force=False):
+    """Удаляет маркер и файлы журнала, если зрителей нет дольше idle секунд
+    (или маркера нет вовсе - тогда подчищает случайный live.log от say(),
+    успевшего дописать строку после удаления маркера). Возвращает True,
+    если что-то удалено или удалять было нечего."""
+    d = d or live_log_dir()
+    idle = LIVE_LOG_IDLE if idle is None else idle
+    now = time.time() if now is None else now
+    p = _live_paths(d)
+    if not os.path.isdir(d):
+        return True
+    try:
+        mtime = os.stat(p["viewer"]).st_mtime
+    except FileNotFoundError:
+        mtime = None
+    if not force and mtime is not None and now - mtime <= idle:
+        return False
+    # Маркер - первым: после этого say() больше не открывает live.log.
+    for key in ("viewer", "gen", "seed", "log", "rot"):
+        _unlink(p[key])
+    return True
+
+
+def live_log_poll(client_gen, client_offset, d=None, limit=None, read_max=LIVE_LOG_READ_MAX):
+    """Один опрос страницы «Журнал». Возвращает dict для JSON-ответа:
+    gen, offset (с какого байта live.log спрашивать в следующий раз),
+    reset (клиент должен очистить вывод и показать seed заново), seed
+    (только при reset), text (новые целые строки), more (есть ещё)."""
+    d = d or live_log_dir()
+    limit = LIVE_LOG_LIMIT if limit is None else limit
+    p = _live_paths(d)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    with open(p["lock"], "a") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        try:
+            # Маркер - до затравки: строки, сказанные между этими шагами,
+            # попадут и туда, и сюда (повтор лучше потери).
+            with open(p["viewer"], "a"):
+                pass
+            os.utime(p["viewer"], None)
+            try:
+                with open(p["gen"]) as f:
+                    gen = f.read().strip()
+            except FileNotFoundError:
+                gen = ""
+            if not gen or not os.path.exists(p["seed"]):
+                _write_file(p["seed"], _build_seed())
+                gen = _new_gen()
+                _write_file(p["gen"], gen.encode("ascii"))
+            try:
+                size = os.stat(p["log"]).st_size
+            except FileNotFoundError:
+                size = 0
+            if size > limit:
+                os.replace(p["log"], p["rot"])
+                lines = _read_tail_lines(p["rot"], 10 ** 6, max_bytes=max(1, limit // 2))
+                seed = "--- более ранние сообщения обрезаны ---".encode("utf-8") + b"\n"
+                if lines:
+                    seed += b"\n".join(lines) + b"\n"
+                _write_file(p["seed"], seed)
+                _unlink(p["rot"])
+                gen = _new_gen()
+                _write_file(p["gen"], gen.encode("ascii"))
+                try:
+                    size = os.stat(p["log"]).st_size
+                except FileNotFoundError:
+                    size = 0
+            reset = client_gen != gen or client_offset < 0 or client_offset > size
+            offset = 0 if reset else client_offset
+            seed_text = None
+            if reset:
+                with open(p["seed"], "rb") as f:
+                    seed_text = _decode(f.read())
+            chunk = b""
+            if offset < size:
+                with open(p["log"], "rb") as f:
+                    f.seek(offset)
+                    chunk = f.read(min(read_max, size - offset))
+                cut = chunk.rfind(b"\n")
+                chunk = chunk[:cut + 1] if cut >= 0 else b""
+        finally:
+            fcntl.flock(lockf, fcntl.LOCK_UN)
+    new_offset = offset + len(chunk)
+    result = {
+        "gen": gen,
+        "offset": new_offset,
+        "reset": reset,
+        "text": _decode(chunk),
+        "more": new_offset < size and len(chunk) > 0,
+    }
+    if reset:
+        result["seed"] = seed_text
+    return result
 
 
 def parse_args(argv):
@@ -590,6 +808,25 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             self._serve_file(index_path)
             return True
 
+        def _handle_live_log(self):
+            # Живой журнал, см. live_log_poll(). Доступ - только после
+            # _authorize(), как у остальных /api/*.
+            if self.command not in ("GET", "HEAD"):
+                self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
+                return
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            client_gen = (query.get("gen") or [""])[0]
+            try:
+                client_offset = int((query.get("offset") or ["0"])[0])
+            except ValueError:
+                client_offset = -1
+            try:
+                result = live_log_poll(client_gen, client_offset)
+            except OSError as e:
+                self._send_json_with_headers(503, {"error": "live_log_unavailable", "detail": str(e)})
+                return
+            self._send_json_with_headers(200, result)
+
         def _handle(self):
             rel, ok = self._normalize_rel(self.path)
             if not ok:
@@ -612,6 +849,10 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             alias_env = None
             if rel is not None and rel in API_ALIASES:
                 rel, alias_env = API_ALIASES[rel]
+
+            if rel == "api/log":
+                self._handle_live_log()
+                return
 
             if rel is not None and rel.split("/", 1)[0] == "api":
                 # Сюда попадает только "/api/*" без записи в API_ALIASES -
@@ -664,6 +905,20 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
     # ForkingMixIn - см. пояснение в шапке файла про self-restart.
     allow_reuse_address = True
     daemon_threads = False
+    _live_log_checked = 0.0
+
+    def service_actions(self):
+        # Вызывается serve_forever() в родительском процессе примерно раз в
+        # poll_interval (0,5 с) - здесь без лишних потоков раз в 5 секунд
+        # прекращаем сбор живого журнала, если страницу «Журнал» закрыли.
+        super().service_actions()
+        now = time.time()
+        if now - self._live_log_checked >= 5:
+            self._live_log_checked = now
+            try:
+                live_log_cleanup(now=now)
+            except OSError:
+                pass
 
     def process_request(self, request, client_address):
         # Переопределяем socketserver.ForkingMixIn.process_request(): в
@@ -735,6 +990,10 @@ def main(argv):
     opts = parse_args(argv)
     handler = make_handler(opts["docroot"])
     server = ForkingHTTPServer((opts["bind"], opts["port"]), handler)
+    try:
+        live_log_cleanup(force=True)   # хвосты прошлого запуска сервера
+    except OSError:
+        pass
     try:
         server.serve_forever()
     except KeyboardInterrupt:

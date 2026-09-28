@@ -27,6 +27,18 @@ PROGRESS_ACTIVE=0   # 1, когда цикл шага 5 (write_progress) нач�
 RUN_LOG=${RUN_LOG:-$WORK/speedtest.log}
 LOG_LIMIT=${LOG_LIMIT:-102400}
 LOG_FLUSHED=0
+# Живой журнал для вкладки «Журнал» веб-интерфейса. Пока страница открыта,
+# stats_httpd.py держит в LIVE_LOG_DIR свежий файл-маркер viewer, и say()
+# дублирует каждую строку в live.log. Без маркера say() в каталог не пишет
+# вовсе. Всё живёт только в /tmp (tmpfs), в /opt ничего не пишется; размер
+# ограничивает и удаляет файлы после ухода зрителя сам stats_httpd.py.
+# LOG_TAG - метка источника строки в живом журнале; скрипты, подключающие
+# этот файл как библиотеку (stats_service.sh, stats_cgi.sh), переопределяют
+# её после подключения, не экспортируя.
+LIVE_LOG_DIR=${LIVE_LOG_DIR:-$TMPROOT/mihomo-speedtest-live}
+LIVE_LOG=$LIVE_LOG_DIR/live.log
+LIVE_LOG_VIEWER=$LIVE_LOG_DIR/viewer
+LOG_TAG=speedtest
 
 MIXED_PORT=7899
 API=127.0.0.1:9099
@@ -123,6 +135,9 @@ say() {
     echo "$log_line" >> "$RUN_LOG"
   else
     echo "$log_line" >> "$LOG" 2>/dev/null || echo "$log_line" >&2
+  fi
+  if [ -f "$LIVE_LOG_VIEWER" ]; then
+    echo "${log_line%% *} [$LOG_TAG] $*" >> "$LIVE_LOG" 2>/dev/null || :
   fi
 }
 
