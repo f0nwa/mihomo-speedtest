@@ -127,6 +127,12 @@ ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
 SPEED_URL="https://speed.cloudflare.com/__down?bytes=$SIZE"  # см. комментарий у DELAY_URL выше
 
+# Скорости curl и история хранятся в байтах/с; журнал показывает Мбит/с.
+# Расчёт в awk без умножения в shell исключает переполнение на 32-битных роутерах.
+format_mbit() {
+  LC_ALL=C awk -v speed="$1" 'BEGIN { printf "%.1f", speed / 125000 }'
+}
+
 say() {
   log_line="$(date '+%H:%M:%S') $*"
   [ "$FORCE" = 1 ] && echo "$log_line"
@@ -1327,10 +1333,10 @@ fi
 CHANNEL=$(measure_direct)
 if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
   EFFECTIVE_MIN=$(compute_threshold "$CHANNEL")
-  say "канал: $((CHANNEL/1048576)) МБ/с, порог: $((EFFECTIVE_MIN/1048576)) МБ/с"
+  say "канал: $(format_mbit "$CHANNEL") Мбит/с, порог: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
 else
   EFFECTIVE_MIN=$MIN_SPEED
-  say "WARN: прямой замер канала не удался, порог из настроек: $((EFFECTIVE_MIN/1048576)) МБ/с"
+  say "WARN: прямой замер канала не удался, порог из настроек: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
 fi
 PROGRESS_TOTAL=$CANDIDATES
 PROGRESS_STARTED_ISO=$(date '+%Y-%m-%d %H:%M:%S')
@@ -1356,7 +1362,7 @@ while read -r D IDX; do
   echo "$SP $IDX" >> "$WORK/res.txt"
   NM=$(awk -v k="$IDX" -F'	' '$1 == k {print $2}' "$WORK/map.txt")
   echo "$((SP/1048576)).$(( (SP%1048576)*10/1048576 ))	МБ/с	$NM" >> "$WORK/full.txt"
-  [ "$FORCE" = 1 ] && say "  $((SP/1048576)).$(( (SP%1048576)*10/1048576 )) МБ/с  $NM"
+  [ "$FORCE" = 1 ] && say "  $(format_mbit "$SP") Мбит/с  $NM"
   PROGRESS_STATUS=slow
   [ "$SP" -ge "$EFFECTIVE_MIN" ] && PROGRESS_STATUS=ok
   printf '%s\t%s\t%s\n' "$NM" "$SP" "$PROGRESS_STATUS" >> "$WORK/progress.tsv"
@@ -1380,7 +1386,7 @@ awk -v wgfile="$WORK/wg.txt" '
 if [ -s "$WORK/wg_ok.txt" ]; then
   while read -r WSP WIDX; do
     WNM=$(awk -F '\t' -v k="$WIDX" '$1 == k { print $2 }' "$WORK/wg_ok.txt")
-    [ -n "$WNM" ] && say "WG: $((WSP/1048576)).$(( (WSP%1048576)*10/1048576 )) МБ/с  $WNM"
+    [ -n "$WNM" ] && say "WG: $(format_mbit "$WSP") Мбит/с  $WNM"
   done < "$WORK/res.txt"
 fi
 wg_publish_fast "$EFFECTIVE_MIN"
@@ -1388,12 +1394,12 @@ select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_
 WIN=$(wc -l < "$WORK/win.txt")
 BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
-  say "WARN: порог $((EFFECTIVE_MIN/1048576)) МБ/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
+  say "WARN: порог $(format_mbit "$EFFECTIVE_MIN") Мбит/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
   best_line=$(sort -rn "$WORK/res.txt" | head -1)
   best_sp=${best_line%% *}
   best_idx=${best_line#* }
   best_nm=$(awk -v k="$best_idx" -F'\t' '$1 == k {print $2}' "$WORK/map.txt")
-  say "лучший результат: $((best_sp/1048576)).$(( (best_sp%1048576)*10/1048576 )) МБ/с  $best_nm"
+  say "лучший результат: $(format_mbit "$best_sp") Мбит/с  $best_nm"
   exit 0
 fi
 
@@ -1401,7 +1407,7 @@ echo "proxies:" > "$WORK/fast.new"
 while read -r SP IDX; do
   NAME=$(awk -v k="$IDX" -F'\t' '$1 == k {print $2}' "$WORK/map.txt")
   cat "$WORK/nodes/$IDX.yaml" >> "$WORK/fast.new"
-  say "  $((SP/1048576)).$(( (SP%1048576)*10/1048576 )) МБ/с  $NAME"
+  say "  $(format_mbit "$SP") Мбит/с  $NAME"
 done < "$WORK/win.txt"
 
 # 7. проверить, что собранное читается
