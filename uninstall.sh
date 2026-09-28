@@ -71,6 +71,9 @@ PURGE_DATA=${PURGE_DATA:-0}
 # промежуточный артефакт bootstrap (докачивается в $DIR/$SELFDIR, оттуда уже
 # install_files() копирует его в $INITD_SCRIPT) - без явного перечисления
 # здесь оставался бы на роутере вечно (найдено при реальном тесте).
+# VERSIONS в релизы больше не входит (файл удалённого самообновления
+# speedtest2.sh --check-update), но остаётся в списке, чтобы удаление
+# убирало его и со старых установок.
 FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
 render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
 stats_index.html stats_style.css stats_app.js stats_chart.js render_progress.awk stats_init.sh

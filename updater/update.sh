@@ -189,7 +189,7 @@ bootstrap_header() {
       row[++n]=$0
     }
     END {
-      if (fmt!="2" || tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || tag ~ /\.\./ || (n!=3 && n!=4) ||
+      if (fmt!="2" || tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || tag ~ /\.\./ || n!=4 ||
           !seen["RELEASE_VERSION"] || !seen["MIN_UPDATER_VERSION"] || !seen["CONFIG_SCHEMA_VERSION"]) exit 1
       for (i=1;i<=n;i++) print row[i]
     }

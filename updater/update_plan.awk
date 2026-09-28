@@ -10,7 +10,8 @@
 #   FORMAT     - "text" (по умолчанию) или "json"
 #   VALIDATE_ONLY - 1: проверить каталог без чтения состояния и вывода плана
 #   UPDATER_VERSION - версия вызывающего обновлятора для проверки минимума
-# Формат 2: RELEASE_TAG, NOTE и CONFLICT; спецификация release/manifest-format.md.
+# Поддерживается только формат 2 (RELEASE_TAG, NOTE и CONFLICT);
+# спецификация release/manifest-format.md.
 # Ничего не пишет на диск - только печатает план в stdout. Код возврата 1
 # при любой ошибке разбора/валидации манифеста (сообщение - в stderr).
 
@@ -186,14 +187,10 @@ BEGIN {
   if (min_updater !~ /^[0-9]+$/) fail("MIN_UPDATER_VERSION должен быть целым числом: " min_updater)
   if (config_schema !~ /^[0-9]+$/) fail("CONFIG_SCHEMA_VERSION должен быть целым числом: " config_schema)
 
-  if (format_version != "1" && format_version != "2") fail("неподдерживаемый FORMAT_VERSION: " format_version)
-  if (format_version == "2") {
-    if (release_tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || release_tag ~ /\.\./)
-      fail("неверный или отсутствующий RELEASE_TAG")
-    for (cid in comp_title) if (!(cid in comp_note)) fail("отсутствует NOTE для компонента: " cid)
-  } else if (("RELEASE_TAG" in header_seen) || conflict_count || note_count) {
-    fail("метаданные формата 2 недопустимы в формате 1")
-  }
+  if (format_version != "2") fail("неподдерживаемый FORMAT_VERSION: " format_version)
+  if (release_tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || release_tag ~ /\.\./)
+    fail("неверный или отсутствующий RELEASE_TAG")
+  for (cid in comp_title) if (!(cid in comp_note)) fail("отсутствует NOTE для компонента: " cid)
   for (cid in comp_note) if (!(cid in comp_title)) fail("NOTE: неизвестный компонент: " cid)
   if (UPDATER_VERSION != "" && min_updater + 0 > UPDATER_VERSION + 0)
     fail("обновите update.sh: нужна версия " min_updater "; инструкция: release/manifest-format.md")
@@ -392,7 +389,7 @@ function print_text(   i, cid, comp_label) {
   if (PREPARED==1) print "Файлы подготовлены в /tmp; установка ещё не выполнялась"
   if (overwrite_needed()) print "Локальные изменения требуют отдельного подтверждения"
   print "Релиз " release_version " (формат манифеста " format_version ", минимальная версия update.sh " min_updater ")"
-  if (release_tag != "") print "Тег релиза: " release_tag
+  print "Тег релиза: " release_tag
   print "Версия схемы config.yaml в релизе: " config_schema
   print ""
   if (MIGRATE_CONFIG==1) {

@@ -2,9 +2,9 @@
 
 ## Версии и заголовок
 
-Генератор выпускает формат 2. Обновлятор версии 6 также читает формат 1
-локального прототипа; первый опубликованный управляемый релиз должен иметь
-формат 2. Неизвестный формат отклоняется целиком. Версия обновлятора задана
+Генератор выпускает и обновлятор принимает только формат 2 (формат 1 был
+только у локального прототипа и в релизах не публиковался). Любой другой
+формат отклоняется целиком. Версия обновлятора задана
 константой UPDATER_VERSION в update.sh, отдельно от версии релиза.
 
 Каждое поле заголовка встречается ровно один раз:
@@ -89,7 +89,7 @@ update_plan.awk с VALIDATE_ONLY=1. Конфликтующие альтерна�
 файл, чтобы ошибка генерации не обнулила прежний манифест.
 
 Установщик размещает updater, installer и config-tools на роутере, включая
-uninstall.sh и переходный VERSIONS в installer. Рабочий config.yaml не
+uninstall.sh в installer. Рабочий config.yaml не
 перезаписывается этими компонентами. Генератор и декларация остаются на
 компьютере разработчика.
 
@@ -199,41 +199,23 @@ MIN_UPDATER_VERSION=4, CONFIG_SCHEMA_VERSION=2. В нём 32 файла прое
 manifest.txt и SHA256SUMS. Рост схемы включает active-config и требует
 отдельного --confirm-config.
 
-Установленный обновлятор версии 4 умеет подготовить v2, но его внешний CLI
-ещё не распознаёт --confirm-config. После --prepare возьмите plan_id из
-результата и один раз запустите сохранённый проверенный движок:
-
-```sh
-plan_id='<64-символьный plan_id из --prepare>'
-engine="/tmp/mst-update-plans/$plan_id/engine/update.sh"
-sh "$engine" --verify-plan "$plan_id" --confirm-local --confirm-config
-sh "$engine" --apply "$plan_id" --confirm-local --confirm-config
-```
-
-После успешного применения устанавливается CLI версии 6; следующие операции
-выполняются обычным /opt/etc/mihomo-speedtest/update.sh. На Keenetic проверены реальный
-HTTPS, подготовка, Mihomo -t, оба подтверждения и структурный diff. Боевое
-применение v2 завершилось applied: схема 2 и CLI 6 установлены, конфиг совпал
-с кандидатом, режим 0600 сохранён, process/API health прошёл, журнал закрыт,
-rollback старого конфига проверен. Приёмка отключения питания пропущена по
-решению владельца.
+На Keenetic v2 применён боевым обновлением (applied): схема 2 и CLI 6
+установлены, конфиг совпал с кандидатом, режим 0600 сохранён, process/API
+health прошёл, rollback старого конфига проверен. Приёмка отключения
+питания пропущена по решению владельца.
 
 ## Ручное обновление несовместимого bootstrap
 
-Начиная с разделения каталогов (см.
-docs/superpowers/specs/2026-09-25-install-dir-separation-design.md) эти четыре
-файла обновлятора - файлы ПРОЕКТА, их место - /opt/etc/mihomo-speedtest, а не
-/opt/etc/mihomo (это правило автоматической миграции не имеет: установка со
-старым layout'ом должна быть удалена uninstall.sh и переустановлена заново,
-ручной перенос ниже относится только к установкам, уже перешедшим на новый
-layout). Версия 4 добавляет update_transaction.sh в bootstrap. Установленный bootstrap
-версии 3 требует однократного ручного обновления четырёх файлов.
-Если стабильный bootstrap не может прочитать релиз, возьмите проверенные
-владельцем update.sh, update_plan.awk, update_prepare.sh и update_transaction.sh из локального
-репозитория. На компьютере владельца:
+Стабильный bootstrap (update.sh:bootstrap_header) принимает только манифест
+формата 2 ровно с четырьмя файлами компонента updater: update.sh,
+update_plan.awk, update_prepare.sh и update_transaction.sh в
+/opt/etc/mihomo-speedtest. Если будущий релиз изменит этот протокол и
+установленный bootstrap не сможет его прочитать, возьмите проверенные
+владельцем четыре файла из каталога updater/ локального репозитория.
+На компьютере владельца:
 
 ```sh
-cd /Volumes/SAMSUNG/SynologyDrive/mihomo/mihomo_fonwa
+cd /Volumes/SAMSUNG/SynologyDrive/mihomo/mihomo_fonwa/updater
 ssh -p 222 root@192.168.10.1 'mkdir -p /tmp/mihomo-updater-manual' &&
 scp -O -P 222 update.sh update_plan.awk update_prepare.sh update_transaction.sh root@192.168.10.1:/tmp/mihomo-updater-manual/ &&
 ssh -p 222 root@192.168.10.1 'set -eu
@@ -452,5 +434,4 @@ speedtest продолжают работать, веб-интерфейс пр�
 
 update.sh и его движок версионируются отдельно через собственную константу
 UPDATER_VERSION (см. "Версии и заголовок" выше) - в этой части она не
-менялась, затронуты только VERSIONS/CORE_VERSION/STATS_VERSION проекта
-(см. VERSIONS в корне репозитория и комментарий в speedtest2.sh).
+менялась.

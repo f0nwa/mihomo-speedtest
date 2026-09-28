@@ -21,9 +21,6 @@ LOCK_HELD=0
 FORCE=${FORCE:-0}             # 1 -- ручной внеочередной запуск: живой вывод в терминал,
                               # ожидание/захват чужой блокировки вместо немедленного выхода
 FORCE_WAIT=${FORCE_WAIT:-180} # force: сколько ждать (сек) чужую блокировку, прежде чем сдаться
-CHECK_UPDATE=${CHECK_UPDATE:-0} # 1 -- только --check-update: сверить версии и выйти, main() не запускать
-UPDATE_CORE=${UPDATE_CORE:-0}   # 1 -- только --update-core: скачать и применить core, main() не запускать
-UPDATE_STATS=${UPDATE_STATS:-0} # 1 -- только --update-stats: скачать и применить stats, main() не запускать
 MPID=
 PUBLISH_TMP=
 PROGRESS_ACTIVE=0   # 1, когда цикл шага 5 (write_progress) начат в этом прогоне - см. cleanup()
@@ -108,48 +105,11 @@ STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его ж�
 STATS_SERVICE=${STATS_SERVICE:-$DIR/stats_service.sh}               # порция 3: независимый supervisor (см. design), ставится install.sh
 STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # порция 3: Entware init-скрипт независимой службы, ставится install.sh
 
-# Проверка обновлений (см. README, "Перенос файлов на роутер и обновление
-# после правок") - только по команде --check-update, без автозапуска по
-# cron. CORE_VERSION/STATS_VERSION - версии этого файла и связанных с ним
-# частей; меняются вручную при подготовке релиза и сверяются с файлом
-# VERSIONS в репозитории (не путать со STATS_* выше - в speedtest2.env
-# им быть не следует). Список файлов при каждой версии ниже - ровно тот
-# набор, что реально скачивают update_core()/update_stats() (--update-core/
-# --update-stats, см. ниже); uninstall.sh, update.sh и его движок
-# (update_plan.awk/update_prepare.sh/update_transaction.sh), а также
-# stats_auth.py/stats_auth.sh в этот старый механизм не входят - они
-# ставятся/обновляются через install.sh и новый релизный обновлятор
-# (release/components.txt, update.sh, версионируется отдельно через
-# UPDATER_VERSION - см. release/manifest-format.md).
-CORE_VERSION=${CORE_VERSION:-4}    # speedtest2.sh, install.sh, setup.sh, version_check.sh, detect_ua.sh, render_config.awk, existing_config.awk, config.example.yaml, prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk, mihomo-speedtest.sh
-STATS_VERSION=${STATS_VERSION:-4}  # render_stats.awk, stats_cgi.sh, stats_run.sh, stats_httpd.py, stats_index.html, stats_style.css, stats_app.js, stats_chart.js, render_progress.awk, stats_service.sh, stats_init.sh
-UPDATE_SOURCE_BASE=${UPDATE_SOURCE_BASE:-https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main}
-UPDATE_MIRROR_BASE=${UPDATE_MIRROR_BASE:-https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@main}
-UPDATE_HTTP_CMD=${UPDATE_HTTP_CMD:-}       # переопределить команду загрузки целиком (тесты/нестандартные прошивки)
-UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
-# Отдельные UPDATE_*-переменные ниже - только для файлов, у которых нет
-# своего "канонического" имени переменной за пределами этого блока
-# (prep.awk/node_stats_update.awk/sub_convert.awk и все stats_*-файлы для
-# --update-stats используют уже существующие PREP/NODE_STATS_UPDATE/
-# SUB_CONVERT/RENDER_STATS/STATS_CGI_SOURCE/STATS_RUN_SOURCE/
-# STATS_HTTPD_PY/STATS_INDEX_SOURCE/STATS_STYLE_SOURCE/STATS_APP_SOURCE/
-# STATS_CHARTJS_SOURCE, объявленные выше). version_check.sh/setup.sh/
-# detect_ua.sh/render_config.awk/existing_config.awk/config.example.yaml -
-# инструментарий setup.sh (см. его же комментарий в шапке) - сам
-# speedtest2.sh их не использует, поэтому у них тоже нет отдельного
-# канонического имени, только это. version_check.sh нужен install.sh при
-# КАЖДОМ запуске (source в его же шапке, включая --recalibrate) - без
-# него в "core" install.sh на устаревшем version_check.sh тихо сверялся
-# бы со старыми минимальными версиями.
-UPDATE_SELF_SCRIPT=${UPDATE_SELF_SCRIPT:-$DIR/speedtest2.sh}
-UPDATE_INSTALL_SH=${UPDATE_INSTALL_SH:-$DIR/install.sh}
+# providers.awk - разбор блоков подписок из config.yaml. Имя переменной
+# историческое (осталось от удалённого самообновления --update-core); её
+# читает stats_cgi.sh после подключения этого файла (кандидаты для
+# гео-фильтра спидтеста), поэтому имя не меняется.
 UPDATE_PROVIDERS_AWK=${UPDATE_PROVIDERS_AWK:-$DIR/providers.awk}
-UPDATE_VERSION_CHECK_SH=${UPDATE_VERSION_CHECK_SH:-$DIR/version_check.sh}
-UPDATE_SETUP_SH=${UPDATE_SETUP_SH:-$DIR/setup.sh}
-UPDATE_DETECT_UA_SH=${UPDATE_DETECT_UA_SH:-$DIR/detect_ua.sh}
-UPDATE_RENDER_CONFIG_AWK=${UPDATE_RENDER_CONFIG_AWK:-$DIR/render_config.awk}
-UPDATE_EXISTING_CONFIG_AWK=${UPDATE_EXISTING_CONFIG_AWK:-$DIR/existing_config.awk}
-UPDATE_CONFIG_EXAMPLE_YAML=${UPDATE_CONFIG_EXAMPLE_YAML:-$DIR/config.example.yaml}
 
 ENV=${ENV:-$DIR/speedtest2.env}
 [ -f "$ENV" ] && . "$ENV"
@@ -705,10 +665,9 @@ render_stats() {
   # отвечает только за атомарную публикацию stats.html/stats.json - как и
   # write_progress() отдельно отвечает за progress.json.
   #
-  # С порции 3 stats_cgi.sh (после сохранения серверных настроек) и
-  # update_stats() ниже (после --update-stats) тоже переключены - вместо
-  # ensure_stats_httpd() они вызывают "$STATS_INIT_SCRIPT reconfigure"
-  # или "restart" (см. apply_stats_update() ниже). ensure_stats_httpd() и
+  # С порции 3 stats_cgi.sh (после сохранения серверных настроек) тоже
+  # переключён - вместо ensure_stats_httpd() он вызывает
+  # "$STATS_INIT_SCRIPT reconfigure". ensure_stats_httpd() и
   # её вспомогательные функции (write_stats_*(), cleanup_old_zash_stats() -
   # переиспользуются stats_service.sh; start_stats_httpd_backend(),
   # stats_httpd_advertise_host(), stop_stats_httpd() - больше не
@@ -1475,295 +1434,25 @@ fi
 record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" "$WIN"
 }
 
-update_http_get() {
-  # $1 = URL. Печатает тело ответа в stdout при успехе, ничего и код !=0
-  # при ошибке (сеть, таймаут, HTTP-ошибка). UPDATE_HTTP_CMD переопределяет
-  # инструмент загрузки целиком - для тестов и нестандартных прошивок, где
-  # не годится ни curl, ни busybox wget.
-  url=$1
-  if [ -n "$UPDATE_HTTP_CMD" ]; then
-    $UPDATE_HTTP_CMD "$url"
-    return $?
-  fi
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --max-time "$UPDATE_HTTP_TIMEOUT" "$url"
-    return $?
-  fi
-  if command -v busybox >/dev/null 2>&1; then
-    busybox wget -q -T "$UPDATE_HTTP_TIMEOUT" -O - "$url"
-    return $?
-  fi
-  return 127
-}
-
-fetch_from_source_or_mirror() {
-  # $1=путь относительно UPDATE_SOURCE_BASE/UPDATE_MIRROR_BASE (например,
-  # "VERSIONS" или "speedtest2.sh"). Основной источник, при неудаче -
-  # зеркало. Печатает содержимое в stdout при успехе, иначе ничего и
-  # возврат 1 - обе попытки не удались.
-  relpath=$1
-  body=$(update_http_get "$UPDATE_SOURCE_BASE/$relpath" 2>/dev/null) || body=""
-  if [ -n "$body" ]; then
-    printf '%s\n' "$body"
-    return 0
-  fi
-  body=$(update_http_get "$UPDATE_MIRROR_BASE/$relpath" 2>/dev/null) || body=""
-  if [ -n "$body" ]; then
-    printf '%s\n' "$body"
-    return 0
-  fi
-  return 1
-}
-
-fetch_versions_manifest() {
-  fetch_from_source_or_mirror VERSIONS
-}
-
-parse_manifest_version() {
-  # $1=содержимое VERSIONS, $2=имя (CORE_VERSION|STATS_VERSION). Строгий
-  # разбор одной строки "ИМЯ=число" через sed - никогда не через eval/
-  # source, т.к. VERSIONS приходит с внешнего сервера и не должен
-  # исполняться как код.
-  content=$1; name=$2
-  val=$(printf '%s\n' "$content" | sed -n "s/^$name=\\([0-9][0-9]*\\)\$/\\1/p" | head -n 1)
-  [ -n "$val" ] || return 1
-  printf '%s' "$val"
-}
-
-report_update_component() {
-  # $1=имя компонента (для сообщения), $2=текущая версия, $3=версия с
-  # сервера (пусто, если строка не найдена/битая в VERSIONS).
-  label=$1; cur=$2; remote=$3
-  if [ -z "$remote" ]; then
-    say "WARN: $label - версия на сервере не распознана в VERSIONS, сравнение пропущено"
-    return 0
-  fi
-  if [ "$remote" -gt "$cur" ] 2>/dev/null; then
-    say "$label: установлена версия $cur, доступна $remote"
-  else
-    say "$label: установлена версия $cur, это актуально (на сервере: $remote)"
-  fi
-}
-
-check_update() {
-  # Точка входа для --check-update: ничего не меняет на диске, только
-  # печатает/логирует, что core/stats устарели относительно VERSIONS из
-  # репозитория. По расписанию (cron) не вызывается - только руками.
-  manifest=$(fetch_versions_manifest) || manifest=""
-  if [ -z "$manifest" ]; then
-    say "WARN: не удалось получить VERSIONS ни с $UPDATE_SOURCE_BASE, ни с зеркала $UPDATE_MIRROR_BASE - проверьте сеть роутера"
-    return 1
-  fi
-  remote_core=$(parse_manifest_version "$manifest" CORE_VERSION) || remote_core=""
-  remote_stats=$(parse_manifest_version "$manifest" STATS_VERSION) || remote_stats=""
-  if [ -z "$remote_core" ] && [ -z "$remote_stats" ]; then
-    say "WARN: файл VERSIONS получен, но не содержит распознаваемых строк CORE_VERSION=/STATS_VERSION="
-    return 1
-  fi
-  report_update_component core "$CORE_VERSION" "$remote_core"
-  report_update_component stats "$STATS_VERSION" "$remote_stats"
-}
-
-update_component_files() {
-  # $1=метка компонента (для сообщений в лог), далее пары вида
-  # "относительный_путь_на_сервере:локальный_путь_назначения". Всё-или-
-  # ничего: сначала скачивает и проверяет КАЖДЫЙ файл во временный
-  # каталог, и только если все прошли - переносит их на место (с бэкапом
-  # прежних версий рядом, "*.bak-ГГГГММДДЧЧММСС"). Любая неудача на этапе
-  # скачивания/проверки прерывает всё обновление до единой записи на диск.
-  # Проверка синтаксиса - не проверка подлинности (подписи нет, см.
-  # TODO.md): просто защита от случайно битого/усечённого файла.
-  label=$1; shift
-  update_tmp=$(mktemp -d "${TMPROOT:-/tmp}/mst-update.XXXXXX" 2>/dev/null) || {
-    say "WARN: $label - не удалось создать временный каталог, обновление не выполнено"
-    return 1
-  }
-  ok=1
-  for pair in "$@"; do
-    remote=${pair%%:*}
-    if ! body=$(fetch_from_source_or_mirror "$remote"); then
-      say "WARN: $label - не удалось скачать $remote ни с $UPDATE_SOURCE_BASE, ни с зеркала $UPDATE_MIRROR_BASE - обновление не выполнено"
-      ok=0
-      break
-    fi
-    if ! printf '%s\n' "$body" > "$update_tmp/$remote" 2>/dev/null; then
-      say "WARN: $label - не удалось записать $remote во временный каталог - обновление не выполнено"
-      ok=0
-      break
-    fi
-    case $remote in
-      *.sh)
-        if ! sh -n "$update_tmp/$remote" 2>/dev/null; then
-          say "WARN: $label - $remote не прошёл проверку синтаксиса (sh -n) - обновление не выполнено"
-          ok=0
-          break
-        fi
-        ;;
-      *.awk)
-        if ! awk -f "$update_tmp/$remote" /dev/null >/dev/null 2>&1; then
-          say "WARN: $label - $remote не прошёл проверку синтаксиса (awk) - обновление не выполнено"
-          ok=0
-          break
-        fi
-        ;;
-      *.py)
-        # Только если python3 вообще есть - на роутере он опционален (см.
-        # STATS_HTTPD_PY выше, резервный busybox httpd без него), отсутствие
-        # интерпретатора само по себе не повод браковать обновление.
-        if command -v python3 >/dev/null 2>&1 && ! python3 -m py_compile "$update_tmp/$remote" 2>/dev/null; then
-          say "WARN: $label - $remote не прошёл проверку синтаксиса (python3 -m py_compile) - обновление не выполнено"
-          ok=0
-          break
-        fi
-        ;;
-    esac
-  done
-  if [ "$ok" != 1 ]; then
-    rm -rf "$update_tmp"
-    return 1
-  fi
-  stamp=$(date '+%Y%m%d%H%M%S')
-  for pair in "$@"; do
-    remote=${pair%%:*}
-    dest=${pair#*:}
-    if [ -f "$dest" ]; then
-      cp "$dest" "$dest.bak-$stamp" 2>/dev/null \
-        || say "WARN: $label - не удалось сохранить резервную копию $dest (обновление продолжается)"
-    fi
-    if mv "$update_tmp/$remote" "$dest"; then
-      case $dest in
-        *.sh) chmod +x "$dest" 2>/dev/null || true ;;
-      esac
-    else
-      say "WARN: $label - не удалось заменить $dest - часть файлов уже могла обновиться, проверьте вручную"
-      ok=0
-    fi
-  done
-  rm -rf "$update_tmp"
-  if [ "$ok" = 1 ]; then
-    say "OK: $label обновлён (резервные копии - рядом с исходными файлами, *.bak-$stamp)"
-    return 0
-  fi
-  return 1
-}
-
-update_core() {
-  # Точка входа для --update-core. Обновляет весь набор целиком (см.
-  # README) - speedtest2.sh, install.sh, setup.sh и весь их
-  # вспомогательный инструментарий (version_check.sh, detect_ua.sh,
-  # render_config.awk, existing_config.awk, config.example.yaml),
-  # prep.awk, providers.awk, node_stats_update.awk, sub_convert.awk. Ни
-  # один из этих файлов не запускается как постоянный сервис - для них
-  # не нужен перезапуск (в отличие от update_stats(), см.
-  # apply_stats_update()), т.к. каждый вызывается заново с диска при
-  # следующем запуске (cron/--force для speedtest2.sh, руками для
-  # install.sh/setup.sh). Изменения вступают в силу со следующего
-  # запуска - текущий процесс (если что-то его всё же вызвало) доработает
-  # со старым кодом.
-  update_component_files core \
-    "speedtest2.sh:$UPDATE_SELF_SCRIPT" \
-    "install.sh:$UPDATE_INSTALL_SH" \
-    "setup.sh:$UPDATE_SETUP_SH" \
-    "version_check.sh:$UPDATE_VERSION_CHECK_SH" \
-    "detect_ua.sh:$UPDATE_DETECT_UA_SH" \
-    "render_config.awk:$UPDATE_RENDER_CONFIG_AWK" \
-    "existing_config.awk:$UPDATE_EXISTING_CONFIG_AWK" \
-    "config.example.yaml:$UPDATE_CONFIG_EXAMPLE_YAML" \
-    "prep.awk:$PREP" \
-    "providers.awk:$UPDATE_PROVIDERS_AWK" \
-    "node_stats_update.awk:$NODE_STATS_UPDATE" \
-    "sub_convert.awk:$SUB_CONVERT"
-  rc=$?
-  if [ "$rc" = 0 ]; then
-    say "core: изменения вступят в силу со следующего запуска (cron или speedtest2.sh --force)"
-  fi
-  return $rc
-}
-
-apply_stats_update() {
-  # После успешного обновления stats-файлов - перегенерировать stats.html
-  # и явно перезапустить независимую службу (stats_service.sh/
-  # stats_init.sh, порция 3 design), не дожидаясь cron: новый
-  # stats_httpd.py и новые статические файлы должны подхватиться сразу,
-  # а не при случайном следующем ensure_stats_httpd() (который теперь и
-  # не вызывается обычными прогонами вовсе - см. порцию 2). Явный restart
-  # нужен именно потому, что supervisor сам перезапускает бэкенд только
-  # при его падении или по команде - не при изменении файлов на диске.
-  #
-  # Неудачный restart - это WARN и ненулевой возврат, но НЕ откат уже
-  # записанных и проверенных файлов (design, "Обновление компонентов"):
-  # update_component_files() выше уже атомарно применил новый набор,
-  # откатывать его из-за отдельно неудавшегося restart не нужно.
-  WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-apply.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-apply.$$
-  mkdir -p "$WORK" 2>/dev/null
-  render_stats
-  rm -rf "$WORK"
-  if [ -x "$STATS_INIT_SCRIPT" ]; then
-    if "$STATS_INIT_SCRIPT" restart >/dev/null 2>&1; then
-      return 0
-    fi
-    say "WARN: stats: файлы обновлены, но $STATS_INIT_SCRIPT restart не удался - перезапустите веб-сервис вручную"
-    return 1
-  fi
-  say "WARN: stats: файлы обновлены, но $STATS_INIT_SCRIPT не найден - переустановите проект (install.sh, порция 3), чтобы веб-сервис подхватил обновление сам"
-  return 1
-}
-
-update_stats() {
-  # Точка входа для --update-stats. Все файлы веб-сервиса статистики
-  # обновляются вместе одним "всё-или-ничего" набором (см.
-  # update_component_files()) - и старый server-rendered путь
-  # (render_stats.awk/stats_cgi.sh), и SPA-shell (stats_index.html/
-  # stats_style.css/stats_app.js/stats_chart.js), и сам веб-сервер
-  # (stats_httpd.py/stats_run.sh), и, с порции 3, независимая служба
-  # (stats_service.sh/stats_init.sh) - разносить их по отдельным командам
-  # смысла нет, все меняются вместе при доработке раздела "Статистика".
-  #
-  # $STATS_INIT_SCRIPT (обычно /opt/etc/init.d/S80speedtest-stats) не
-  # оканчивается на ".sh" - автоматический chmod +x внутри
-  # update_component_files() (он смотрит на суффикс ИМЕНИ НАЗНАЧЕНИЯ)
-  # его не затронет, поэтому исполняемый бит здесь выставляется явно.
-  if ! update_component_files stats \
-      "render_stats.awk:$RENDER_STATS" \
-      "stats_cgi.sh:$STATS_CGI_SOURCE" \
-      "stats_run.sh:$STATS_RUN_SOURCE" \
-      "stats_httpd.py:$STATS_HTTPD_PY" \
-      "stats_index.html:$STATS_INDEX_SOURCE" \
-      "stats_style.css:$STATS_STYLE_SOURCE" \
-      "stats_app.js:$STATS_APP_SOURCE" \
-      "stats_chart.js:$STATS_CHARTJS_SOURCE" \
-      "render_progress.awk:$RENDER_PROGRESS" \
-      "stats_service.sh:$STATS_SERVICE" \
-      "stats_init.sh:$STATS_INIT_SCRIPT"; then
-    return 1
-  fi
-  chmod +x "$STATS_INIT_SCRIPT" 2>/dev/null || true
-  apply_stats_update
-}
-
 parse_args() {
   for _arg in "$@"; do
     case $_arg in
       --force) FORCE=1 ;;
-      --check-update) CHECK_UPDATE=1 ;;
-      --update-core) UPDATE_CORE=1 ;;
-      --update-stats) UPDATE_STATS=1 ;;
+      # Старое самообновление с ветки main (VERSIONS, без SHA256) удалено:
+      # обновления ставятся только управляемым обновлятором update.sh.
+      # Флаги распознаются, чтобы по старой привычке не запустить вместо
+      # них полный прогон спидтеста.
+      --check-update | --update-core | --update-stats) REMOVED_UPDATE_FLAG=$_arg ;;
     esac
   done
 }
 
 if [ "${MST_LIB_ONLY:-0}" != 1 ]; then
+  REMOVED_UPDATE_FLAG=
   parse_args "$@"
-  if [ "$CHECK_UPDATE" = 1 ] || [ "$UPDATE_CORE" = 1 ] || [ "$UPDATE_STATS" = 1 ]; then
-    FORCE=1
+  if [ -n "$REMOVED_UPDATE_FLAG" ]; then
+    echo "speedtest2.sh: $REMOVED_UPDATE_FLAG больше не поддерживается - используйте раздел «Обновления» веб-интерфейса или mihomo-speedtest update --check" >&2
+    exit 2
   fi
-  if [ "$CHECK_UPDATE" = 1 ]; then
-    check_update
-  elif [ "$UPDATE_CORE" = 1 ]; then
-    update_core
-  elif [ "$UPDATE_STATS" = 1 ]; then
-    update_stats
-  else
-    main "$@"
-  fi
+  main "$@"
 fi
