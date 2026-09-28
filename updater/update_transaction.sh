@@ -235,26 +235,29 @@ tx_watchdog() (
 tx_bounded_command() (
   tx_limit=$1; shift
   tx_timeout_valid "$tx_limit" || exit 1
-  tx_log=$WORK/tx-command-$$.log
-  : > "$tx_log" || exit 1
   tx_pending=$(mktemp "$WORK/tx-command-state.XXXXXX") || exit 1
   tx_timed_out=$tx_pending.timeout
   tx_done=$tx_pending.done
   rm -f "$tx_timed_out" "$tx_done"
-  ( ulimit -f 64; exec "$@" ) >> "$tx_log" 2>&1 &
+  # Без ulimit -f: команда здесь - перезапуск служб (init-скрипт веб-службы,
+  # xkeen -restart), и лимит наследовали бы запущенные ими демоны
+  # (stats_httpd.py, mihomo) - вплоть до "File size limit exceeded" у всего,
+  # что они потом запускают. Вывод никто не читает, поэтому /dev/null: так
+  # демон не держит открытым удалённый журнал в /tmp.
+  ( exec "$@" ) > /dev/null 2>&1 < /dev/null &
   tx_child=$!
   printf '%s\n' "$tx_child" > "$WORK/tx-action-children" || {
     tx_kill_tree "$tx_child" KILL; wait "$tx_child" 2>/dev/null || :
-    rm -f "$tx_log" "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1
+    rm -f "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1
   }
   tx_watchdog "$tx_limit" "$tx_pending" "$tx_timed_out" "$tx_done" "$tx_child" >/dev/null 2>&1 &
   tx_watch=$!
   printf '%s\n%s\n' "$tx_child" "$tx_watch" > "$WORK/tx-action-children" || {
     tx_kill_tree "$tx_child" KILL; tx_kill_tree "$tx_watch" KILL
     wait "$tx_child" 2>/dev/null || :
-    rm -f "$tx_log" "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1
+    rm -f "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1
   }
-  trap 'tx_kill_tree "$tx_child" KILL; tx_kill_tree "$tx_watch" KILL; wait "$tx_child" 2>/dev/null || :; rm -f "$tx_log" "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1' HUP INT TERM
+  trap 'tx_kill_tree "$tx_child" KILL; tx_kill_tree "$tx_watch" KILL; wait "$tx_child" 2>/dev/null || :; rm -f "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"; exit 1' HUP INT TERM
   tx_rc=0; wait "$tx_child" || tx_rc=$?
   if mv "$tx_pending" "$tx_done" 2>/dev/null; then
     tx_kill_tree "$tx_watch" TERM
@@ -265,7 +268,7 @@ tx_bounded_command() (
   wait "$tx_watch" 2>/dev/null || :
   [ ! -e "$tx_timed_out" ] || tx_rc=1
   [ -e "$tx_done" ] || tx_rc=1
-  rm -f "$tx_log" "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"
+  rm -f "$tx_pending" "$tx_timed_out" "$tx_done" "$WORK/tx-action-children"
   exit "$tx_rc"
 )
 tx_health_config() (
