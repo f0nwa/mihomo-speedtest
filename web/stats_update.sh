@@ -7,7 +7,8 @@
 #
 # Действия: MST_UPDATE_ACTION=check|status|prepare|apply|discard (из
 # API_ALIASES stats_httpd.py) или первый позиционный аргумент при прямом
-# запуске (ежедневный cron зовёт "check", служебные воркеры - "prepare-worker"/
+# запуске (cron раз в UPDATE_CHECK_HOURS зовёт "check", "cron-sync" - только
+# переписать cron-строку, служебные воркеры - "prepare-worker"/
 # "apply-worker", наружу через CGI не проброшены).
 set -eu
 
@@ -451,6 +452,47 @@ cmd_discard() {
   return 1
 }
 
+# --- частота фоновой проверки обновлений (cron) ---
+# UPDATE_CHECK_HOURS в speedtest2.env (поле "Проверять обновления" в
+# настройках веб-интерфейса) - раз во сколько часов cron зовёт "check".
+# Допустимы только делители суток, чтобы интервал укладывался в "*/N"
+# без перекоса на стыке суток; всё остальное (или пусто) = 12.
+UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
+
+update_check_hours() {
+  uch=$(sed -n "s/^UPDATE_CHECK_HOURS=['\"]\{0,1\}\([0-9]*\)['\"]\{0,1\}\$/\1/p" "${ENV:-$DIR/speedtest2.env}" 2>/dev/null | tail -n 1)
+  case $uch in
+    1|2|3|4|6|8|12|24) printf '%s' "$uch" ;;
+    *) printf '12' ;;
+  esac
+}
+
+update_cron_line() {
+  # Минута 17 - не совпадает с минутой "0" cron-строки speedtest2.sh.
+  case $1 in
+    24) printf '17 5 * * * %s check' "$UPDATE_CHECK_SCRIPT" ;;
+    1) printf '17 * * * * %s check' "$UPDATE_CHECK_SCRIPT" ;;
+    *) printf '17 */%s * * * %s check' "$1" "$UPDATE_CHECK_SCRIPT" ;;
+  esac
+}
+
+# Приводит cron-строку проверки к UPDATE_CHECK_HOURS. Без аргумента "add"
+# только заменяет уже существующую строку (так её мигрирует сам cron-вызов
+# "check" на роутерах со старой ежедневной строкой), с "add" - ещё и
+# добавляет, если строки нет (сохранение настроек в веб-интерфейсе).
+cmd_cron_sync() {
+  command -v crontab >/dev/null 2>&1 || return 0
+  ccs_line=$(update_cron_line "$(update_check_hours)")
+  ccs_cur=$(crontab -l 2>/dev/null || true)
+  if printf '%s\n' "$ccs_cur" | grep -qF "$UPDATE_CHECK_SCRIPT"; then
+    [ "$(printf '%s\n' "$ccs_cur" | grep -F "$UPDATE_CHECK_SCRIPT")" = "$ccs_line" ] && return 0
+  else
+    [ "${1:-}" = add ] || return 0
+  fi
+  ccs_rest=$(printf '%s\n' "$ccs_cur" | grep -vF "$UPDATE_CHECK_SCRIPT" || true)
+  { [ -n "$ccs_rest" ] && printf '%s\n' "$ccs_rest"; printf '%s\n' "$ccs_line"; } | crontab -
+}
+
 # --- точка входа: CGI (REQUEST_METHOD задан) или прямой CLI-вызов ---
 action=${MST_UPDATE_ACTION:-${1:-}}
 if [ -n "${REQUEST_METHOD:-}" ]; then
@@ -541,9 +583,10 @@ if [ -n "${REQUEST_METHOD:-}" ]; then
   esac
 else
   case $action in
-    check) cmd_check "${2:-button}" >/dev/null ;;
+    check) cmd_cron_sync || true; cmd_check "${2:-button}" >/dev/null ;;
+    cron-sync) cmd_cron_sync "${2:-}" ;;
     prepare-worker) cmd_prepare_worker "${2:-}" ;;
     apply-worker) cmd_apply_worker "${2:-}" "${3:-0}" "${4:-0}" ;;
-    *) echo "usage: stats_update.sh check|status|prepare|apply|discard" >&2; exit 2 ;;
+    *) echo "usage: stats_update.sh check|cron-sync|status|prepare|apply|discard" >&2; exit 2 ;;
   esac
 fi

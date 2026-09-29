@@ -82,7 +82,7 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     GET/HEAD, без побочных эффектов - под той же общей сессией/CSRF, что
     и остальные "/api/...".
   - "/api/config", "/api/config/{backups,backup,check,repair,save,restore,
-    restore-working}" - вкладка "Конфиг": внутренние алиасы на один
+    restore-working,log}" - вкладка "Конфиг": внутренние алиасы на один
     CGI-скрипт "cgi-bin/configedit" (копия stats_config.sh, кладётся
     write_stats_config() в speedtest2.sh), действие - в MST_CONFIG_ACTION.
     Тяжёлым действиям алиас задаёт MST_CGI_TIMEOUT больше обычных 30 с.
@@ -406,6 +406,7 @@ API_ALIASES = {
     "api/config/save": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore-working": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
+    "api/config/log": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "log"}),
 }
 
 

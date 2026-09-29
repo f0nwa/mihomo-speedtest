@@ -19,6 +19,7 @@ export MST_LIB_ONLY=1
 [ -n "$DIR" ] && [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
 LOG_TAG=settings   # метка строк формы настроек в живом журнале (см. say() в speedtest2.sh)
 MAX_TESTED=${MAX_TESTED:-40}
+UPDATE_CHECK_HOURS=${UPDATE_CHECK_HOURS:-12}   # раз во сколько часов cron проверяет обновления (см. cmd_cron_sync() в stats_update.sh)
 
 if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
   echo "Content-Type: text/plain; charset=utf-8"
@@ -27,6 +28,36 @@ if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
   echo "Обычно это значит, что CGI запущен не через busybox httpd, поднятый stats_service.sh."
   exit 0
 fi
+
+reset_node_stats() {
+  # Кнопка «Сбросить статистику нод» в настройках: очищает историю нод-
+  # победителей (график «Скорость по нодам», speedtest_history.tsv) и
+  # агрегат доступности (таблица «Статистика доступности нод», node_stability.tsv).
+  # Сводку прогонов (speedtest_runs.tsv) не трогает. Под той же блокировкой,
+  # что и прогон speedtest2.sh: во время прогона сброс отклоняется, иначе
+  # прогон дописал бы в файлы старые данные поверх сброса. Печатает JSON.
+  echo "Content-Type: application/json; charset=utf-8"
+  echo
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    printf '{"ok":false,"errors":{"reset":"Сейчас идёт прогон - дождитесь его окончания и повторите сброс."}}'
+    return 0
+  fi
+  echo $$ > "$LOCK/pid" 2>/dev/null
+  rn_ok=1
+  : > "$HISTORY_NODES" 2>/dev/null || rn_ok=0
+  : > "$HISTORY_STABILITY" 2>/dev/null || rn_ok=0
+  rm -rf "$LOCK"
+  WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-cgi.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-cgi.$$
+  mkdir -p "$WORK" 2>/dev/null
+  RUN_LOG=$WORK/cgi.log
+  render_stats >/dev/null 2>&1
+  rm -rf "$WORK"
+  if [ "$rn_ok" = 1 ]; then
+    printf '{"ok":true}'
+  else
+    printf '{"ok":false,"errors":{"reset":"Не удалось очистить файлы статистики (нет места или файловая система только для чтения)."}}'
+  fi
+}
 
 urldecode() {
   # Раньше: busybox httpd -d "$1" - на сборке Entware BusyBox без апплета
@@ -178,11 +209,16 @@ validate_settings_fields() {
   err_fields=""
 
   if ! is_uint "$max_tested"; then
-    _add_err max_tested "Лимит кандидатов должен быть целым числом от 0 (0 = без ограничения)."
+    _add_err max_tested "«Сколько нод проверять на скорость за прогон» должно быть целым числом от 0 (0 = все)."
   fi
 
-  if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 8 ]; then
-    _add_err node_cap "Число нод на графике должно быть от 1 до 8."
+  case $update_check_hours in
+    1|2|3|4|6|8|12|24) ;;
+    *) _add_err update_check_hours "Частота проверки обновлений: 1, 2, 3, 4, 6, 8, 12 или 24 часа." ;;
+  esac
+
+  if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 50 ]; then
+    _add_err node_cap "«Сколько нод показывать на графике сразу» должно быть от 1 до 50."
   fi
   if ! is_uint "$keep_runs"; then
     _add_err keep_runs "«Хранить прогонов» должно быть целым числом (0 = не ограничивать)."
@@ -210,34 +246,34 @@ validate_settings_fields() {
 "*) _add_err extype "Исключаемые типы не должны содержать перевод строки." ;;
   esac
   if ! is_decimal_in_range "$size_mb" 1 incl 100; then
-    _add_err size_mb "Размер файла для замера должен быть числом от 1 до 100 МБ."
+    _add_err size_mb "«Объём скачивания на одну ноду» должен быть числом от 1 до 100 МБ."
   fi
   if ! is_uint "$dl_timeout" || [ "$dl_timeout" -lt 1 ] || [ "$dl_timeout" -gt 120 ]; then
-    _add_err dl_timeout "Таймаут закачки должен быть целым числом от 1 до 120 секунд."
+    _add_err dl_timeout "«Максимум времени на одну ноду» должен быть целым числом от 1 до 120 секунд."
   fi
   if ! is_decimal_in_range "$min_speed_mb" 0 excl 10000; then
-    _add_err min_speed_mb "Порог скорости должен быть числом больше 0 и не больше 10000 Мбит/с."
+    _add_err min_speed_mb "«Запасной порог» должен быть числом больше 0 и не больше 10000 Мбит/с."
   fi
   if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
-    _add_err min_ratio "Доля канала должна быть числом больше 0 и не больше 1 (например 0.25)."
+    _add_err min_ratio "«Доля от скорости канала» должна быть числом больше 0 и не больше 1 (например 0.25)."
   fi
   if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
-    _add_err min_floor_mb "Абсолютный минимум порога должен быть числом от 0 Мбит/с (0 = без минимума)."
+    _add_err min_floor_mb "«Порог скорости: не ниже» должен быть числом от 0 Мбит/с (0 = без границы)."
   fi
   if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
-    _add_err topn "Число нод в fast.yaml (TOPN) должно быть целым от 1 до 50."
+    _add_err topn "«Сколько нод держать в быстром пуле» (TOPN) должно быть целым от 1 до 50."
   fi
   if ! is_uint "$enough" || [ "$enough" -lt 1 ] || [ "$enough" -gt 100 ]; then
-    _add_err enough "«Хватит нод выше порога» должно быть целым от 1 до 100."
+    _add_err enough "«Остановиться, когда найдено быстрых нод» должно быть целым от 1 до 100."
   fi
   if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
-    _add_err min_winners "Минимум нод-победителей должен быть целым от 0 до 50."
+    _add_err min_winners "«Минимум нод в быстром пуле» должен быть целым от 0 до 50."
   fi
   if ! is_uint "$stability_window" || [ "$stability_window" -lt 1 ] || [ "$stability_window" -gt 5000 ]; then
-    _add_err stability_window "Длина окна стабильности должна быть целым от 1 до 5000 прогонов."
+    _add_err stability_window "«Окно для расчёта Uptime» (окна стабильности) должно быть целым от 1 до 5000 прогонов."
   fi
   if ! is_uint "$stability_drop_after"; then
-    _add_err stability_drop_after "«Удалять ноду после» должно быть целым числом (0 = не удалять)."
+    _add_err stability_drop_after "«Убирать из таблицы доступности ноду...» должно быть целым числом (0 = никогда)."
   fi
   [ -z "$err" ]
 }
@@ -284,7 +320,7 @@ print_settings_json() {
   MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" \
   awk -v node_cap="$STATS_NODE_CAP" -v keep_runs="$HISTORY_KEEP_RUNS" \
       -v keep_days="$HISTORY_KEEP_DAYS" \
-      -v max_tested="$MAX_TESTED" \
+      -v max_tested="$MAX_TESTED" -v update_check_hours="$UPDATE_CHECK_HOURS" \
       -v size_mb="$(bytes_to_mb "$SIZE")" -v dl_timeout="$DL_TIMEOUT" \
       -v min_speed_mb="$(bytes_to_mbit "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
       -v min_floor_mb="$(bytes_to_mbit "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
@@ -295,7 +331,7 @@ print_settings_json() {
       geo_filter = ENVIRON["MST_API_GEO"]
       extype = ENVIRON["MST_API_EXTYPE"]
       printf "{\"ok\":true,\"values\":{"
-      printf "\"max_tested\":%d,", max_tested + 0
+      printf "\"max_tested\":%d,\"update_check_hours\":%d,", max_tested + 0, update_check_hours + 0
       printf "\"node_cap\":%d,\"keep_runs\":%d,\"keep_days\":%d,", node_cap + 0, keep_runs + 0, keep_days + 0
       printf "\"geo_filter\":\"%s\",\"extype\":\"%s\",", esc(geo_filter), esc(extype)
       printf "\"size_mb\":%s,\"dl_timeout\":%d,", size_mb + 0, dl_timeout + 0
@@ -328,10 +364,17 @@ if [ "$method" = "POST" ]; then
   RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
   RAW_stability_window=""; RAW_stability_drop_after=""
   RAW_max_tested="$MAX_TESTED"
+  RAW_update_check_hours="$UPDATE_CHECK_HOURS"
+  RAW_action=""
   eval "$(parse_body_fields)"
+  if [ "$RAW_action" = reset_node_stats ]; then
+    reset_node_stats
+    exit 0
+  fi
 
   node_cap=$(urldecode "$RAW_node_cap")
   max_tested=$(urldecode "$RAW_max_tested")
+  update_check_hours=$(urldecode "$RAW_update_check_hours")
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
   geo_filter=$(normalize_block "$(urldecode "$RAW_geo_filter")")
@@ -367,6 +410,7 @@ if [ "$method" = "POST" ]; then
     set_env_var MIN_WINNERS "$min_winners"
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
+    set_env_var UPDATE_CHECK_HOURS "$update_check_hours"
     if [ "$env_write_failed" = 1 ]; then
       _add_err save "Не удалось записать $ENV (нет места или файловая система только для чтения) - часть настроек не сохранена."
     fi
@@ -377,6 +421,11 @@ if [ "$method" = "POST" ]; then
     # независимая служба через явный reconfigure (порция 3), а не эта форма
     # напрямую.
     [ -f "$ENV" ] && . "$ENV"
+    # Новая частота проверки обновлений - сразу в crontab. REQUEST_METHOD
+    # сброшен, иначе stats_update.sh принял бы вызов за CGI-запрос.
+    if [ -f "$DIR/stats_update.sh" ] && ! REQUEST_METHOD= MST_UPDATE_ACTION= ENV="$ENV" sh "$DIR/stats_update.sh" cron-sync add >/dev/null 2>&1; then
+      _add_err update_check_hours "Не удалось обновить расписание проверки обновлений в crontab."
+    fi
     WORK=$(mktemp -d "${TMPROOT:-/tmp}/mst-cgi.XXXXXX" 2>/dev/null) || WORK=${TMPROOT:-/tmp}/mst-cgi.$$
     mkdir -p "$WORK" 2>/dev/null
     RUN_LOG=$WORK/cgi.log

@@ -179,7 +179,7 @@
 
     function refreshStatus() {
       fetchJson('/api/run').then(function (d) {
-        status.textContent = d.running ? 'Прогон уже идёт.' : 'Сейчас прогонов не идёт.';
+        status.textContent = d.running ? 'Прогон уже идёт.' : 'Сейчас прогонов нет.';
         if (d.running && onRunning) { onRunning(); }
       })['catch'](function (err) {
         status.textContent = 'Не удалось узнать статус: ' + err.message;
@@ -345,98 +345,248 @@
     };
   }
 
-  // buildNodeChart() - график по нодам на Chart.js (см. комментарий в
-  // начале файла про stats_chart.js). runsSeries - data.runs.series из
-  // /api/stats (нужен только iso[] для подписей оси X и тултипа).
+  // График «Скорость по нодам» (вариант A из макетов): все ноды истории,
+  // легенда-чипы под графиком. Наведение на чип или на линию подсвечивает
+  // ноду (остальные притухают, тултип - только по ней), клик по чипу
+  // скрывает/показывает, поиск отбирает чипы, «Только найденные» оставляет
+  // на графике их. Сразу показаны первые nodeHistory.cap нод по числу побед
+  // (настройка «Сколько нод показывать на графике сразу»). Выбор хранится
+  // здесь, вне DOM, по имени ноды - как stabilityFilter ниже, переживает
+  // перерисовку после прогона и сбрасывается только перезагрузкой страницы.
+  var nodeChartState = { vis: {}, query: '' };
+
+  // withAlpha(color, a) - тот же цвет с прозрачностью: "#rrggbb" или
+  // "hsl(h, s%, l%)" (оба формата отдаёт node_color() в render_stats.awk).
+  function withAlpha(color, a) {
+    if (/^#[0-9a-f]{6}$/i.test(color)) {
+      return color + ('0' + Math.round(a * 255).toString(16)).slice(-2);
+    }
+    var m = /^hsl\((.*)\)$/.exec(color);
+    return m ? 'hsla(' + m[1] + ', ' + a + ')' : color;
+  }
+
   function buildNodeChart(nodeHistory, runsSeries) {
     var top = nodeHistory.top || [];
+    var cap = nodeHistory.cap || 8;
     var labels = runsSeries.map(function (r) { return r.iso; });
+    var wrap = el('div', 'node-chart');
 
-    var wrap = el('div', 'chart-wrap');
-
-    if (typeof Chart === 'undefined') {
-      wrap.appendChild(el('p', 'hint', 'chart.js не загрузился - график недоступен (переустановите install.sh).'));
-      return wrap;
+    function isVisible(i) {
+      var v = nodeChartState.vis[top[i].name];
+      return v === undefined ? i < cap : v;
+    }
+    function matches(i) {
+      var q = nodeChartState.query.toLowerCase();
+      return !!q && top[i].name.toLowerCase().indexOf(q) >= 0;
     }
 
-    var sameDay = sameCalendarDay(labels);
-    var canvas = document.createElement('canvas');
-    wrap.appendChild(canvas);
+    // --- панель: поиск, счётчик, быстрые кнопки ---
+    var bar = el('div', 'node-chart-bar');
+    var search = el('input');
+    search.type = 'text';
+    search.placeholder = 'поиск ноды';
+    search.setAttribute('aria-label', 'Поиск ноды на графике');
+    search.value = nodeChartState.query;
+    var onlyFoundBtn = el('button', 'theme-btn');
+    onlyFoundBtn.type = 'button';
+    var counter = el('span', 'hint node-chart-count');
+    bar.appendChild(search);
+    bar.appendChild(onlyFoundBtn);
+    bar.appendChild(counter);
+    function quickBtn(text, fn) {
+      var b = el('button', 'theme-btn', text);
+      b.type = 'button';
+      b.addEventListener('click', fn);
+      bar.appendChild(b);
+    }
+    quickBtn('Все', function () { top.forEach(function (n) { nodeChartState.vis[n.name] = true; }); applyVisibility(); });
+    quickBtn('Топ-' + Math.min(cap, top.length), function () { top.forEach(function (n, i) { nodeChartState.vis[n.name] = i < cap; }); applyVisibility(); });
+    quickBtn('Скрыть все', function () { top.forEach(function (n) { nodeChartState.vis[n.name] = false; }); applyVisibility(); });
+    wrap.appendChild(bar);
 
-    var datasets = top.map(function (node) {
-      var color = node.color || '#2a78d6';
-      return {
-        label: node.name,
-        data: node.values.map(function (v) { return v === null || v === undefined ? null : bytesToMbit(v); }),
-        borderColor: color,
-        backgroundColor: color,
-        pointRadius: 2.5,
-        pointHoverRadius: 4,
-        borderWidth: 2,
-        spanGaps: false,
-        tension: 0
-      };
+    var readout = el('p', 'hint node-chart-readout');
+    wrap.appendChild(readout);
+
+    var chartWrap = el('div', 'chart-wrap');
+    wrap.appendChild(chartWrap);
+    var chart = null;
+    if (typeof Chart === 'undefined') {
+      chartWrap.appendChild(el('p', 'hint', 'chart.js не загрузился - график недоступен (переустановите install.sh).'));
+    }
+
+    // --- легенда-чипы ---
+    var legend = el('div', 'legend node-legend');
+    var chips = top.map(function (node, i) {
+      var chip = el('button', 'node-chip');
+      chip.type = 'button';
+      var sw = el('span', 'sw');
+      sw.style.background = node.color || '#2a78d6';
+      chip.appendChild(sw);
+      chip.appendChild(el('span', null, node.name));
+      chip.appendChild(el('span', 'node-chip-wins', String(node.wins)));
+      chip.title = 'побед: ' + node.wins + ' - клик скрывает/показывает';
+      chip.addEventListener('mouseenter', function () { setHighlight(i); });
+      chip.addEventListener('mouseleave', function () { setHighlight(null); });
+      chip.addEventListener('focus', function () { setHighlight(i); });
+      chip.addEventListener('blur', function () { setHighlight(null); });
+      chip.addEventListener('click', function () {
+        nodeChartState.vis[node.name] = !isVisible(i);
+        applyVisibility();
+      });
+      legend.appendChild(chip);
+      return chip;
+    });
+    wrap.appendChild(legend);
+
+    var highlighted = null;
+
+    function fmtVal(v) { return v === null || v === undefined ? '-' : bytesToMbit(v) + ' Мбит/с'; }
+
+    function updateReadout() {
+      if (highlighted === null) {
+        readout.textContent = 'Наведите курсор на ноду в легенде или на линию - она подсветится. Клик по ноде в легенде скрывает/показывает её.';
+        readout.classList.remove('active');
+        return;
+      }
+      var n = top[highlighted];
+      var got = n.values.filter(function (v) { return v !== null && v !== undefined; });
+      var avg = got.length ? got.reduce(function (a, b) { return a + b; }, 0) / got.length : null;
+      readout.textContent = n.name + '  ·  средняя ' + fmtVal(avg) + '  ·  последний ' + fmtVal(n.values[n.values.length - 1]) +
+        '  ·  в победителях ' + n.wins + ' раз' + (isVisible(highlighted) ? '' : '  (скрыта)');
+      readout.classList.add('active');
+    }
+
+    // Цвет/толщина линий - scriptable-опции датасетов (см. new Chart ниже):
+    // Chart.js кэширует обычные опции точек, поэтому смена цвета через
+    // свойства датасета не доходила бы до точек. Здесь - только порядок
+    // отрисовки (подсвеченная линия поверх остальных) и перерисовка.
+    function styleDatasets() {
+      if (!chart) { return; }
+      chart.data.datasets.forEach(function (ds, i) { ds.order = highlighted === i ? -1 : i; });
+      chart.update('none');
+    }
+
+    function setHighlight(i) {
+      if (highlighted === i) { return; }
+      highlighted = i;
+      chips.forEach(function (c, k) { c.classList.toggle('hl', k === i); });
+      styleDatasets();
+      updateReadout();
+    }
+
+    function applyVisibility() {
+      var shown = 0, found = 0;
+      chips.forEach(function (c, i) {
+        var vis = isVisible(i), m = matches(i);
+        if (vis) { shown++; }
+        if (m) { found++; }
+        c.classList.toggle('off', !vis);
+        c.classList.toggle('match', m);
+        c.classList.toggle('dim', !!nodeChartState.query && !m);
+        if (chart) { chart.setDatasetVisibility(i, vis); }
+      });
+      counter.textContent = 'показано ' + shown + ' из ' + top.length;
+      onlyFoundBtn.textContent = 'Только найденные (' + found + ')';
+      onlyFoundBtn.disabled = found === 0;
+      if (chart) { chart.update('none'); }
+      updateReadout();
+    }
+
+    search.addEventListener('input', function () {
+      nodeChartState.query = search.value.trim();
+      applyVisibility();
+    });
+    onlyFoundBtn.addEventListener('click', function () {
+      top.forEach(function (n, i) { nodeChartState.vis[n.name] = matches(i); });
+      applyVisibility();
     });
 
-    new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels: labels, datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false }, // своя легенда - buildNodeLegend() (в ней ещё и число побед)
-          tooltip: {
-            callbacks: {
-              title: function (items) { return items.length ? items[0].label : ''; },
-              label: function (item) {
-                return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' Мбит/с';
+    if (typeof Chart !== 'undefined') {
+      var sameDay = sameCalendarDay(labels);
+      var canvas = document.createElement('canvas');
+      chartWrap.appendChild(canvas);
+      var lineColor = function (ctx) {
+        var i = ctx.datasetIndex, color = top[i].color || '#2a78d6';
+        return highlighted !== null && highlighted !== i ? withAlpha(color, 0.12) : color;
+      };
+      var datasets = top.map(function (node) {
+        return {
+          label: node.name,
+          data: node.values.map(function (v) { return v === null || v === undefined ? null : bytesToMbit(v); }),
+          borderColor: lineColor,
+          backgroundColor: lineColor,
+          pointBackgroundColor: lineColor,
+          pointBorderColor: lineColor,
+          pointRadius: function (ctx) { return highlighted === ctx.datasetIndex ? 3.5 : 2.5; },
+          pointHoverRadius: 4,
+          borderWidth: function (ctx) { return highlighted === ctx.datasetIndex ? 3.5 : 2; },
+          spanGaps: false,
+          tension: 0
+        };
+      });
+
+      chart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: { labels: labels, datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'index', intersect: false },
+          // Подсветка линии под курсором: ближайшая точка видимой ноды не
+          // дальше 12 px от курсора.
+          onHover: function (evt, active, ch) {
+            var near = ch.getElementsAtEventForMode(evt, 'nearest', { intersect: false, axis: 'xy' }, false);
+            var idx = null;
+            if (near.length) {
+              var p = near[0].element;
+              if (Math.abs(p.x - evt.x) <= 12 && Math.abs(p.y - evt.y) <= 12) { idx = near[0].datasetIndex; }
+            }
+            if (idx === null && highlighted !== null && chips[highlighted] === document.activeElement) { return; }
+            setHighlight(idx);
+          },
+          plugins: {
+            legend: { display: false }, // своя легенда - чипы под графиком
+            tooltip: {
+              filter: function (item) { return highlighted === null || item.datasetIndex === highlighted; },
+              callbacks: {
+                title: function (items) { return items.length ? items[0].label : ''; },
+                label: function (item) {
+                  return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' Мбит/с';
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: {
+                autoSkip: true,
+                maxTicksLimit: 6,
+                maxRotation: 0,
+                callback: function (value, index) {
+                  var iso = labels[index];
+                  return iso ? (sameDay ? fmtTimeShort(iso) : fmtDateShort(iso)) : '';
+                }
+              }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: function (value) { return value + ' Мбит/с'; }
               }
             }
           }
         },
-        scales: {
-          x: {
-            ticks: {
-              autoSkip: true,
-              maxTicksLimit: 6,
-              maxRotation: 0,
-              callback: function (value, index) {
-                var iso = labels[index];
-                return iso ? (sameDay ? fmtTimeShort(iso) : fmtDateShort(iso)) : '';
-              }
-            }
-          },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              callback: function (value) { return value + ' Мбит/с'; }
-            }
-          }
-        }
-      },
-      plugins: [makeCrosshairPlugin()]
-    });
-
-    return wrap;
-  }
-
-  function buildNodeLegend(nodeHistory) {
-    var wrap = el('div', 'legend');
-    var top = nodeHistory.top || [];
-    for (var k = 0; k < top.length; k++) {
-      var item = el('span', 'legend-item');
-      var sw = el('span', 'sw');
-      sw.style.background = top[k].color || '#2a78d6';
-      item.appendChild(sw);
-      item.appendChild(document.createTextNode(top[k].name + ' (побед: ' + top[k].wins + ')'));
-      wrap.appendChild(item);
+        plugins: [makeCrosshairPlugin()]
+      });
+      canvas.addEventListener('mouseleave', function () { setHighlight(null); });
     }
+
+    applyVisibility();
     return wrap;
   }
 
-  // Фильтр «Доступности нод пула» по статусу. Работает только в
+  // Фильтр «Статистики доступности нод» по статусу. Работает только в
   // браузере по уже полученному /api/stats. Выбор хранится здесь, вне
   // DOM: renderStats() пересоздаёт карточку при каждой загрузке и после
   // завершения прогона, а фильтр должен пережить перерисовку. Сбрасывается
@@ -486,34 +636,87 @@
     return wrap;
   }
 
+  // Сортировка «Статистики доступности нод» кликом по заголовку столбца: первый
+  // клик - направление по умолчанию для столбца (dir ниже), повторный -
+  // обратное. Пустые значения (null, нет данных) всегда внизу. Выбор
+  // хранится вне DOM, как stabilityFilter, и переживает перерисовку;
+  // до первого клика - порядок сервера (по убыванию uptime).
+  var STATUS_ORDER = { alive: 0, down: 1, skipped: 2 };
+  var STABILITY_COLUMNS = [
+    { title: 'Нода', key: 'name', dir: 1, get: function (r) { return r.name ? r.name.toLowerCase() : null; } },
+    { title: 'Статус', key: 'status', dir: 1, get: function (r) { return r.status in STATUS_ORDER ? STATUS_ORDER[r.status] : 3; } },
+    { title: 'Последний раз жива', key: 'last_seen', dir: -1, get: function (r) { return r.last_seen || null; } },
+    { title: 'Uptime', key: 'uptime', dir: -1, get: function (r) { return r.uptime_pct; } },
+    { title: 'Сейчас, Мбит/с', key: 'last', dir: -1, get: function (r) { return r.last_speed_bytes; } },
+    { title: 'Средняя, Мбит/с', key: 'avg', dir: -1, get: function (r) { return r.avg_speed_bytes; } },
+    { title: 'Δ, Мбит/с', key: 'delta', dir: -1, get: function (r) { return r.delta_bytes; } }
+  ];
+  var stabilitySort = { key: null, dir: 1 };
+
+  function sortStabilityRows(rows) {
+    var col = null;
+    STABILITY_COLUMNS.forEach(function (c) { if (c.key === stabilitySort.key) { col = c; } });
+    if (!col) { return rows.slice(); }
+    return rows.map(function (r, i) { return { r: r, i: i, v: col.get(r) }; }).sort(function (a, b) {
+      var an = a.v === null || a.v === undefined, bn = b.v === null || b.v === undefined;
+      if (an || bn) { return an === bn ? a.i - b.i : (an ? 1 : -1); }
+      var c = typeof a.v === 'string' ? a.v.localeCompare(b.v) : a.v - b.v;
+      return c ? c * stabilitySort.dir : a.i - b.i;
+    }).map(function (x) { return x.r; });
+  }
+
   function buildStabilityTable(rows) {
-    var table = el('table');
+    var table = el('table', 'stability-table');
     var thead = el('thead');
     var htr = el('tr');
-    [''].concat(['Нода', 'Статус', 'Последний раз жива', 'Uptime', 'Сейчас, Мбит/с', 'Средняя, Мбит/с', 'Δ, Мбит/с']).forEach(function (t) {
-      htr.appendChild(el('th', null, t));
+    htr.appendChild(el('th'));
+    var headBtns = [];
+    STABILITY_COLUMNS.forEach(function (col) {
+      var th = el('th');
+      var btn = el('button', 'th-sort');
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        if (stabilitySort.key === col.key) { stabilitySort.dir = -stabilitySort.dir; }
+        else { stabilitySort.key = col.key; stabilitySort.dir = col.dir; }
+        fillBody();
+      });
+      th.appendChild(btn);
+      htr.appendChild(th);
+      headBtns.push({ col: col, th: th, btn: btn });
     });
     thead.appendChild(htr);
     table.appendChild(thead);
     var tbody = el('tbody');
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var tr = el('tr');
-      tr.setAttribute('data-group', stabilityGroup(r.status));
-      var st = statusLabel(r.status);
-      var swTd = el('td');
-      swTd.appendChild(el('span', 'sw ' + st.sw));
-      tr.appendChild(swTd);
-      tr.appendChild(el('td', null, r.name));
-      tr.appendChild(el('td', st.cls, st.text));
-      tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
-      tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
-      tr.appendChild(el('td', null, fmtMbit(r.last_speed_bytes)));
-      tr.appendChild(el('td', null, fmtMbit(r.avg_speed_bytes)));
-      tr.appendChild(el('td', null, fmtSigned(r.delta_bytes)));
-      tbody.appendChild(tr);
-    }
     table.appendChild(tbody);
+
+    function fillBody() {
+      headBtns.forEach(function (h) {
+        var on = stabilitySort.key === h.col.key;
+        h.btn.textContent = h.col.title + (on ? (stabilitySort.dir > 0 ? ' ▲' : ' ▼') : '');
+        h.btn.classList.toggle('on', on);
+        h.th.setAttribute('aria-sort', on ? (stabilitySort.dir > 0 ? 'ascending' : 'descending') : 'none');
+      });
+      while (tbody.firstChild) { tbody.removeChild(tbody.firstChild); }
+      sortStabilityRows(rows).forEach(function (r) {
+        var tr = el('tr');
+        var group = stabilityGroup(r.status);
+        tr.setAttribute('data-group', group);
+        tr.hidden = !stabilityFilter[group];
+        var st = statusLabel(r.status);
+        var swTd = el('td');
+        swTd.appendChild(el('span', 'sw ' + st.sw));
+        tr.appendChild(swTd);
+        tr.appendChild(el('td', null, r.name));
+        tr.appendChild(el('td', st.cls, st.text));
+        tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
+        tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
+        tr.appendChild(el('td', null, fmtMbit(r.last_speed_bytes)));
+        tr.appendChild(el('td', null, fmtMbit(r.avg_speed_bytes)));
+        tr.appendChild(el('td', null, fmtSigned(r.delta_bytes)));
+        tbody.appendChild(tr);
+      });
+    }
+    fillBody();
     return table;
   }
 
@@ -582,14 +785,13 @@
 
       var chartCard = card('Скорость по нодам (последние ' + runsCount + ' прогонов)');
       if (data.node_history && data.node_history.total_unique > 0) {
-        chartCard.appendChild(buildNodeLegend(data.node_history));
         chartCard.appendChild(buildNodeChart(data.node_history, data.runs.series));
       } else {
         chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для графика.'));
       }
       app.appendChild(chartCard);
 
-      var stabilityCard = card('Доступность нод пула');
+      var stabilityCard = card('Статистика доступности нод');
       if (data.node_stability && data.node_stability.length) {
         var stabilityTable = buildStabilityTable(data.node_stability);
         var stabilityEmpty = el('p', 'hint', 'Нет нод с выбранными статусами.');
@@ -952,44 +1154,295 @@
 
   // ----- раздел "Настройки" (/api/settings) -----
 
-  // Описание полей формы - в том же порядке и с теми же подписями/
-  // подсказками/диапазонами, что и в прежней HTML-форме stats_cgi.sh, -
-  // группировка по карточкам ниже повторяет прежнюю разбивку.
+  // Описание полей формы. label - подпись, hint - одна строка под полем,
+  // help - подробная подсказка (появляется, если задержать курсор на поле,
+  // или по кнопке «?» - для телефона и клавиатуры): пары [заголовок, текст].
+  // Тексты должны совпадать с тем, что реально делают speedtest2.sh,
+  // prep.awk, node_stats_update.awk и install.sh - меняя поведение там,
+  // правьте подсказку здесь.
+  var HELP_WHEN = ['Когда действует', 'Со следующего прогона (по расписанию раз в 3 часа или по кнопке «Сохранить и запустить»). Сам по себе этот параметр ничего не меняет и никакими другими настройками не перезаписывается.'];
   var FIELD_DEFS = {
-    max_tested: { label: 'Максимум кандидатов на скоростной тест', type: 'number', min: 0, hint: 'Берём первые живые ноды по возрастанию технического времени ответа второго ядра. 0 = без ограничения.' },
-    extype: { label: 'Исключить типы нод целиком (через |)', type: 'text', placeholder: 'например trojan|ss', hint: 'Пусто = тестировать все типы, которые понимает mihomo.' },
-    size_mb: { label: 'Размер файла для замера, МБ', type: 'number', min: 1, max: 100, step: 'any', hint: 'Меньше 10 МБ занижает результат - треть времени уходит на TTFB.' },
-    dl_timeout: { label: 'Таймаут закачки, сек', type: 'number', min: 1, max: 120 },
-    min_speed_mb: { label: 'Порог отбора (для текущего канала), Мбит/с', type: 'number', min: 0.1, max: 10000, step: 'any', hint: 'Пересчитывается install.sh при переустановке от прямого замера канала - здесь можно поправить вручную.' },
-    min_ratio: { label: 'Динамический порог, доля от прямого канала', type: 'number', min: 0.01, max: 1, step: 'any' },
-    min_floor_mb: { label: 'Абсолютный минимум порога, Мбит/с (0 = без минимума)', type: 'number', min: 0, step: 'any' },
-    topn: { label: 'Сколько нод класть в fast.yaml (TOPN)', type: 'number', min: 1, max: 50 },
-    enough: { label: 'Хватит нод выше порога - дальше не мерить', type: 'number', min: 1, max: 100 },
-    min_winners: { label: 'Минимум нод в fast.yaml, даже ниже порога', type: 'number', min: 0, max: 50, hint: 'Если рабочих нод меньше TOPN - добор идёт по убыванию скорости, пока не наберётся этот минимум.' },
-    stability_window: { label: 'Длина окна "недавних" прогонов', type: 'number', min: 1, max: 5000, hint: 'В прогонах, не в днях - 200 при прогоне раз в 3 часа - это около месяца.' },
-    stability_drop_after: { label: 'Удалять ноду после стольких прогонов подряд без неё в пуле (0 = не удалять)', type: 'number', min: 0 },
-    node_cap: { label: 'Число нод на графике (1-8)', type: 'number', min: 1, max: 8, hint: 'Больше 8 не поддерживается - столько цветов в палитре легенды.' },
-    keep_runs: { label: 'Хранить прогонов (0 = не ограничивать)', type: 'number', min: 0 },
-    keep_days: { label: 'Хранить дней (0 = не ограничивать)', type: 'number', min: 0, hint: 'Нельзя занулить оба сразу.' }
+    min_ratio: {
+      label: 'Порог скорости: доля от скорости вашего канала', type: 'number', min: 0.01, max: 1, step: 'any',
+      hint: '0.25 = нода должна выдать хотя бы 25% скорости интернета без прокси.',
+      help: [
+        ['Что это', 'Главная настройка отбора. Нода попадает в быстрый пул, только если её скорость не ниже порога. Порог не задаётся числом раз и навсегда - он пересчитывается в каждом прогоне от скорости вашего интернета.'],
+        ['Как работает', 'В начале каждого прогона роутер качает тестовый файл напрямую, без прокси, и получает скорость канала. Порог = скорость канала × эта доля, но не ниже значения «Порог скорости: не ниже».'],
+        ['Пример', 'Канал 100 Мбит/с, доля 0.25 → порог 25 Мбит/с. Вечером канал просел до 60 Мбит/с → порог сам станет 15 Мбит/с, и пул не опустеет из-за того, что провайдер медленнее.'],
+        ['Как выбрать', 'Больше (0.4-0.5) - в пул попадут только самые быстрые ноды, но их может оказаться мало. Меньше (0.1-0.15) - пул шире, но в него попадут и средние ноды.'],
+        ['Связи', 'Если замер канала не удался (нет интернета напрямую), вместо этой формулы берётся «Запасной порог» из раздела «Дополнительно». Команда mihomo-speedtest recalibrate и переустановка пересчитывают запасной порог по этой доле.'],
+        HELP_WHEN
+      ]
+    },
+    min_floor_mb: {
+      label: 'Порог скорости: не ниже, Мбит/с', type: 'number', min: 0, step: 'any',
+      hint: 'Нижняя граница для порога выше. 0 = без границы.',
+      help: [
+        ['Что это', 'Страховка для порога «доля от канала»: какой бы медленной ни оказалась прямая скорость в момент замера, порог не опустится ниже этого числа.'],
+        ['Пример', 'Доля 0.25, этот параметр 4 Мбит/с. Ночью канал намерился всего 8 Мбит/с (кто-то качал торрент) → 8 × 0.25 = 2, но порог станет 4 Мбит/с, и совсем медленные ноды в пул не пройдут.'],
+        ['Как выбрать', 'Минимальная скорость, при которой вам ещё комфортно (видео, звонки). 0 - порог всегда равен доле от канала.'],
+        HELP_WHEN
+      ]
+    },
+    topn: {
+      label: 'Сколько нод держать в быстром пуле (максимум)', type: 'number', min: 1, max: 50,
+      hint: 'Самые быстрые ноды выше порога попадают в fast.yaml.',
+      help: [
+        ['Что это', 'Сколько нод-победителей записывается в fast.yaml. Из них Mihomo собирает группу «⚡ Быстрый пул» и сам выбирает внутри неё ноду с лучшим пингом, раз в минуту.'],
+        ['Как работает', 'Все проверенные ноды выше порога сортируются по скорости, первые N становятся пулом. Если нод выше порога меньше - пул будет меньше (см. «Минимум нод в быстром пуле»).'],
+        ['Пример', 'Значение 15, выше порога оказалось 22 ноды → в пул попадут 15 самых быстрых. Оказалось 6 → в пул попадут 6.'],
+        ['Как выбрать', 'Больше - группе есть из чего выбирать, если нода упадёт между прогонами. Меньше - в пуле только лучшие. 10-20 подходит большинству.'],
+        ['Связи', 'Прогон перестаёт проверять ноды, как только найдено «Остановиться, когда найдено быстрых нод». Если это число меньше, чем здесь, пул никогда не заполнится полностью - держите его не меньше этого значения.'],
+        HELP_WHEN
+      ]
+    },
+    min_winners: {
+      label: 'Минимум нод в быстром пуле', type: 'number', min: 0, max: 50,
+      hint: 'Если быстрых нод мало - добираем самыми быстрыми из остальных. 0 = не добирать.',
+      help: [
+        ['Что это', 'Защита от пустого пула. Если нод выше порога набралось меньше этого числа, пул добирается самыми быстрыми из рабочих нод ниже порога.'],
+        ['Пример', 'Значение 3, выше порога прошла только 1 нода → в пул попадут она и ещё 2 самые быстрые из остальных, даже если они медленнее порога. Ноды, которые вообще не скачали файл, не добираются никогда.'],
+        ['Как выбрать', '2-3 обычно достаточно: пул из одной ноды перестаёт работать, как только она упадёт. 0 - в пул попадают только ноды выше порога, даже если это значит пустой пул (тогда остаётся прошлый fast.yaml).'],
+        HELP_WHEN
+      ]
+    },
+    max_tested: {
+      label: 'Сколько нод проверять на скорость за прогон (максимум)', type: 'number', min: 0,
+      hint: '0 = все доступные ноды. Меньше - прогон быстрее и тратит меньше трафика.',
+      help: [
+        ['Что это', 'Сначала все ноды подписок быстро проверяются на доступность. Из живых на скорость проверяются не больше этого числа - первые по времени ответа.'],
+        ['Как работает', 'Ноды проверяются по очереди, по одной. На каждую уходит до «Максимум времени на одну ноду» и скачивается до «Объём скачивания на одну ноду».'],
+        ['Пример', 'Значение 40, объём 10 МБ, время 15 сек: прогон скачает не больше 400 МБ и займёт не дольше 10 минут. При прогоне раз в 3 часа это до 3,2 ГБ трафика в сутки.'],
+        ['Связи', 'Прогон может закончиться раньше - когда найдено «Остановиться, когда найдено быстрых нод». Этот параметр - верхняя граница на случай, когда быстрых нод мало.'],
+        HELP_WHEN
+      ]
+    },
+    enough: {
+      label: 'Остановиться, когда найдено быстрых нод', type: 'number', min: 1, max: 100,
+      hint: 'Экономит время и трафик: дальше не проверяем. Держите не меньше размера пула.',
+      help: [
+        ['Что это', 'Как только столько проверенных нод оказались выше порога, прогон перестаёт скачивать через остальные.'],
+        ['Пример', 'Значение 20, размер пула 15: прогон найдёт 20 быстрых нод, остановится и возьмёт в пул 15 лучших из них. Оставшиеся кандидаты в этот раз не проверяются.'],
+        ['Как выбрать', 'Не меньше «Сколько нод держать в быстром пуле», лучше немного больше - тогда в пул попадут лучшие из найденных, а не просто первые. Больше - точнее отбор, но дольше прогон.'],
+        HELP_WHEN
+      ]
+    },
+    keep_runs: {
+      label: 'Хранить прогонов (0 = не ограничивать)', type: 'number', min: 0,
+      hint: 'Сколько последних прогонов помнить для графиков.',
+      help: [
+        ['Что это', 'История прогонов для графиков на странице статистики. Старые прогоны удаляются.'],
+        ['Как работает', 'Действуют оба ограничения - «прогонов» и «дней»: срабатывает то, что наступит раньше. 200 прогонов при прогоне раз в 3 часа - это 25 дней.'],
+        ['Связи', 'Лишние прогоны удаляются при следующем прогоне, не сразу. На таблицу «Статистика доступности нод» не влияет - у неё свои параметры в разделе «Дополнительно».'],
+        HELP_WHEN
+      ]
+    },
+    keep_days: {
+      label: 'Хранить дней (0 = не ограничивать)', type: 'number', min: 0,
+      hint: 'Нельзя занулить оба ограничения сразу.',
+      help: [
+        ['Что это', 'Прогоны старше стольких дней удаляются из истории графиков.'],
+        ['Пример', '«Прогонов» 200 и «дней» 7: хранится неделя, даже если за неделю прошло меньше 200 прогонов.'],
+        HELP_WHEN
+      ]
+    },
+    node_cap: {
+      label: 'Сколько нод показывать на графике сразу (1-50)', type: 'number', min: 1, max: 50,
+      hint: 'Первые по числу побед. Остальные можно включить в легенде графика.',
+      help: [
+        ['Что это', 'Только отображение: сколько нод график «Скорость по нодам» показывает при открытии страницы. На отбор нод не влияет.'],
+        ['Как работает', 'Ноды упорядочены по тому, сколько раз попадали в пул. Остальные ноды истории есть в легенде под графиком - включаются кликом или через поиск.'],
+        ['Когда действует', 'Сразу после сохранения.']
+      ]
+    },
+    update_check_hours: {
+      label: 'Проверять обновления', type: 'select', dflt: 12,
+      options: [[1, 'каждый час'], [2, 'раз в 2 часа'], [3, 'раз в 3 часа'], [4, 'раз в 4 часа'], [6, 'раз в 6 часов'], [8, 'раз в 8 часов'], [12, 'раз в 12 часов'], [24, 'раз в сутки']],
+      hint: 'Только проверка. Обновление ставится кнопкой в разделе «Обновления».',
+      help: [
+        ['Что это', 'Как часто роутер сам спрашивает GitHub, не вышла ли новая версия проекта. Если вышла - на вкладке «Обновления» появляется отметка.'],
+        ['Важно', 'Ничего не устанавливается само: обновление всегда запускается только кнопкой «Обновить».'],
+        ['Когда действует', 'Сразу после сохранения - расписание в cron переписывается.']
+      ]
+    },
+    extype: {
+      label: 'Не проверять ноды этих типов (через |)', type: 'text', placeholder: 'например trojan|ss',
+      hint: 'Типы протоколов, которые пропускаются целиком. Пусто = пропускается только trojan.',
+      help: [
+        ['Что это', 'Ноды с таким протоколом (поле type в подписке) не проверяются на скорость и не попадают в быстрый пул.'],
+        ['Пример', 'trojan|ss - пропустить Trojan и Shadowsocks. Другие типы: vless, vmess, hysteria2, tuic, wireguard.'],
+        ['Зачем', 'Если какой-то протокол у вас не работает или работает плохо, нет смысла тратить на него время и трафик.'],
+        ['Связи', 'В config.yaml у провайдера fast тоже есть exclude-type (по умолчанию trojan|ss): если убрать тип отсюда, но оставить там, ноды этого типа будут проверяться, но Mihomo всё равно не возьмёт их в «⚡ Быстрый пул». Пустое поле не отключает фильтр - тогда пропускается trojan.'],
+        HELP_WHEN
+      ]
+    },
+    size_mb: {
+      label: 'Объём скачивания на одну ноду, МБ', type: 'number', min: 1, max: 100, step: 'any',
+      hint: 'Меньше 10 МБ занижает результат. Больше - точнее, но больше трафика.',
+      help: [
+        ['Что это', 'Сколько данных скачивается через каждую ноду для замера (файл с speed.cloudflare.com). Скорость = объём / время.'],
+        ['Почему не меньше 10', 'Первые доли секунды уходят на установку соединения. На маленьком файле они занимают большую часть времени: на 3 МБ нода с реальными 12 МБ/с показывала 4,5 МБ/с.'],
+        ['Трафик', 'Объём × число проверенных нод за прогон. 10 МБ × 40 нод = до 400 МБ за прогон.'],
+        HELP_WHEN
+      ]
+    },
+    dl_timeout: {
+      label: 'Максимум времени на одну ноду, сек', type: 'number', min: 1, max: 120,
+      hint: 'Медленная нода не задерживает прогон дольше этого.',
+      help: [
+        ['Что это', 'Сколько секунд максимум ждать скачивания через одну ноду. Если не успела - засчитывается скорость, с которой она качала до обрыва.'],
+        ['Пример', '10 МБ за 15 секунд - это около 5,6 Мбит/с. Нода медленнее за 15 секунд файл не докачает, но её скорость всё равно будет измерена.'],
+        ['Связи', 'Самый долгий прогон ≈ это время × «Сколько нод проверять на скорость за прогон». Этим же временем ограничен замер прямого канала в начале прогона.'],
+        HELP_WHEN
+      ]
+    },
+    min_speed_mb: {
+      label: 'Запасной порог, Мбит/с (если замер канала не удался)', type: 'number', min: 0.1, max: 10000, step: 'any',
+      hint: 'Используется только когда прямой замер канала не удался.',
+      help: [
+        ['Что это', 'Порог скорости на крайний случай. Обычно порог считается в каждом прогоне как «доля от скорости канала», а это число не используется.'],
+        ['Когда используется', 'Если в начале прогона не удалось скачать тестовый файл напрямую, без прокси (провайдер недоступен, Cloudflare заблокирован и т.п.).'],
+        ['Меняется ли само', 'Да: install.sh при установке и команда mihomo-speedtest recalibrate пересчитывают его по текущей скорости канала и долям выше. Здесь его можно поправить вручную - значение продержится до следующего recalibrate или переустановки.']
+      ]
+    },
+    stability_window: {
+      label: 'Окно для расчёта Uptime, прогонов', type: 'number', min: 1, max: 5000,
+      hint: 'За сколько последних прогонов считать Uptime в таблице доступности.',
+      help: [
+        ['Что это', 'Столбец Uptime в таблице «Статистика доступности нод» - доля прогонов, в которых нода отвечала. Этот параметр - за сколько последних прогонов считать.'],
+        ['Пример', '200 прогонов при прогоне раз в 3 часа - около 25 дней. 8 - только последние сутки.'],
+        ['Связи', 'Влияет только на таблицу доступности, на отбор нод в пул - нет.'],
+        HELP_WHEN
+      ]
+    },
+    stability_drop_after: {
+      label: 'Убирать из таблицы доступности ноду, пропавшую из подписки, через N прогонов (0 = никогда)', type: 'number', min: 0,
+      hint: 'Чистит таблицу от нод, которых больше нет в подписках.',
+      help: [
+        ['Что это', 'Если нода исчезла из подписки и не появляется столько прогонов подряд, её строка удаляется из таблицы «Статистика доступности нод».'],
+        ['Пример', '8 - нода, пропавшая из подписки, исчезнет из таблицы через сутки (при прогоне раз в 3 часа). 0 - строки никогда не удаляются.'],
+        HELP_WHEN
+      ]
+    }
   };
 
   var CARDS = [
     { geo: true }, // своя карточка - buildGeoFilterCard()
-    { title: 'Как тестируем ноды', fields: ['extype', 'max_tested', 'size_mb', 'dl_timeout'] },
-    { title: 'Порог и число нод в fast.yaml', fields: ['min_speed_mb', 'min_ratio', 'min_floor_mb', 'topn', 'enough', 'min_winners'] },
-    { title: 'Стабильность нод', fields: ['stability_window', 'stability_drop_after'] },
-    { title: 'График по нодам', fields: ['node_cap'] },
-    { title: 'Хранение истории', fields: ['keep_runs', 'keep_days'] }
+    { title: 'Быстрый пул: какие ноды в него попадают', fields: ['min_ratio', 'min_floor_mb', 'topn', 'min_winners'] },
+    { title: 'Сколько нод проверять за прогон', fields: ['max_tested', 'enough'] },
+    { title: 'История и графики', fields: ['keep_runs', 'keep_days', 'node_cap'] },
+    { title: 'Обновления', fields: ['update_check_hours'] },
+    { title: 'Дополнительно', advanced: true, note: 'Редко нужные параметры. Значения по умолчанию подходят большинству.', fields: ['extype', 'size_mb', 'dl_timeout', 'min_speed_mb', 'stability_window', 'stability_drop_after'] }
   ];
+
+  // Короткая схема прогона над формой - чтобы подсказки полей было к чему
+  // привязать («порог», «пул», «кандидаты»).
+  function buildRunOverviewCard() {
+    var c = el('details', 'card settings-overview');
+    c.open = true;
+    c.appendChild(el('summary', null, 'Как устроен прогон - кратко'));
+    var ol = el('ol');
+    [
+      'Раз в 3 часа (или по кнопке) роутер берёт все ноды из подписок, кроме отфильтрованных гео-фильтром и по типу.',
+      'Быстро проверяет, какие из них вообще отвечают.',
+      'Замеряет скорость вашего интернета без прокси и считает порог: доля от канала, но не ниже заданного минимума.',
+      'По очереди качает тестовый файл через живые ноды и останавливается, когда нашёл достаточно быстрых или проверил максимум нод.',
+      'Самые быстрые ноды выше порога записываются в fast.yaml - это группа «⚡ Быстрый пул» в Mihomo. Внутри неё Mihomo сам выбирает ноду с лучшим пингом.'
+    ].forEach(function (t) { ol.appendChild(el('li', null, t)); });
+    c.appendChild(ol);
+    c.appendChild(el('p', 'hint', 'Задержите курсор на любом поле или нажмите «?» рядом с ним - появится подробное объяснение с примерами.'));
+    return c;
+  }
+
+  // Подробная подсказка поля: появляется, если задержать курсор на поле
+  // (HELP_DELAY_MS), и по кнопке «?» (закрепляется до повторного нажатия,
+  // клика мимо или Esc). Одновременно открыта одна.
+  var HELP_DELAY_MS = 600;
+  var openHelp = null;
+
+  function closeOpenHelp() {
+    if (openHelp) { openHelp.hide(); }
+  }
+
+  document.addEventListener('click', function (e) {
+    if (openHelp && !openHelp.wrap.contains(e.target)) { closeOpenHelp(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { closeOpenHelp(); }
+  });
+
+  function attachHelp(wrap, head, name, def) {
+    var pop = el('div', 'help-pop');
+    pop.id = 'help-' + name;
+    pop.setAttribute('role', 'tooltip');
+    pop.hidden = true;
+    pop.appendChild(el('div', 'help-title', def.label));
+    def.help.forEach(function (part) {
+      var p = el('p');
+      p.appendChild(el('b', null, part[0] + '. '));
+      p.appendChild(document.createTextNode(part[1]));
+      pop.appendChild(p);
+    });
+    var q = el('button', 'help-q', '?');
+    q.type = 'button';
+    q.setAttribute('aria-label', 'Подробнее: ' + def.label);
+    q.setAttribute('aria-expanded', 'false');
+    q.setAttribute('aria-describedby', pop.id);
+    head.appendChild(q);
+    wrap.appendChild(pop);
+
+    var timer = null, pinned = false;
+    var api = {
+      wrap: wrap,
+      show: function () {
+        if (openHelp && openHelp !== api) { openHelp.hide(); }
+        pop.hidden = false;
+        q.setAttribute('aria-expanded', 'true');
+        openHelp = api;
+      },
+      hide: function () {
+        clearTimeout(timer);
+        pinned = false;
+        pop.hidden = true;
+        q.setAttribute('aria-expanded', 'false');
+        if (openHelp === api) { openHelp = null; }
+      }
+    };
+    wrap.addEventListener('mouseenter', function () {
+      clearTimeout(timer);
+      if (pop.hidden) { timer = setTimeout(api.show, HELP_DELAY_MS); }
+    });
+    wrap.addEventListener('mouseleave', function () {
+      clearTimeout(timer);
+      if (!pinned) { api.hide(); }
+    });
+    q.addEventListener('click', function () {
+      if (pinned) { api.hide(); return; }
+      api.show();
+      pinned = true;
+    });
+  }
 
   function buildField(name, value) {
     var def = FIELD_DEFS[name];
-    var wrap = document.createDocumentFragment();
+    var wrap = el('div', 'field');
+    var head = el('div', 'field-head');
     var label = el('label', null, def.label);
     label.setAttribute('for', name);
-    wrap.appendChild(label);
-    var input = el('input');
-    input.type = def.type;
+    head.appendChild(label);
+    wrap.appendChild(head);
+    var input;
+    if (def.type === 'select') {
+      input = el('select');
+      def.options.forEach(function (opt) {
+        var o = el('option', null, opt[1]);
+        o.value = String(opt[0]);
+        input.appendChild(o);
+      });
+    } else {
+      input = el('input');
+      input.type = def.type;
+    }
     input.id = name;
     input.name = name;
     if (def.type === 'number') {
@@ -999,8 +1452,10 @@
     }
     if (def.placeholder) { input.placeholder = def.placeholder; }
     input.value = value === undefined || value === null ? '' : value;
+    if (def.type === 'select' && !input.value) { input.value = String(def.dflt); }
     wrap.appendChild(input);
     if (def.hint) { wrap.appendChild(el('p', 'hint', def.hint)); }
+    if (def.help) { attachHelp(wrap, head, name, def); }
     return wrap;
   }
 
@@ -1014,13 +1469,28 @@
 
   function buildSettingsForm(values) {
     var form = document.createElement('form');
+    form.appendChild(buildRunOverviewCard());
+    // Браузерная проверка min/max не может показать ошибку в поле внутри
+    // свёрнутого <details> и молча не отправляет форму - раскрываем блок.
+    form.addEventListener('invalid', function (e) {
+      var fold = e.target.closest && e.target.closest('details');
+      if (fold) { fold.open = true; }
+    }, true);
 
     CARDS.forEach(function (cardDef) {
       if (cardDef.geo) {
         form.appendChild(buildGeoFilterCard(values.geo_filter || '', values.geo_filter_candidates));
         return;
       }
-      var c = card(cardDef.title);
+      var c;
+      if (cardDef.advanced) {
+        // Свёрнутый блок: поля внутри <details> всё равно уходят в POST.
+        c = el('details', 'card settings-advanced');
+        c.appendChild(el('summary', null, cardDef.title));
+      } else {
+        c = card(cardDef.title);
+      }
+      if (cardDef.note) { c.appendChild(el('p', 'hint', cardDef.note)); }
       cardDef.fields.forEach(function (name) {
         c.appendChild(buildField(name, values[name]));
       });
@@ -1061,7 +1531,12 @@
           Object.keys(errs).forEach(function (key) {
             texts.push(errs[key]);
             var badInput = form.querySelector('[name="' + key + '"]');
-            if (badInput) { badInput.classList.add('input-err'); }
+            if (badInput) {
+              badInput.classList.add('input-err');
+              // ошибка в свёрнутом «Дополнительно» - раскрыть, иначе её не видно
+              var fold = badInput.closest && badInput.closest('details');
+              if (fold) { fold.open = true; }
+            }
           });
           showFormMessage(form, texts.join(' '), 'err');
           setFormButtonsDisabled(false);
@@ -1086,6 +1561,42 @@
     return form;
   }
 
+  // Сброс графика «Скорость по нодам» и таблицы «Статистика доступности нод»
+  // (reset_node_stats() в stats_cgi.sh). Сводка прогонов остаётся.
+  function buildResetStatsCard() {
+    var c = card('Сброс статистики нод');
+    c.appendChild(el('p', 'hint', 'Очищает график «Скорость по нодам» и таблицу «Статистика доступности нод» - они начнут копиться заново со следующего прогона. Сводка прогонов и настройки не меняются.'));
+    var msg = el('p', 'hint');
+    var btn = el('button', 'submit secondary', 'Сбросить статистику нод');
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      if (!window.confirm('Сбросить статистику «Скорость по нодам» и «Статистика доступности нод»? Отменить сброс нельзя.')) { return; }
+      btn.disabled = true;
+      msg.className = 'hint';
+      msg.textContent = 'Сбрасываю...';
+      fetchJson('/api/settings', { method: 'POST', body: new URLSearchParams({ action: 'reset_node_stats' }) }).then(function (resp) {
+        if (resp.ok) {
+          msg.className = 'msg-ok';
+          msg.textContent = 'Статистика нод сброшена.';
+        } else {
+          var errs = resp.errors || {};
+          msg.className = 'msg-err';
+          msg.textContent = errs.reset || 'Не удалось сбросить статистику.';
+        }
+        btn.disabled = false;
+      })['catch'](function (err) {
+        msg.className = 'msg-err';
+        msg.textContent = 'Не удалось сбросить статистику: ' + err.message;
+        btn.disabled = false;
+      });
+    });
+    var row = el('div', 'btn-row');
+    row.appendChild(btn);
+    c.appendChild(row);
+    c.appendChild(msg);
+    return c;
+  }
+
   function renderSettings(justSavedMsg) {
     setLoading();
     fetchJson('/api/settings').then(function (data) {
@@ -1093,6 +1604,7 @@
       var values = data.values || {};
       var form = buildSettingsForm(values);
       app.appendChild(form);
+      app.appendChild(buildResetStatsCard());
       if (justSavedMsg) { showFormMessage(form, justSavedMsg, 'ok'); }
     })['catch'](function (err) {
       if (err.message === 'not_implemented') {
@@ -1708,6 +2220,7 @@
       var saveBtn = btn(row1, 'Сохранить и применить');
       var diffBtn = btn(row1, 'Сравнить с сохранённым', true);
       var resetBtn = btn(row1, 'Отменить правки', true);
+      var logBtn = btn(row1, 'Журнал применения', true);
       main.appendChild(row1);
 
       var msgBox = el('div', 'config-msg');
@@ -1716,6 +2229,22 @@
       main.appendChild(msgBox);
       main.appendChild(editorHost);
       main.appendChild(output);
+
+      // Журнал применения (stats_config.sh, действие log): этапы проверки,
+      // записи, xkeen -restart, проверки ядра и отката. Пока ждём ответа на
+      // save/restore/restore-working - опрашиваем раз в секунду.
+      var applyBox = el('div', 'config-apply');
+      applyBox.hidden = true;
+      var applyHead = el('div', 'config-apply-head');
+      applyHead.appendChild(el('h2', null, 'Журнал применения'));
+      var applyStatus = el('span', 'hint');
+      applyHead.appendChild(applyStatus);
+      applyBox.appendChild(applyHead);
+      var applyPre = el('div', 'update-console config-apply-log');
+      applyPre.setAttribute('role', 'log');
+      applyPre.setAttribute('aria-live', 'polite');
+      applyBox.appendChild(applyPre);
+      main.appendChild(applyBox);
       app.appendChild(main);
 
       var repairCard = card('Починка');
@@ -1736,7 +2265,7 @@
       backupsCard.appendChild(backupView);
       app.appendChild(backupsCard);
 
-      var all = [checkBtn, saveBtn, diffBtn, resetBtn, fmtBtn, tplBtn, workBtn];
+      var all = [checkBtn, saveBtn, diffBtn, resetBtn, fmtBtn, tplBtn, workBtn];  // logBtn - доступна и во время применения
       function busy(on) {
         all.forEach(function (b) { b.disabled = on; });
         var rb = backupsBody.querySelectorAll('button');
@@ -1748,6 +2277,60 @@
         if (text) { main.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
       }
       function clearOutput() { while (output.firstChild) { output.removeChild(output.firstChild); } }
+
+      var applyTimer = null;
+      function applyLineClass(line) {
+        if (/===/.test(line)) { return 'log-line sep'; }
+        if (/ОШИБКА|ERROR|FAIL|не удалось|не поднял/i.test(line)) { return 'log-line err'; }
+        if (/ГОТОВО|ядро работает/.test(line)) { return 'log-line ok'; }
+        return 'log-line';
+      }
+      function renderApplyLog(text) {
+        var atBottom = applyPre.scrollHeight - applyPre.scrollTop - applyPre.clientHeight < 24;
+        while (applyPre.firstChild) { applyPre.removeChild(applyPre.firstChild); }
+        var lines = String(text || '').split('\n');
+        if (lines[lines.length - 1] === '') { lines.pop(); }
+        if (!lines.length) { applyPre.appendChild(el('div', 'log-line', 'Журнал пуст - конфиг из этой вкладки ещё не применялся (журнал хранится до перезагрузки роутера).')); }
+        lines.forEach(function (l) { applyPre.appendChild(el('div', applyLineClass(l), l === '' ? ' ' : l)); });
+        if (atBottom || applyTimer) { applyPre.scrollTop = applyPre.scrollHeight; }
+      }
+      function fetchApplyLog() {
+        return fetchJson('/api/config/log').then(function (d) { renderApplyLog(d.text); return d; })
+          ['catch'](function () { return null; });
+      }
+      function startApplyLog() {
+        applyBox.hidden = false;
+        applyStatus.textContent = 'идёт применение...';
+        while (applyPre.firstChild) { applyPre.removeChild(applyPre.firstChild); }
+        clearInterval(applyTimer);
+        applyTimer = setInterval(fetchApplyLog, 1000);
+        fetchApplyLog();
+      }
+      function stopApplyLog() {
+        clearInterval(applyTimer);
+        applyTimer = null;
+        return fetchApplyLog().then(function () {
+          applyStatus.textContent = 'завершено в ' + new Date().toLocaleTimeString('ru-RU');
+          applyBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+      }
+      logBtn.addEventListener('click', function () {
+        if (!applyBox.hidden && !applyTimer) { applyBox.hidden = true; return; }
+        applyBox.hidden = false;
+        if (!applyTimer) { applyStatus.textContent = 'последнее применение'; }
+        fetchApplyLog().then(function () { applyBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
+      });
+      // Применение уже идёт (из другой вкладки или до перезагрузки страницы) -
+      // сразу показываем журнал и ждём окончания.
+      fetchJson('/api/config/log').then(function (d) {
+        if (!d.running) { return; }
+        startApplyLog();
+        var waitDone = setInterval(function () {
+          fetchJson('/api/config/log').then(function (x) {
+            if (!x.running) { clearInterval(waitDone); stopApplyLog(); reload(); }
+          })['catch'](function () {});
+        }, 1500);
+      })['catch'](function () {});
       function showOutput(title, lines) {
         clearOutput();
         output.appendChild(el('h2', null, title));
@@ -1812,10 +2395,11 @@
       }
       function applyRequest(url, body, what) {
         busy(true);
+        startApplyLog();
         var p = body === null ? fetchJson(url, { method: 'POST' }) : postText(url, body);
         return p.then(function (resp) { reload(applyText(resp, typeof what === 'function' ? what(resp) : what)); })
           ['catch'](handleApplyError)
-          .then(function () { busy(false); });
+          .then(function () { busy(false); return stopApplyLog(); });
       }
 
       function loadBackups() {
@@ -1936,13 +2520,14 @@
           (view.dirty ? '\nНесохранённые правки в редакторе будут потеряны.' : ''))) { return; }
         clearOutput(); msg('Поиск рабочего бэкапа и перезапуск ядра (может занять пару минут)...', '');
         busy(true);
+        startApplyLog();
         fetchJson('/api/config/restore-working?base=' + encodeURIComponent(view.base), { method: 'POST' })
           .then(function (resp) { reload(applyText(resp, 'Применён бэкап ' + fmtBackupName(resp.restored) + '.')); })
           ['catch'](function (e) {
             if (e.message === 'no_working_backup') { msg('Среди последних бэкапов нет ни одного, проходящего mihomo -t.', 'err'); return; }
             handleApplyError(e);
           })
-          .then(function () { busy(false); });
+          .then(function () { busy(false); return stopApplyLog(); });
       });
     })['catch'](function (err) {
       var d = err.data || {};

@@ -381,19 +381,29 @@ install_cron() {
 }
 
 install_update_check_cron() {
-  # Ежедневная фоновая проверка обновлений (см. docs/superpowers/specs/
-  # 2026-09-15-managed-project-updates-design.md, "Веб-флоу") - отдельная
+  # Фоновая проверка обновлений раз в UPDATE_CHECK_HOURS часов (по
+  # умолчанию 12, поле "Проверять обновления" в настройках веб-интерфейса;
+  # см. cmd_cron_sync() в web/stats_update.sh - та же формула, здесь
+  # продублирована: install.sh не подключает stats_update.sh). Отдельная
   # от install_cron() cron-строка и отдельный бэкап-файл (cron-update.bak,
   # не cron.bak), чтобы обе функции не затирали бэкап друг друга при
-  # последовательном вызове из main(). Время (5:17) - не критично, выбрано
-  # так, чтобы не совпадать с минутой "0" cron-строки speedtest2.sh.
-  cron_line="17 5 * * * $UPDATE_CHECK_SCRIPT check"
+  # последовательном вызове из main(). Минута 17 выбрана так, чтобы не
+  # совпадать с минутой "0" cron-строки speedtest2.sh. Уже стоящую строку
+  # с другой частотой (например, старую ежедневную "17 5") заменяет.
+  hours=$(sed -n "s/^UPDATE_CHECK_HOURS=['\"]\{0,1\}\([0-9]*\)['\"]\{0,1\}\$/\1/p" "${ENVFILE:-$DIR/speedtest2.env}" 2>/dev/null | tail -n 1)
+  case $hours in
+    24) cron_line="17 5 * * * $UPDATE_CHECK_SCRIPT check" ;;
+    1) cron_line="17 * * * * $UPDATE_CHECK_SCRIPT check" ;;
+    2|3|4|6|8|12) cron_line="17 */$hours * * * $UPDATE_CHECK_SCRIPT check" ;;
+    *) cron_line="17 */12 * * * $UPDATE_CHECK_SCRIPT check" ;;
+  esac
   current=$(crontab -l 2>/dev/null || true)
-  if printf '%s\n' "$current" | grep -qF "$UPDATE_CHECK_SCRIPT"; then
+  if [ "$(printf '%s\n' "$current" | grep -F "$UPDATE_CHECK_SCRIPT")" = "$cron_line" ]; then
     return 0
   fi
   printf '%s\n' "$current" > "$TMPROOT/cron-update.bak"
-  { [ -n "$current" ] && printf '%s\n' "$current"; echo "$cron_line"; } | crontab -
+  rest=$(printf '%s\n' "$current" | grep -vF "$UPDATE_CHECK_SCRIPT" || true)
+  { [ -n "$rest" ] && printf '%s\n' "$rest"; echo "$cron_line"; } | crontab -
 }
 
 atomic_install() {
@@ -507,7 +517,13 @@ write_env() {
     echo "# создано install.sh $(date '+%F %T')"
     echo "# фильтр: $BLOCK_SOURCE"
     printf "SOURCES='%s'\n" "$SOURCES"
-    [ -n "${EXTYPE:-}" ] && printf "EXTYPE='%s'\n" "$EXTYPE"
+    # EXTYPE из окружения установщика - как раньше; иначе сохраняем то,
+    # что пользователь задал в веб-настройках.
+    if [ -n "${EXTYPE:-}" ]; then
+      printf "EXTYPE='%s'\n" "$EXTYPE"
+    else
+      sed -n '/^EXTYPE=/p' "$dst" 2>/dev/null | tail -1
+    fi
     printf "BLOCK='%s'\n" "$BLOCK"
     printf "MIN_SPEED='%s'\n" "$MIN_SPEED"
     # При повторной установке сохраняем пользовательские лимиты отбора.
@@ -524,6 +540,14 @@ write_env() {
         esac
         printf "%s='%s'\n" "$limit_key" "$(read_speedtest_const "$limit_key" "$limit_default")"
       fi
+    done
+    # Остальные поля веб-настроек (stats_cgi.sh) при переустановке тоже не
+    # сбрасываем к умолчаниям: пишем прежнюю строку, если она была. Список
+    # явный, чтобы удалённые из проекта настройки (например MAX_PING_MS)
+    # по-прежнему вычищались переустановкой.
+    for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR STABILITY_WINDOW STABILITY_DROP_AFTER \
+        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS; do
+      sed -n "/^$keep_key=/p" "$dst" 2>/dev/null | tail -1
     done
     # STATS_HTTP_ENABLE - персистентный флаг stop-web/start-web (см.
     # docs/superpowers/specs/2026-09-26-mihomo-speedtest-cli-design.md,
@@ -583,15 +607,25 @@ read_speedtest_const() {
   fi
 }
 
+env_number() {
+  # Число NAME из уже существующего speedtest2.env (в кавычках или без);
+  # возврат 1, если файла/строки нет или значение не число.
+  en_val=$(sed -n "s/^$1=['\"]\{0,1\}\([0-9.]*\)['\"]\{0,1\}\$/\1/p" "${ENVFILE:-$DIR/speedtest2.env}" 2>/dev/null | tail -1)
+  case $en_val in ''|*[!0-9.]*|.*|*.*.*) return 1 ;; esac
+  printf '%s\n' "$en_val"
+}
+
 compute_min_speed() {
   # $1 = CHANNEL (байт/с прямого замера).
   # Дублирует compute_threshold() из speedtest2.sh на числах, прочитанных
   # оттуда же через read_speedtest_const; 0.25/524288 ниже - fallback
   # ТОЛЬКО если строки MIN_RATIO=/MIN_FLOOR= не найдены в speedtest2.sh
   # (они ДОЛЖНЫ совпадать с дефолтами в его шапке).
+  # Если пользователь уже менял долю канала/минимум в веб-настройках
+  # (переустановка, recalibrate), считаем по его значениям.
   channel=$1
-  ratio=$(read_speedtest_const MIN_RATIO 0.25)
-  floor=$(read_speedtest_const MIN_FLOOR 524288)
+  ratio=$(env_number MIN_RATIO) || ratio=$(read_speedtest_const MIN_RATIO 0.25)
+  floor=$(env_number MIN_FLOOR) || floor=$(read_speedtest_const MIN_FLOOR 524288)
   awk -v c="$channel" -v r="$ratio" -v f="$floor" 'BEGIN {
     t = int(c * r)
     print (t > f) ? t : f

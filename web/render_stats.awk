@@ -15,8 +15,8 @@
 # Использование:
 #   awk -v last=PATH -v nodes=PATH -v stability=PATH -v generated="строка даты" \
 #       -v cap=N -f render_stats.awk RUNS_TSV
-# cap: сколько нод отдавать в node_history, 1..8 (см. NODE_CAP ниже);
-#   необязателен, вне диапазона/не число - используется 8.
+# cap: сколько нод графика по нодам показывать сразу, 1..50 (см. NODE_CAP
+#   ниже); необязателен, вне диапазона/не число - используется 8.
 #
 # RUNS_TSV (позиционный аргумент, может быть пустым файлом):
 #   epoch<TAB>iso<TAB>channel_bytes<TAB>threshold_bytes<TAB>total<TAB>alive<TAB>tested<TAB>good<TAB>winners
@@ -24,12 +24,13 @@
 #   необязателен - если не задан или не существует, last_measurement пуст.
 # nodes: путь к speedtest_history.tsv (строки "epoch<TAB>speed_bytes<TAB>имя"
 #   по каждой ноде-победителю каждого прогона), необязателен. В node_history
-#   попадают не более NODE_CAP нод, отобранных по частоте побед (при
-#   равенстве - по свежести последнего появления), иначе при большом
-#   разнообразии побеждающих нод график станет нечитаемым. Цвета линий -
-#   фиксированный порядок из 8 категориальных оттенков (массив PAL ниже),
-#   подобранный так, чтобы соседние и произвольные пары оставались
-#   различимы при дальтонизме.
+#   попадают ВСЕ ноды истории, отсортированные по частоте побед (при
+#   равенстве - по свежести последнего появления); cap - сколько первых из
+#   них браузер показывает сразу, остальные включаются в легенде графика.
+#   Цвета линий: первые 8 - фиксированный порядок категориальных оттенков
+#   (массив PAL ниже), подобранный так, чтобы пары оставались различимы
+#   при дальтонизме; дальше - шаг «золотого угла» по кругу оттенков
+#   (hsl), чтобы палитра не заканчивалась.
 # stability: путь к node_stability.tsv - доступность ВСЕХ нод пула (не
 #   только победителей): статус на последнем прогоне, uptime и история за
 #   окно (по групповому delay-check, весь пул каждый прогон), последняя и
@@ -102,7 +103,13 @@ function json_last(path,   line, f, first, out) {
   return out
 }
 
-# json_node_history(path, run_n) - топ NODE_CAP нод-победителей по частоте
+# node_color(k) - цвет k-й ноды графика (см. описание nodes в шапке).
+function node_color(k) {
+  if (k <= 8) return PAL[k]
+  return "hsl(" (int((k - 1) * 137.508) % 360) ", " ((k % 2) ? "62%, 62%" : "55%, 72%") ")"
+}
+
+# json_node_history(path, run_n) - все ноды-победители по частоте
 # побед (при равенстве - по свежести последнего появления), с плотным по
 # прогонам массивом скорости в байтах (null там, где нода прогон
 # пропустила). Отбор и порядок - см. описание nodes в шапке файла.
@@ -144,8 +151,7 @@ function json_node_history(path, run_n,
     if (best != i) { tmp = uniq[i]; uniq[i] = uniq[best]; uniq[best] = tmp }
   }
 
-  topk = (un < NODE_CAP) ? un : NODE_CAP
-  for (k = 1; k <= topk; k++) rank[uniq[k]] = k
+  topk = un
 
   out = "{\"total_unique\":" un ",\"cap\":" NODE_CAP ",\"top\":["
   for (k = 1; k <= topk; k++) {
@@ -159,13 +165,13 @@ function json_node_history(path, run_n,
       p_speed[pn] = h_speed2[i]
     }
     out = out (k > 1 ? "," : "") "{\"name\":" json_str(nm) ",\"wins\":" freq[nm] \
-      ",\"color\":" json_str(PAL[k]) ",\"values\":[" join_series_values(p_idx, p_speed, pn, run_n) "]}"
+      ",\"color\":" json_str(node_color(k)) ",\"values\":[" join_series_values(p_idx, p_speed, pn, run_n) "]}"
   }
   out = out "]}"
   return out
 }
 
-# json_node_stability(path) - "Доступность нод пула" (node_stability.tsv),
+# json_node_stability(path) - "Статистика доступности нод" (node_stability.tsv),
 # отсортированная по убыванию uptime за окно (см. описание stability в
 # шапке файла); историю за окно клиент при желании нарисует сам по полю
 # "window".
@@ -273,8 +279,8 @@ BEGIN {
   FS = "\t"
   n = 0
   # cap приходит снаружи (-v cap=...) из STATS_NODE_CAP в speedtest2.env;
-  # некорректное/пустое/вне диапазона значение -> дефолт 8 (столько цветов в PAL).
-  NODE_CAP = (cap + 0 >= 1 && cap + 0 <= 8) ? cap + 0 : 8
+  # некорректное/пустое/вне диапазона значение -> дефолт 8.
+  NODE_CAP = (cap + 0 >= 1 && cap + 0 <= 50) ? cap + 0 : 8
   PAL[1] = "#2a78d6"; PAL[2] = "#eb6834"; PAL[3] = "#1baf7a"; PAL[4] = "#eda100"
   PAL[5] = "#e87ba4"; PAL[6] = "#008300"; PAL[7] = "#4a3aa7"; PAL[8] = "#e34948"
 }

@@ -14,6 +14,9 @@
 #   restore         POST - то же для выбранного бэкапа (?kind=&name=)
 #   restore-working POST - найти самый свежий бэкап, проходящий mihomo -t, и применить
 #   repair          POST - починка текста (?mode=format|template), без записи
+#   log             GET  - журнал последнего применения (save/restore/
+#                          restore-working) и идёт ли оно сейчас: веб-вкладка
+#                          опрашивает его, пока ждёт ответа на применение.
 # save/restore/restore-working принимают ?base=<отпечаток из read>: если
 # config.yaml успели поменять с момента открытия редактора - 409 conflict.
 #
@@ -45,9 +48,17 @@ RESTART_TIMEOUT=${RESTART_TIMEOUT:-30}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-15}
 HEALTH_STABLE=${HEALTH_STABLE:-2}
 RESTORE_WORKING_MAX=${RESTORE_WORKING_MAX:-10}
+# Журнал применения: этапы, вывод mihomo -t, результат xkeen -restart и
+# проверки ядра, откат. В /tmp (tmpfs), перезаписывается каждым применением.
+APPLY_LOG=${CONFIGEDIT_APPLY_LOG:-$TMPROOT/mst-configedit-apply.log}
+# Журналы XKeen: после перезапуска в журнал применения попадает то, что в
+# них дописалось за время перезапуска (если файлов нет - ничего). Сам вывод
+# xkeen -restart не перехватывается: его наследует демон mihomo (см. bounded()).
+XKEEN_LOG_FILES=${XKEEN_LOG_FILES:-/opt/var/log/xkeen/error.log /opt/var/log/xkeen/info.log}
 
 WORK=
 LOCK_HELD=0
+APPLY_LOGGING=0
 BACKUP_NAME=
 RESTORED_NAME=
 cleanup() {
@@ -70,8 +81,30 @@ reply() {
   exit 0
 }
 
+# ----- журнал применения -----
+
+alog() {
+  [ "$APPLY_LOGGING" = 1 ] || return 0
+  printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >> "$APPLY_LOG" 2>/dev/null || true
+}
+
+# Файл $1 в журнал с отступом, не больше $2 последних строк.
+alog_file() {
+  [ "$APPLY_LOGGING" = 1 ] && [ -s "$1" ] || return 0
+  tail -n "${2:-40}" "$1" | sed 's/^/         | /' >> "$APPLY_LOG" 2>/dev/null || true
+}
+
+apply_log_start() {
+  # $1 = что делаем. Вызывается под блокировкой, один раз на запрос.
+  [ "$APPLY_LOGGING" = 1 ] && return 0
+  APPLY_LOGGING=1
+  : > "$APPLY_LOG" 2>/dev/null || APPLY_LOGGING=0
+  alog "=== $1 ==="
+}
+
 fail_json() {
   # $1 = статус, $2 = код ошибки, $3 = необязательный текст
+  alog "ОШИБКА: ${3:-$2}"
   printf '{"ok":false,"error":"%s","message":%s}\n' "$2" "$(jstr "${3:-}")" > "$WORK/resp"
   reply "$1" "$WORK/resp"
 }
@@ -183,6 +216,7 @@ check_json() {
 }
 
 acquire_lock() {
+  [ "$LOCK_HELD" = 1 ] && return 0
   if ! mkdir "$CONFIGEDIT_LOCK" 2>/dev/null; then
     old=$(cat "$CONFIGEDIT_LOCK/pid" 2>/dev/null || true)
     case $old in
@@ -245,21 +279,64 @@ bounded() {
 }
 
 mihomo_healthy() {
+  alog "жду процесс mihomo (до $HEALTH_TIMEOUT с, затем $HEALTH_STABLE с на устойчивость)"
   waited=0
   while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
     if "$PIDOF_CMD" mihomo > /dev/null 2>&1; then
       sleep "$HEALTH_STABLE"
-      "$PIDOF_CMD" mihomo > /dev/null 2>&1 && return 0
+      if mh_pid=$("$PIDOF_CMD" mihomo 2>/dev/null); then
+        alog "ядро работает (pid ${mh_pid:-?})"
+        return 0
+      fi
+      alog "процесс mihomo появился и сразу завершился"
     fi
     sleep 1; waited=$((waited + 1))
   done
+  alog "ОШИБКА: процесс mihomo не запущен за $HEALTH_TIMEOUT с"
   return 1
 }
 
+# Размеры журналов XKeen до перезапуска - в $WORK/xkeen-logs.pos.
+xkeen_logs_mark() {
+  : > "$WORK/xkeen-logs.pos"
+  for xl in $XKEEN_LOG_FILES; do
+    [ -f "$xl" ] || continue
+    printf '%s\t%s\n' "$(wc -c < "$xl" | tr -d ' ')" "$xl" >> "$WORK/xkeen-logs.pos"
+  done
+}
+
+# Что дописалось в журналы XKeen после xkeen_logs_mark (до 30 строк с файла).
+xkeen_logs_new() {
+  [ -s "$WORK/xkeen-logs.pos" ] || return 0
+  while IFS="$(printf '\t')" read -r xpos xl; do
+    [ -f "$xl" ] || continue
+    xsize=$(wc -c < "$xl" | tr -d ' ')
+    [ "$xsize" -gt "$xpos" ] 2>/dev/null || continue
+    tail -c +"$((xpos + 1))" "$xl" > "$WORK/xkeen-new.log" 2>/dev/null || continue
+    alog "новое в $xl:"
+    alog_file "$WORK/xkeen-new.log" 30
+  done < "$WORK/xkeen-logs.pos"
+}
+
 restart_mihomo() {
-  [ -x "$XKEEN_BIN" ] || return 2
-  bounded "$RESTART_TIMEOUT" "$XKEEN_BIN" -restart || return 1
-  mihomo_healthy
+  if [ ! -x "$XKEEN_BIN" ]; then
+    alog "xkeen не найден ($XKEEN_BIN) - перезапустите ядро вручную"
+    return 2
+  fi
+  xkeen_logs_mark
+  alog "xkeen -restart (таймаут $RESTART_TIMEOUT с)..."
+  rs_start=$(date +%s)
+  rs_rc=0; bounded "$RESTART_TIMEOUT" "$XKEEN_BIN" -restart || rs_rc=$?
+  rs_time=$(( $(date +%s) - rs_start ))
+  case $rs_rc in
+    0) alog "xkeen -restart завершился за $rs_time с" ;;
+    124) alog "ОШИБКА: xkeen -restart не завершился за $RESTART_TIMEOUT с - остановлен" ;;
+    *) alog "ОШИБКА: xkeen -restart завершился с кодом $rs_rc за $rs_time с" ;;
+  esac
+  hrc=1
+  [ "$rs_rc" = 0 ] && { mihomo_healthy && hrc=0 || hrc=1; }
+  xkeen_logs_new
+  return "$hrc"
 }
 
 # Применение кандидата $1 (уже в $WORK). Проверяет base, mihomo -t,
@@ -269,16 +346,22 @@ apply_candidate() {
   cand=$1
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
+  apply_log_start "применение config.yaml"
   want=$(query_param base)
   if [ -n "$want" ] && [ "$want" != "$(fingerprint "$target")" ]; then
     fail_json 409 conflict "config.yaml изменился с момента открытия редактора - перезагрузите его"
   fi
+  alog "проверка: $BIN -t"
   rc=0; check_file "$cand" || rc=$?
+  alog_file "$WORK/check.log" 40
   if [ "$rc" != 0 ]; then
+    alog "ОШИБКА: конфиг не прошёл mihomo -t - ничего не записано, ядро не перезапускалось"
     printf '{"ok":false,"error":"check_failed","check":%s}\n' "$(check_json "$rc")" > "$WORK/resp"
     reply 422 "$WORK/resp"
   fi
+  alog "проверка пройдена"
   if [ -f "$target" ] && cmp -s "$cand" "$target"; then
+    alog "конфиг не изменился - запись и перезапуск не нужны"
     printf '{"ok":true,"unchanged":true,"base":"%s"}\n' "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -286,22 +369,30 @@ apply_candidate() {
   if [ -f "$target" ]; then
     make_backup "$target" || fail_json 500 backup_failed "Не удалось сохранить бэкап, конфиг не тронут"
     backup=$BACKUP_NAME
+    alog "текущий конфиг сохранён в бэкап $CONFIG_BACKUP_DIR/$backup"
   fi
   publish_config "$cand" "$target" || fail_json 500 write_failed "Не удалось записать config.yaml, конфиг не тронут"
+  alog "записан $target"
   rrc=0; restart_mihomo || rrc=$?
   if [ "$rrc" = 0 ]; then
+    alog "ГОТОВО: конфиг применён, ядро перезапущено"
     printf '{"ok":true,"backup":%s,"restarted":true,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   if [ "$rrc" = 2 ]; then
     # xkeen не найден: конфиг записан, перезапуск - вручную.
+    alog "ГОТОВО: конфиг записан, ядро не перезапускалось"
     printf '{"ok":true,"backup":%s,"restarted":false,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   rolled=false
+  alog "ОШИБКА: ядро не поднялось с новым конфигом - откатываю"
   if [ -n "$backup" ] && publish_config "$CONFIG_BACKUP_DIR/$backup" "$target"; then
     rolled=true
-    restart_mihomo || true
+    alog "возвращён прежний конфиг из бэкапа $backup, перезапуск"
+    if restart_mihomo; then alog "ядро работает на прежнем конфиге"; else alog "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH"; fi
+  else
+    alog "ОШИБКА: откат не удался - проверьте конфиг по SSH"
   fi
   printf '{"ok":false,"error":"restart_failed","rolled_back":%s,"backup":%s,"base":"%s"}\n' \
     "$rolled" "$(jstr "$backup")" "$(fingerprint "$target")" > "$WORK/resp"
@@ -401,6 +492,8 @@ cmd_repair() {
 
 cmd_restore_working() {
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+  acquire_lock
+  apply_log_start "откат к рабочему бэкапу"
   list_backups > "$WORK/list"
   tried=0
   while IFS="$(printf '\t')" read -r kind name path; do
@@ -409,9 +502,11 @@ cmd_restore_working() {
     tried=$((tried + 1))
     cp "$path" "$WORK/cand.yaml" || continue
     if check_file "$WORK/cand.yaml"; then
+      alog "бэкап $name проходит mihomo -t - применяю"
       RESTORED_NAME=$name
       apply_candidate "$WORK/cand.yaml"
     fi
+    alog "бэкап $name не проходит mihomo -t - пропускаю"
   done < "$WORK/list"
   fail_json 404 no_working_backup "Среди последних бэкапов нет ни одного, проходящего mihomo -t"
 }
@@ -456,6 +551,13 @@ case $action:$method in
   save:POST)
     read_body "$WORK/cand.yaml"
     apply_candidate "$WORK/cand.yaml" ;;
+  log:GET|log:HEAD)
+    running=false
+    lp=$(cat "$CONFIGEDIT_LOCK/pid" 2>/dev/null || true)
+    case $lp in ''|*[!0-9]*) ;; *) kill -0 "$lp" 2>/dev/null && running=true ;; esac
+    if [ -f "$APPLY_LOG" ]; then tail -n 400 "$APPLY_LOG" > "$WORK/log"; else : > "$WORK/log"; fi
+    printf '{"running":%s,"text":%s}\n' "$running" "$(jstr_file "$WORK/log")" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
   restore:POST)
     p=$(backup_path "$(query_param kind)" "$(query_param name)") || fail_json 404 no_backup "Бэкап не найден"
     cp "$p" "$WORK/cand.yaml" || fail_json 500 read_failed "Не удалось прочитать бэкап"
