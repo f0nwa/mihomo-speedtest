@@ -65,7 +65,7 @@ initialize_web_auth() {
     say 'WARN: обновление применено, но Python 3 отсутствует; веб-интерфейс не запущен'
     return 0
   fi
-  if ! setup_code=$(python3 "$auth_py" initialize --state-dir "$auth_dir/.stats-auth" --runtime-dir /tmp/mihomo-speedtest-auth); then
+  if ! setup_code=$(python3 "$auth_py" initialize --state-dir "$auth_dir/.stats-auth" --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}"); then
     say "WARN: обновление применено, но авторизация не инициализирована; выполните sh $auth_dir/stats_auth.sh reset"
     return 0
   fi

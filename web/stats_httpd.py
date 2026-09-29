@@ -489,7 +489,7 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             # условные запросы, которые этот сервер не поддерживает.
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            if body_bytes:
+            if body_bytes and self.command != "HEAD":
                 self.wfile.write(body_bytes)
 
         def _send_json(self, status, obj):
@@ -795,7 +795,8 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                 self.send_header(name, value)
             self.send_header("Content-Length", str(len(cgi_body)))
             self.end_headers()
-            self.wfile.write(cgi_body)
+            if self.command != "HEAD":
+                self.wfile.write(cgi_body)
 
         def _serve_file(self, full_path):
             try:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# setup.sh — установка с нуля: копирует config.example.yaml, собирает
+# setup.sh - установка с нуля: копирует config.example.yaml, собирает
 # подписки (с необязательным импортом из старого config.yaml) и
 # статические proxies, подбирает User-Agent автоматически, применяет
 # конфиг и передаёт управление install.sh (speedtest).
@@ -22,7 +22,7 @@ DETECT_UA_LIB_ONLY=1
 . "$SELFDIR/detect_ua.sh"
 
 collect_subscriptions() {
-  # Печатает в stdout URL по одному на строку — итоговый список подписок
+  # Печатает в stdout URL по одному на строку - итоговый список подписок
   # до автоподбора UA. Порядок: импорт из старого CONFIG (за вычетом
   # номеров, убранных пользователем) -> SUB_URLS из окружения -> ручной
   # интерактивный ввод.
@@ -57,7 +57,7 @@ collect_subscriptions() {
           *) echo "  $i) $u" >&2 ;;
         esac
       done < "$imported"
-      printf 'Введите номера через пробел, чтобы убрать лишние (Enter — оставить все): ' >&2
+      printf 'Введите номера через пробел, чтобы убрать лишние (Enter - оставить все): ' >&2
       read -r drop || drop=""
       i=0
       while IFS= read -r u; do
@@ -107,7 +107,7 @@ collect_subscriptions() {
 
 pick_ua() {
   # $1 = URL. Печатает две строки: выбранный User-Agent и вид ответа
-  # ("full"/"short"). Пустой вывод — ни один UA не подошёл.
+  # ("full"/"short"). Пустой вывод - ни один UA не подошёл.
   url=$1
   tmp=$(mktemp "${TMPDIR:-/tmp}/setup_ua.XXXXXX")
   found=""
@@ -166,11 +166,11 @@ build_provider_specs() {
     ua=$(printf '%s\n' "$result" | sed -n 1p)
     kind=$(printf '%s\n' "$result" | sed -n 2p)
     if [ -z "$ua" ]; then
-      echo "для $url не подобран рабочий User-Agent — подписка исключена (проверьте вручную: sh detect_ua.sh \"$url\")" >&2
+      echo "для $url не подобран рабочий User-Agent - подписка исключена (проверьте вручную: sh detect_ua.sh \"$url\")" >&2
       continue
     fi
     if [ "$kind" = "short" ]; then
-      echo "WARN для $url подошёл только укороченный clash YAML — сверьте набор нод после установки" >&2
+      echo "WARN для $url подошёл только укороченный clash YAML - сверьте набор нод после установки" >&2
     else
       echo "для $url подобран рабочий User-Agent \"$ua\"" >&2
     fi
@@ -334,7 +334,7 @@ main() {
   rm -f "$subs_file"
 
   if [ ! -s "$specs_file" ]; then
-    echo "ни одна подписка не прошла проверку — устанавливать нечего" >&2
+    echo "ни одна подписка не прошла проверку - устанавливать нечего" >&2
     rm -f "$specs_file"
     return 1
   fi

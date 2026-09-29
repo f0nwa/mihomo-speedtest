@@ -188,7 +188,13 @@ acquire_lock() {
     done
   else
     if ! mkdir "$LOCK" 2>/dev/null; then
-      return 1
+      # Блокировку от убитого kill -9/OOM прогона забираем, иначе все
+      # следующие прогоны по cron выходили бы до перезагрузки роутера.
+      old_pid=$(cat "$LOCK/pid" 2>/dev/null)
+      [ -n "$old_pid" ] && ! kill -0 "$old_pid" 2>/dev/null || return 1
+      say "забираю зависшую блокировку (pid $old_pid не отвечает)"
+      rm -rf "$LOCK"
+      mkdir "$LOCK" 2>/dev/null || return 1
     fi
   fi
   LOCK_HELD=1
@@ -1216,7 +1222,6 @@ cleanup() {
     wait "$MPID" 2>/dev/null || true
     MPID=
   fi
-  flush_log 2>/dev/null || true
   [ -n "$PUBLISH_TMP" ] && rm -f "$PUBLISH_TMP"
   # Страховка на случай, если цикл шага 5 (write_progress 0 после него,
   # см. main()) не был достигнут - ранний return/exit по ходу самого
@@ -1224,6 +1229,8 @@ cleanup() {
   # running:true до следующего прогона. Порядок важен - до rm -rf "$WORK"
   # (write_progress читает "$WORK/progress.tsv").
   [ "$PROGRESS_ACTIVE" = 1 ] && write_progress 0
+  # Журнал - после write_progress: её WARN тоже должны попасть в speedtest.log.
+  flush_log 2>/dev/null || true
   [ -n "$WORK" ] && rm -rf "$WORK"
   if [ "$LOCK_HELD" = 1 ]; then
     rm -rf "$LOCK"

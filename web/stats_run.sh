@@ -55,7 +55,10 @@ if [ "$method" = "POST" ]; then
     # сброса до 0 дочерний speedtest2.sh унаследует его и main() у
     # него не запустится (см. условие "MST_LIB_ONLY != 1" в самом
     # низу speedtest2.sh).
-    ( MST_LIB_ONLY=0 "$DIR/speedtest2.sh" --force </dev/null >/dev/null 2>&1 & )
+    # RUN_LOG экспортирует stats_service.sh (журнал службы) - прогону нужен
+    # свой временный журнал в $WORK, иначе flush_log() дописал бы весь
+    # service.log в speedtest.log.
+    ( unset RUN_LOG; MST_LIB_ONLY=0 "$DIR/speedtest2.sh" --force </dev/null >/dev/null 2>&1 & )
     started=true
     running=true
   fi

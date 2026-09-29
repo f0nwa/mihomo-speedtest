@@ -537,8 +537,7 @@ write_env() {
     else
       printf "STATS_HTTP_ENABLE=1\n"
     fi
-  } > "$tmp"
-  mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
+  } > "$tmp" && mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
 }
 
 recalibrate_env() {
@@ -552,8 +551,7 @@ recalibrate_env() {
     /^MIN_SPEED=/ { print "MIN_SPEED=" q v q; done = 1; next }
     { print }
     END { if (!done) print "MIN_SPEED=" q v q }
-  ' "$dst" > "$tmp"
-  mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
+  ' "$dst" > "$tmp" && mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
 }
 
 read_speedtest_const() {

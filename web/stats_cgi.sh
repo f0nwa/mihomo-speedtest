@@ -135,8 +135,15 @@ set_env_var() {
   name=$1; val=$2
   esc=$(printf '%s' "$val" | sed "s/'/'\\\\''/g")
   tmp="$ENV.cgi.$$"
-  { [ -f "$ENV" ] && grep -v "^$name=" "$ENV"; printf "%s='%s'\\n" "$name" "$esc"; } > "$tmp" 2>/dev/null
-  mv "$tmp" "$ENV"
+  # Не заменяем исправный $ENV, если временный файл записать не удалось
+  # (нет места, read-only) - иначе настройки обнулились бы.
+  if { [ -f "$ENV" ] && grep -v "^$name=" "$ENV"; printf "%s='%s'\\n" "$name" "$esc"; } > "$tmp" 2>/dev/null \
+     && mv "$tmp" "$ENV"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  env_write_failed=1
+  return 1
 }
 
 _add_err() {
@@ -152,7 +159,7 @@ _add_err() {
 normalize_block() {
   # BLOCK - список подстрок через | (см. prep.awk), не regex: убираем
   # пробелы вокруг | и по краям и префикс "(?i)" у кусков (след копирования
-  # exclude-filter из config.yaml). Та же функция есть в web/stats_cgi.sh.
+  # exclude-filter из config.yaml). Та же функция есть в install.sh.
   printf '%s\n' "$1" | sed -e 's/[[:space:]]*|[[:space:]]*/|/g' \
     -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
     -e 's/^(?i)//' -e 's/|(?i)/|/g'
@@ -198,6 +205,10 @@ validate_settings_fields() {
       _add_err geo_filter "Гео-фильтр должен быть не длиннее 4000 символов."
     fi
   fi
+  case $extype in
+    *"
+"*) _add_err extype "Исключаемые типы не должны содержать перевод строки." ;;
+  esac
   if ! is_decimal_in_range "$size_mb" 1 incl 100; then
     _add_err size_mb "Размер файла для замера должен быть числом от 1 до 100 МБ."
   fi
@@ -339,6 +350,7 @@ if [ "$method" = "POST" ]; then
   validate_settings_fields
 
   if [ -z "$err" ]; then
+    env_write_failed=0
     set_env_var MAX_TESTED "$max_tested"
     set_env_var STATS_NODE_CAP "$node_cap"
     set_env_var HISTORY_KEEP_RUNS "$keep_runs"
@@ -355,6 +367,9 @@ if [ "$method" = "POST" ]; then
     set_env_var MIN_WINNERS "$min_winners"
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
+    if [ "$env_write_failed" = 1 ]; then
+      _add_err save "Не удалось записать $ENV (нет места или файловая система только для чтения) - часть настроек не сохранена."
+    fi
     # перечитываем свежесохранённые значения и применяем сразу, не дожидаясь
     # следующего прогона по cron: перегенерируем stats.json (новый NODE_CAP)
     # немедленно. render_stats() с порции 2 сама больше не трогает
