@@ -140,8 +140,8 @@ http_get() {
   if [ -n "${UPDATE_HTTP_CMD:-}" ]; then $UPDATE_HTTP_CMD "$1"
   elif command -v curl >/dev/null 2>&1; then
     case $1 in
-      https://*) curl -fsSL --proto '=https' --proto-redir '=https' --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" 2>/dev/null ;;
-      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" 2>/dev/null ;;
+      https://*) curl -fsSL --proto '=https' --proto-redir '=https' --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" ;;
+      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" ;;
       *) return 1 ;;
     esac
   else die 'штатная загрузка требует curl с поддержкой HTTPS'; fi
@@ -153,8 +153,13 @@ download_to() {
   # Лимит касается всех файлов процесса транспорта, включая его журнал.
   # Минимум 256 КиБ допускает небольшой журнал даже при загрузке короткого файла.
   [ "$write_limit" -ge 262144 ] || write_limit=262144
-  if ! (ulimit -f "$(( (write_limit + 511) / 512 ))"; http_get "$1" "$3") > "$2"; then
-    die 'не удалось получить манифест или файл релиза - проверьте сеть и сертификаты роутера'
+  if (ulimit -f "$(( (write_limit + 511) / 512 ))"; http_get "$1" "$3") > "$2"; then
+    :
+  else
+    download_status=$?
+    die "не удалось скачать файл обновления (код загрузчика: $download_status).
+Адрес: $1
+Повторите обновление через несколько минут. Если ошибка повторится, пришлите этот вывод для диагностики."
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
   [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || die 'пустой файл или превышен лимит загрузки'

@@ -11,6 +11,11 @@
 # "apply-worker", наружу через CGI не проброшены).
 set -eu
 
+# Старые версии обновлятора передавали эти маркеры перезапускаемой панели.
+# Каждый веб-запрос начинает собственную проверку через штатный bootstrap.
+unset UPDATE_VERIFIED_ENGINE_DIR UPDATE_VERIFIED_PLAN_ID UPDATE_RECOVERY_ENGINE_DIR
+unset UPDATE_BOOTSTRAP_DIR UPDATE_PINNED_MANIFEST
+
 DIR=${DIR:-/opt/etc/mihomo-speedtest}
 TMPROOT=${TMPROOT:-/tmp}
 UPDATE_SCRIPT=${UPDATE_SCRIPT:-$DIR/update.sh}

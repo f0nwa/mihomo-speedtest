@@ -141,6 +141,10 @@ tx_publish() {
   mv -f "$tx_tmp" "$tx_dest"
 }
 tx_bounded_action() (
+  # Временный движок принадлежит только текущей операции обновления.
+  # Служба не должна передавать его маркеры следующим запросам панели.
+  unset UPDATE_VERIFIED_ENGINE_DIR UPDATE_VERIFIED_PLAN_ID UPDATE_RECOVERY_ENGINE_DIR
+  unset UPDATE_BOOTSTRAP_DIR UPDATE_PINNED_MANIFEST
   tx_init=$(target_file /opt/etc/init.d/S80speedtest-stats)
   safe_path "$tx_init"
   [ -f "$tx_init" ] || exit 1
