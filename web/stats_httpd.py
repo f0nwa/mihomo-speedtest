@@ -81,6 +81,11 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
     футер веб-интерфейса (версия релиза/аптайм/CPU/MEM/статус mihomo).
     GET/HEAD, без побочных эффектов - под той же общей сессией/CSRF, что
     и остальные "/api/...".
+  - "/api/config", "/api/config/{backups,backup,check,repair,save,restore,
+    restore-working}" - вкладка "Конфиг": внутренние алиасы на один
+    CGI-скрипт "cgi-bin/configedit" (копия stats_config.sh, кладётся
+    write_stats_config() в speedtest2.sh), действие - в MST_CONFIG_ACTION.
+    Тяжёлым действиям алиас задаёт MST_CGI_TIMEOUT больше обычных 30 с.
   - "/api/log" - живой журнал для вкладки «Журнал» (GET, параметры gen и
     offset), обрабатывается прямо здесь, см. live_log_poll(). Пока его
     опрашивают, say() в speedtest2.sh пишет копию строк в /tmp; без
@@ -390,6 +395,17 @@ API_ALIASES = {
     "api/updates/apply": ("cgi-bin/update", {"MST_UPDATE_ACTION": "apply"}),
     "api/updates/discard": ("cgi-bin/update", {"MST_UPDATE_ACTION": "discard"}),
     "api/system": ("cgi-bin/system", {}),
+    # Вкладка "Конфиг" (stats_config.sh). Применение ждёт mihomo -t,
+    # xkeen -restart, проверку ядра и при провале - откат с повторным
+    # перезапуском, поэтому этим действиям дан больший таймаут CGI.
+    "api/config": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "read"}),
+    "api/config/backups": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "backups"}),
+    "api/config/backup": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "backup"}),
+    "api/config/check": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "check"}),
+    "api/config/repair": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "repair", "MST_CGI_TIMEOUT": "60"}),
+    "api/config/save": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
+    "api/config/restore": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
+    "api/config/restore-working": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
 }
 
 
@@ -753,6 +769,12 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                 # "/api/settings") - только для алиасов, у обычных
                 # "/cgi-bin/..." extra_env пустой/None, поведение не меняется.
                 env.update(extra_env)
+            # Обычный CGI - 30 с; долгим действиям алиас задаёт свой
+            # MST_CGI_TIMEOUT (см. "api/config/*" в API_ALIASES).
+            try:
+                cgi_timeout = int((extra_env or {}).get("MST_CGI_TIMEOUT", "30"))
+            except ValueError:
+                cgi_timeout = 30
             try:
                 proc = subprocess.run(
                     [full_path],
@@ -761,7 +783,7 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=os.path.dirname(full_path) or docroot,
-                    timeout=30,
+                    timeout=cgi_timeout,
                 )
             except Exception as exc:
                 self._send_simple(500, "text/plain; charset=utf-8", ("CGI error: %s\n" % exc).encode())

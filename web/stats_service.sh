@@ -90,6 +90,7 @@ prepare() {
   write_stats_run
   write_stats_update
   write_stats_system
+  write_stats_config
   write_stats_static
   return 0
 }

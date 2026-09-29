@@ -26,7 +26,7 @@ PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh u
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_system.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_system.sh stats_config.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -453,6 +453,8 @@ install_files() {
   chmod +x "$DIR/stats_update.sh"
   atomic_install "$SELFDIR/stats_system.sh" "$DIR/stats_system.sh" || return 1
   chmod +x "$DIR/stats_system.sh"
+  atomic_install "$SELFDIR/stats_config.sh" "$DIR/stats_config.sh" || return 1
+  chmod +x "$DIR/stats_config.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
   # веб-сервиса статистики - копируются в раздаваемый каталог сами,
   # write_stats_static() из speedtest2.sh; исполняемый бит не нужен.
@@ -462,6 +464,9 @@ install_files() {
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
   atomic_install "$SELFDIR/stats_chart.js" "$DIR/stats_chart.js" || return 1
+  # stats_codemirror.js/.css - вендоренный CodeMirror 5 для вкладки "Конфиг".
+  atomic_install "$SELFDIR/stats_codemirror.js" "$DIR/stats_codemirror.js" || return 1
+  atomic_install "$SELFDIR/stats_codemirror.css" "$DIR/stats_codemirror.css" || return 1
   # обязательный веб-сервер на python3 (см. docs/guide.md, "Обязательная
   # авторизация веб-интерфейса") - запускается start_backend() в
   # stats_service.sh (порция 3, независимая служба); исполняемый бит не

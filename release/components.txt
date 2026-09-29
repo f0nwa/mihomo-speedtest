@@ -35,6 +35,7 @@ FILE|web|web/stats_cgi.sh|/opt/etc/mihomo-speedtest/stats_cgi.sh|0755|sh
 FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
 FILE|web|web/stats_system.sh|/opt/etc/mihomo-speedtest/stats_system.sh|0755|sh
+FILE|web|web/stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|0755|sh
 FILE|web|web/stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|0644|py
 FILE|web|web/stats_auth.py|/opt/etc/mihomo-speedtest/stats_auth.py|0644|py
 FILE|web|web/stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|0755|sh
@@ -42,6 +43,8 @@ FILE|web|web/stats_index.html|/opt/etc/mihomo-speedtest/stats_index.html|0644|no
 FILE|web|web/stats_style.css|/opt/etc/mihomo-speedtest/stats_style.css|0644|none
 FILE|web|web/stats_app.js|/opt/etc/mihomo-speedtest/stats_app.js|0644|none
 FILE|web|web/stats_chart.js|/opt/etc/mihomo-speedtest/stats_chart.js|0644|none
+FILE|web|web/stats_codemirror.js|/opt/etc/mihomo-speedtest/stats_codemirror.js|0644|none
+FILE|web|web/stats_codemirror.css|/opt/etc/mihomo-speedtest/stats_codemirror.css|0644|none
 FILE|web|web/render_progress.awk|/opt/etc/mihomo-speedtest/render_progress.awk|0644|awk
 FILE|web|web/stats_service.sh|/opt/etc/mihomo-speedtest/stats_service.sh|0755|sh
 FILE|web|web/stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh

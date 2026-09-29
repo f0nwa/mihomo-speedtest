@@ -106,6 +106,8 @@ STATS_UPDATE_SOURCE=${STATS_UPDATE_SOURCE:-$DIR/stats_update.sh}              # 
 STATS_UPDATE_SCRIPT=${STATS_UPDATE_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/update}    # его же копия внутри раздаваемого каталога, пишется сама
 STATS_SYSTEM_SOURCE=${STATS_SYSTEM_SOURCE:-$DIR/stats_system.sh}             # исходник CGI-обёртки для футера (версия/аптайм/CPU/MEM/mihomo), ставится install.sh
 STATS_SYSTEM_SCRIPT=${STATS_SYSTEM_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/system}   # его же копия внутри раздаваемого каталога, пишется сама
+STATS_CONFIG_SOURCE=${STATS_CONFIG_SOURCE:-$DIR/stats_config.sh}             # исходник CGI-обёртки вкладки "Конфиг" (редактор config.yaml), ставится install.sh
+STATS_CONFIG_SCRIPT=${STATS_CONFIG_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/configedit} # его же копия внутри раздаваемого каталога, пишется сама
 STATS_INDEX_SOURCE=${STATS_INDEX_SOURCE:-$DIR/stats_index.html}     # исходник SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md), ставится install.sh
 STATS_INDEX_HTML=${STATS_INDEX_HTML:-$STATS_HTTP_DIR/index.html}    # его же копия внутри раздаваемого каталога, пишется сама
 STATS_STYLE_SOURCE=${STATS_STYLE_SOURCE:-$DIR/stats_style.css}      # исходник общего CSS для SPA-shell, ставится install.sh
@@ -114,6 +116,10 @@ STATS_APP_SOURCE=${STATS_APP_SOURCE:-$DIR/stats_app.js}             # исход
 STATS_APP_JS=${STATS_APP_JS:-$STATS_HTTP_DIR/app.js}                # его же копия внутри раздаваемого каталога, пишется сама
 STATS_CHARTJS_SOURCE=${STATS_CHARTJS_SOURCE:-$DIR/stats_chart.js}   # вендоренная UMD-сборка Chart.js для графика по нодам, ставится install.sh
 STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его же копия внутри раздаваемого каталога, пишется сама
+STATS_CM_JS_SOURCE=${STATS_CM_JS_SOURCE:-$DIR/stats_codemirror.js}     # вендоренная сборка CodeMirror 5 для вкладки "Конфиг", ставится install.sh
+STATS_CM_JS=${STATS_CM_JS:-$STATS_HTTP_DIR/codemirror.js}              # его же копия внутри раздаваемого каталога, пишется сама
+STATS_CM_CSS_SOURCE=${STATS_CM_CSS_SOURCE:-$DIR/stats_codemirror.css}  # стили CodeMirror 5, ставится install.sh
+STATS_CM_CSS=${STATS_CM_CSS:-$STATS_HTTP_DIR/codemirror.css}           # его же копия внутри раздаваемого каталога, пишется сама
 STATS_SERVICE=${STATS_SERVICE:-$DIR/stats_service.sh}               # порция 3: независимый supervisor (см. design), ставится install.sh
 STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # порция 3: Entware init-скрипт независимой службы, ставится install.sh
 
@@ -463,6 +469,21 @@ write_stats_system() {
   chmod +x "$STATS_SYSTEM_SCRIPT" 2>/dev/null || true
 }
 
+write_stats_config() {
+  # Копирует CGI-обёртку вкладки "Конфиг" ($STATS_CONFIG_SOURCE, ставится
+  # install.sh рядом со speedtest2.sh) в раздаваемый каталог
+  # ($STATS_CONFIG_SCRIPT) - тот же приём, что write_stats_system().
+  if [ ! -f "$STATS_CONFIG_SOURCE" ]; then
+    say "WARN: $STATS_CONFIG_SOURCE не найден, редактор конфига недоступен (переустановите install.sh)"
+    return 0
+  fi
+  if ! publish_file "$STATS_CONFIG_SOURCE" "$STATS_CONFIG_SCRIPT"; then
+    say "WARN: не удалось записать $STATS_CONFIG_SCRIPT, редактор конфига не обновлён"
+    return 0
+  fi
+  chmod +x "$STATS_CONFIG_SCRIPT" 2>/dev/null || true
+}
+
 write_stats_static() {
   # Копирует статические файлы SPA-shell ($STATS_INDEX_SOURCE/$STATS_STYLE_SOURCE/
   # $STATS_APP_SOURCE/$STATS_CHARTJS_SOURCE, ставятся install.sh рядом со
@@ -478,7 +499,7 @@ write_stats_static() {
   # (return 0 в любом случае): без index.html stats_httpd.py отдаёт 404
   # - см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
   # покажет "chart.js не загрузился", см. buildNodeChart() в stats_app.js).
-  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS" "$STATS_CHARTJS_SOURCE:$STATS_CHARTJS_JS"; do
+  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS" "$STATS_CHARTJS_SOURCE:$STATS_CHARTJS_JS" "$STATS_CM_JS_SOURCE:$STATS_CM_JS" "$STATS_CM_CSS_SOURCE:$STATS_CM_CSS"; do
     src=${pair%%:*}
     dst=${pair#*:}
     if [ ! -f "$src" ]; then
@@ -575,6 +596,7 @@ ensure_stats_httpd() {
   write_stats_run
   write_stats_update
   write_stats_system
+  write_stats_config
   write_stats_static
 
   want="$STATS_HTTP_BIND:$STATS_HTTP_PORT"

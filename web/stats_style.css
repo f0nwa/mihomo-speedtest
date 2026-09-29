@@ -134,3 +134,35 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .geo-summary summary{cursor:pointer}
 .geo-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;color:var(--text)}
 @media (max-width:760px){.geo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.geo-cols{grid-template-columns:minmax(0,1fr)}}
+/* Вкладка "Конфиг": редактор config.yaml (CodeMirror 5 из codemirror.js/.css,
+   подгружается только на этой вкладке) - поверх стилей самого CodeMirror
+   тема под общую палитру панели. */
+.config-editor{margin:12px 0;border:1px solid var(--card-border)}
+.config-editor .CodeMirror{height:62vh;min-height:320px;background:#11151c;color:#d7dee6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+.config-editor .CodeMirror-gutters{background:#161a20;border-right:1px solid var(--card-border)}
+.config-editor .CodeMirror-linenumber{color:#5c6570}
+.config-editor .CodeMirror-cursor{border-left:1px solid var(--accent)}
+.config-editor .CodeMirror-selected,.config-editor .CodeMirror-focused .CodeMirror-selected{background:#35c7c733}
+.config-editor .CodeMirror-line::selection,.config-editor .CodeMirror-line>span::selection,.config-editor .CodeMirror-line>span>span::selection{background:#35c7c733}
+.config-editor .cm-s-default .cm-property{color:#35c7c7}
+.config-editor .cm-s-default .cm-comment{color:#6b7580;font-style:italic}
+.config-editor .cm-s-default .cm-string{color:#d7dee6}
+.config-editor .cm-s-default .cm-number,.config-editor .cm-s-default .cm-atom{color:#e0b060}
+.config-editor .cm-s-default .cm-meta,.config-editor .cm-s-default .cm-bracket{color:#8b9096}
+.config-editor .cm-s-default .cm-variable-2,.config-editor .cm-s-default .cm-tag,.config-editor .cm-s-default .cm-def{color:#c792ea}
+.config-editor .cm-err-line{background:#d1453b33}
+.config-textarea{display:block;width:100%;height:62vh;min-height:320px;background:#11151c;color:#d7dee6;border:0;padding:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre;tab-size:2}
+.config-status.config-dirty{color:#e0b060}
+.config-diff{max-height:420px}
+.config-diff .diff-add{color:#7ee787;background:#16a34a1f}
+.config-diff .diff-del{color:#ff8a80;background:#d1453b1f}
+.config-diff .diff-gap{color:var(--muted)}
+.config-fixes{margin:4px 0 8px;padding-left:20px;font-size:13px}
+.config-backups{width:100%;border-collapse:collapse;font-size:13px}
+.config-backups td{padding:6px 8px;border-top:1px solid var(--border);vertical-align:middle}
+.config-backup-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.config-backup-actions .theme-btn{padding:4px 8px;font-size:12px}
+@media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backup-actions{justify-content:flex-start}}
+/* Шапка на узком экране: с вкладкой "Конфиг" пунктов меню стало больше -
+   переносим навигацию, а не выталкиваем кнопку "Выйти" за край. */
+@media (max-width:640px){header>div[style]{flex:1 1 100%!important;flex-wrap:wrap;justify-content:space-between}nav{flex-wrap:wrap}nav a{padding:6px 7px 4px}}
