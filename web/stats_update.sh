@@ -203,37 +203,27 @@ except Exception:
   return $frn_rc
 }
 
-# Собирает JSON-массив "notes" для всех релизов между установленной версией
-# (не включая) и целевой версией плана (включая) - "если пропущено
-# несколько обновлений, перечислить все изменения из предыдущих релизов"
-# (задача веб-редизайна). $1=целевая версия (release_version плана, уже
-# известно что это число). Печатает JSON-массив (может быть "[]", если
-# installed_version неизвестна/не меньше целевой, или тексты не
-# добываются - сеть/API недоступны). Непарсимые/недоступные релизы просто
-# пропускаются - лучше показать частичный список, чем не показать check
-# вовсе (ruling: не блокировать check сетевой недоступностью notes).
+# Собирает JSON-массив "notes" с описанием только нового релиза плана:
+# с тегами-датами (v26.9.29) промежуточные теги по номеру не вычислить.
+# $1=целевой RELEASE_VERSION (число), $2=его тег. Печатает "[]", если
+# установлена та же или более новая версия либо текст не добыт
+# (сеть/API недоступны) - check из-за заметок не блокируется.
 fetch_release_notes() {
   frs_target=$1
+  frs_tag=$2
   frs_installed=$(su_manifest_field "$(su_installed_manifest_path)" RELEASE_VERSION)
   case $frs_installed in *[!0-9]*|'') frs_installed=0 ;; esac
-  frs_from=$((frs_installed + 1))
-  [ "$frs_from" -le "$frs_target" ] || { printf '[]'; return 0; }
-  frs_out=""
-  frs_v=$frs_from
-  while [ "$frs_v" -le "$frs_target" ]; do
-    # "if", а не хвостовая цепочка "&&" - неудачный fetch_release_note()
-    # (обычный, ожидаемый случай: отсутствующий/недоступный релиз) не
-    # должен закончить всю функцию (и cmd_check() целиком) под set -eu -
-    # та же ловушка, что и в исходном уроке ревью этой сессии про
-    # uninstall.sh:remove_mihomo_speedtest_symlink().
-    frs_body=""
-    if frs_body=$(fetch_release_note "v$frs_v") && [ -n "$frs_body" ]; then
-      frs_entry="{\"version\":$frs_v,\"tag\":\"v$frs_v\",\"body\":$frs_body}"
-      frs_out="${frs_out:+$frs_out,}$frs_entry"
-    fi
-    frs_v=$((frs_v + 1))
-  done
-  printf '[%s]' "$frs_out"
+  if [ "$frs_installed" -ge "$frs_target" ] || [ -z "$frs_tag" ]; then
+    printf '[]'
+    return 0
+  fi
+  # "if", а не цепочка "&&": неудачная загрузка под set -eu не должна
+  # завершать cmd_check().
+  if frs_body=$(fetch_release_note "$frs_tag") && [ -n "$frs_body" ]; then
+    printf '[{"version":%s,"tag":"%s","body":%s}]' "$frs_target" "$frs_tag" "$frs_body"
+  else
+    printf '[]'
+  fi
 }
 
 cmd_check() {
@@ -264,8 +254,9 @@ cmd_check() {
   notesval=null
   if [ "$ok" = true ]; then
     cc_target=$(printf '%s' "$planval" | sed -n 's/.*"release_version":"\([0-9]*\)".*/\1/p')
+    cc_tag=$(printf '%s' "$planval" | sed -n 's/.*"release_tag":"\([A-Za-z0-9_.-]*\)".*/\1/p')
     if [ -n "$cc_target" ]; then
-      notesval=$(fetch_release_notes "$cc_target") || notesval='[]'
+      notesval=$(fetch_release_notes "$cc_target" "$cc_tag") || notesval='[]'
     fi
   fi
   tmp=$STATS_UPDATE_RUNTIME_DIR/.last-check.$$

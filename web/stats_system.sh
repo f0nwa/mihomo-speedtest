@@ -29,7 +29,8 @@ PIDOF_CMD=${PIDOF_CMD:-pidof}
 
 release_version() {
   [ -f "$INSTALLED_MANIFEST_PATH" ] || { printf 'null'; return 0; }
-  v=$(awk -F= '$1=="RELEASE_VERSION"{print $2;exit}' "$INSTALLED_MANIFEST_PATH" 2>/dev/null || true)
+  # Показываем имя релиза (тег без "v": 26.9.29), а без тега - номер.
+  v=$(awk -F= '$1=="RELEASE_TAG"{t=$2} $1=="RELEASE_VERSION"{n=$2} END{sub(/^v/,"",t); print (t!="")?t:n}' "$INSTALLED_MANIFEST_PATH" 2>/dev/null || true)
   [ -n "$v" ] || { printf 'null'; return 0; }
   printf '"%s"' "$v"
 }

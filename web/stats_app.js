@@ -1397,7 +1397,7 @@
         // пометка статуса) владелец счёл избыточным.
         var versionMsg = 'Последняя проверка: ' + lc.checked_at + '. ' +
           (available ? 'Доступна новая версия: ' : 'Установлена актуальная версия: ') +
-          lc.plan.release_version + '.';
+          (lc.plan.release_tag || lc.plan.release_version) + '.';
         summary.appendChild(el('p', 'hint', versionMsg));
       } else if (lc) {
         summary.appendChild(el('p', 'msg-err', 'Последняя проверка не удалась: ' + (lc.error || '')));

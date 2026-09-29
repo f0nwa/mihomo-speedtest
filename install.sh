@@ -756,7 +756,8 @@ version_main() {
     installed_version=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_VERSION)
   fi
   if [ -n "$installed_version" ]; then
-    echo "версия релиза: $installed_version" >&2
+    installed_tag=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG)
+    echo "версия релиза: ${installed_tag:-v$installed_version} (номер $installed_version)" >&2
   else
     echo "установленный релиз не отслеживается" >&2
   fi

@@ -11,6 +11,13 @@
 # берёт следующий RELEASE_VERSION (+1), оставляя MIN_UPDATER_VERSION/
 # CONFIG_SCHEMA_VERSION как есть - их поднимают вручную флагом только
 # если реально менялся протокол обновлятора или схема config.yaml.
+#
+# Имена релизов: до v26 включительно тег = v<RELEASE_VERSION>. С
+# RELEASE_VERSION 27 тег - дата публикации vГГ.М.Д (v26.9.29), второй и
+# следующие релизы того же дня - v26.9.29.2, v26.9.29.3 и т.д.
+# RELEASE_VERSION при этом остаётся внутренним счётчиком +1: по нему
+# update.sh сравнивает версии, и уже установленные роутеры принимают
+# только целое число. Тег можно задать явно флагом --tag.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -19,7 +26,7 @@ cd "$ROOT"
 REPO=${RELEASE_REPO:-f0nwa/mihomo-speedtest}
 
 usage() {
-  echo "Использование: $0 \"<текст --notes>\" [--release-version N] [--min-updater N] [--config-schema N]" >&2
+  echo "Использование: $0 \"<текст --notes>\" [--release-version N] [--min-updater N] [--config-schema N] [--tag TAG]" >&2
   exit 2
 }
 
@@ -30,11 +37,14 @@ shift
 NEW_VERSION=""
 MIN_UPDATER=""
 CONFIG_SCHEMA=""
+TAG=""
+DATE_TAGS_FROM=27   # с этого RELEASE_VERSION тег - дата (см. шапку)
 while [ $# -gt 0 ]; do
   case "$1" in
     --release-version) NEW_VERSION=$2; shift 2 ;;
     --min-updater) MIN_UPDATER=$2; shift 2 ;;
     --config-schema) CONFIG_SCHEMA=$2; shift 2 ;;
+    --tag) TAG=$2; shift 2 ;;
     *) echo "неизвестный аргумент: $1" >&2; usage ;;
   esac
 done
@@ -61,10 +71,25 @@ case $NEW_VERSION in (*[!0-9]*|'') echo "release-version должен быть �
 case $MIN_UPDATER in (*[!0-9]*|'') echo "min-updater должен быть целым числом" >&2; exit 2;; esac
 case $CONFIG_SCHEMA in (*[!0-9]*|'') echo "config-schema должен быть целым числом" >&2; exit 2;; esac
 
-TAG="v$NEW_VERSION"
-echo "cut_release.sh: готовлю $TAG (RELEASE_VERSION=$NEW_VERSION, MIN_UPDATER_VERSION=$MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CONFIG_SCHEMA)" >&2
 
 command -v gh >/dev/null 2>&1 || { echo "cut_release.sh: не найден gh (GitHub CLI) - установите его перед публикацией" >&2; exit 1; }
+
+if [ -z "$TAG" ]; then
+  if [ "$NEW_VERSION" -lt "$DATE_TAGS_FROM" ]; then
+    TAG="v$NEW_VERSION"
+  else
+    # vГГ.М.Д без ведущих нулей; занятый тег -> .2, .3, ...
+    day_tag=v$(date '+%y %m %d' | awk '{ printf "%d.%d.%d", $1, $2, $3 }')
+    TAG=$day_tag
+    day_n=1
+    while gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; do
+      day_n=$((day_n + 1))
+      TAG=$day_tag.$day_n
+    done
+  fi
+fi
+case $TAG in (''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*|*..*) echo "cut_release.sh: недопустимый тег: $TAG" >&2; exit 2;; esac
+echo "cut_release.sh: готовлю $TAG (RELEASE_VERSION=$NEW_VERSION, MIN_UPDATER_VERSION=$MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CONFIG_SCHEMA)" >&2
 
 sha_tool() {
   if command -v sha256sum >/dev/null 2>&1; then echo sha256sum

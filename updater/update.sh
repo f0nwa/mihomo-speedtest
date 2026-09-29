@@ -508,12 +508,14 @@ awk -v MANIFEST="$MANIFEST_TMP" -v VALIDATE_ONLY=1 -v SELECTED="$components" \
     -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
 if [ "$cmd" = check ]; then
   installed_version=
+  # Версия показывается именем релиза (тегом), номер - в скобках.
   if [ -f "$INSTALLED_MANIFEST_PATH" ]; then installed_version=$(manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_VERSION); fi
-  if [ -n "$installed_version" ]; then say "Установлена версия релиза: $installed_version"
+  if [ -n "$installed_version" ]; then
+    installed_tag=$(manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG)
+    say "Установлена версия релиза: ${installed_tag:-v$installed_version} (номер $installed_version)"
   else say 'Установленный релиз не отслеживается update.sh'; fi
-  say "Доступна версия релиза: $(manifest_field "$MANIFEST_TMP" RELEASE_VERSION) (формат манифеста $(manifest_field "$MANIFEST_TMP" FORMAT_VERSION))"
   release_tag=$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)
-  if [ -n "$release_tag" ]; then say "Тег релиза: $release_tag"; fi
+  say "Доступна версия релиза: ${release_tag:-v$(manifest_field "$MANIFEST_TMP" RELEASE_VERSION)} (номер $(manifest_field "$MANIFEST_TMP" RELEASE_VERSION), формат манифеста $(manifest_field "$MANIFEST_TMP" FORMAT_VERSION))"
   exit 0
 fi
 SHA_TOOL=$(sha256_tool) || die 'не найден инструмент SHA256'
