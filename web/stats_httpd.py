@@ -97,6 +97,7 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
 import http.server
 import json
 import os
+import signal
 import socketserver
 import subprocess
 import sys
@@ -416,6 +417,30 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
         # STATS_HTTPD_READ_TIMEOUT позволяет тестам подставить маленькое
         # значение вместо ожидания секунд по умолчанию.
         timeout = int(os.environ.get("STATS_HTTPD_READ_TIMEOUT", "30"))
+
+        # Остановка сервиса и keep-alive (см. _child_on_term() ниже): пока
+        # ребёнок ждёт СЛЕДУЮЩИЙ запрос по keep-alive-соединению, он
+        # простаивает (_CHILD_BUSY=False) и по TERM завершается сразу; пока
+        # обрабатывает запрос - дописывает ответ и закрывает соединение.
+        def handle_one_request(self):
+            global _CHILD_BUSY
+            _CHILD_BUSY = False
+            if _STOPPING:
+                self.close_connection = True
+                return
+            try:
+                super().handle_one_request()
+            finally:
+                _CHILD_BUSY = False
+                if _STOPPING:
+                    self.close_connection = True
+
+        def parse_request(self):
+            # Вызывается stdlib сразу после чтения строки запроса - с этого
+            # момента соединение "занято" и TERM не должен обрывать ответ.
+            global _CHILD_BUSY
+            _CHILD_BUSY = True
+            return super().parse_request()
 
         def log_message(self, fmt, *args):
             pass  # тихо - лог уже ведёт speedtest2.sh поверх stdout/stderr процесса
@@ -892,6 +917,27 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
     return Handler
 
 
+# Состояние остановки для процесса-обработчика соединения (ребёнка после
+# fork) - см. _child_on_term() и Handler.handle_one_request().
+_STOPPING = False
+_CHILD_BUSY = False
+
+
+def _child_on_term(signum, frame):
+    # TERM в ребёнке (его шлёт родитель из _on_term() при остановке службы).
+    # Простаивающее keep-alive-соединение закрываем немедленно - иначе
+    # открытая вкладка панели, опрашивающая сервер каждые 2 с, держала бы
+    # ребёнка живым бесконечно (таймаут простоя не наступает), и после
+    # "S80speedtest-stats stop"/uninstall.sh веб-интерфейс продолжал бы
+    # отвечать по старому соединению. Запрос, который уже обрабатывается,
+    # дописываем до конца (на это полагается self-restart - см. шапку
+    # файла) и только потом закрываем соединение.
+    global _STOPPING
+    _STOPPING = True
+    if not _CHILD_BUSY:
+        os._exit(0)
+
+
 class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
     # ForkingMixIn - см. пояснение в шапке файла про self-restart.
     allow_reuse_address = True
@@ -940,8 +986,18 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
         # обработки уже принятого соединения (request) слушающий сокет не
         # нужен. Дальше - копия socketserver.ForkingMixIn.process_request()
         # из стандартной библиотеки.
-        pid = os.fork()
+        # TERM блокируется на время fork(), чтобы ребёнок не получил его,
+        # пока ещё действует унаследованный родительский обработчик
+        # (_on_term() в ребёнке разослал бы TERM "братьям" по копии
+        # active_children). Ребёнок ставит свой обработчик и снимает блок.
+        masked = _block_term()
+        try:
+            pid = os.fork()
+        except BaseException:
+            _unblock_term(masked)
+            raise
         if pid:
+            _unblock_term(masked)
             # Родитель - как в оригинале: просто регистрирует ребёнка и
             # закрывает СВОЮ копию request (не листенер, а принятое
             # соединение - им теперь занимается ребёнок). active_children -
@@ -960,6 +1016,8 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
             self.close_request(request)
             return
         # Ребёнок - никогда не возвращается, только os._exit() в finally.
+        signal.signal(signal.SIGTERM, _child_on_term)
+        _unblock_term(masked)
         try:
             self.socket.close()
         except OSError:
@@ -977,10 +1035,42 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
                 os._exit(status)
 
 
+def _block_term():
+    if hasattr(signal, "pthread_sigmask"):
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        return True
+    return False
+
+
+def _unblock_term(masked):
+    if masked:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+
+
+def _install_parent_term(server):
+    # TERM в родителе-слушателе (supervisor в stats_service.sh гасит им
+    # бэкенд при stop/restart/reconfigure, в т.ч. из uninstall.sh): сначала
+    # рассылаем TERM всем живым детям-обработчикам соединений - иначе они
+    # переживают родителя и продолжают отвечать по keep-alive (см.
+    # _child_on_term()), - затем завершаемся так же, как без обработчика
+    # (смерть от сигнала TERM, код для wait в supervisor не меняется).
+    def _on_term(signum, frame):
+        for pid in list(server.active_children or ()):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _on_term)
+
+
 def main(argv):
     opts = parse_args(argv)
     handler = make_handler(opts["docroot"])
     server = ForkingHTTPServer((opts["bind"], opts["port"]), handler)
+    _install_parent_term(server)
     try:
         live_log_cleanup(force=True)   # хвосты прошлого запуска сервера
     except OSError:
