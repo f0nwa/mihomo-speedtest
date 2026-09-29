@@ -80,25 +80,28 @@ fail_json() {
 # Каждая строка файла получает "\n" в конце - файл без завершающего
 # перевода строки приходит с ним, для YAML это безразлично.
 jstr_file() {
-  awk '
-    BEGIN { printf "\"" }
-    {
-      s = $0
-      gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
-      gsub(/\t/, "\\t", s); gsub(/\r/, "\\r", s)
-      if (s ~ /[\001-\037\177]/) {
-        o = ""
-        for (i = 1; i <= length(s); i++) {
-          c = substr(s, i, 1)
-          if (c ~ /[\001-\037\177]/) {
-            for (k = 1; k < 128; k++) if (sprintf("%c", k) == c) break
-            o = o sprintf("\\u%04x", k)
-          } else o = o c
-        }
-        s = o
+  # Экранирование посимвольной склейкой, без gsub: у gsub в разных awk
+  # по-разному трактуется обратная косая черта в замене (mawk и некоторые busybox
+  # не удваивают обратную косую черту - JSON ломался на конфигах с
+  # регулярками в exclude-filter). LC_ALL=C - работаем с байтами, UTF-8
+  # проходит как есть.
+  LC_ALL=C awk '
+    BEGIN { printf "\""; for (k = 1; k < 128; k++) ord[sprintf("%c", k)] = k }
+    function esc(s,   o, i, c, n) {
+      if (s !~ /[\\"\001-\037\177]/) return s
+      o = ""; n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\\") o = o "\\\\"
+        else if (c == "\"") o = o "\\\""
+        else if (c == "\t") o = o "\\t"
+        else if (c == "\r") o = o "\\r"
+        else if (c ~ /[\001-\037\177]/) o = o sprintf("\\u%04x", ord[c])
+        else o = o c
       }
-      printf "%s\\n", s
+      return o
     }
+    { printf "%s\\n", esc($0) }
     END { printf "\"" }' "$1"
 }
 

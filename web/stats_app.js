@@ -1652,6 +1652,34 @@
     return m ? (m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + m[6]) : (name || '');
   }
 
+  // GET /api/config* с проверкой, что пришёл именно JSON редактора.
+  // fetchJson() молча превращает не-JSON в {} (так задумано для
+  // /api/stats), а здесь это дало бы пустой редактор, который можно
+  // сохранить поверх настоящего конфига. Поэтому ответ без поля field -
+  // ошибка с подробностями (код, тип, начало тела) для диагностики.
+  function fetchConfigJson(url, field) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      return r.text().then(function (body) {
+        var data = null;
+        try { data = JSON.parse(body); } catch (e) { data = null; }
+        if (r.status === 401) { return fetchJson(url); }
+        if (data && !r.ok) {
+          var err = new Error(data.error || ('HTTP ' + r.status));
+          err.status = r.status; err.data = data;
+          throw err;
+        }
+        if (!data || typeof data[field] !== 'string') {
+          var snippet = String(body || '').replace(/\s+/g, ' ').slice(0, 160);
+          throw new Error('неожиданный ответ сервера ' + url + ' (HTTP ' + r.status + ', ' +
+            (r.headers.get('Content-Type') || 'без типа') + '): ' + (snippet || 'пустое тело') +
+            '. Похоже, CGI cgi-bin/configedit не установлен или завершился с ошибкой - ' +
+            'перезапустите веб-службу (/opt/etc/init.d/S80speedtest-stats restart).');
+        }
+        return data;
+      });
+    });
+  }
+
   function postText(url, text) {
     return fetchJson(url, { method: 'POST', body: text, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   }
@@ -1660,7 +1688,7 @@
     setLoading();
     configView = { dirty: false };
     var view = configView;
-    fetchJson('/api/config').then(function (data) {
+    fetchConfigJson('/api/config', 'text').then(function (data) {
       clearApp();
       view.base = data.base;
       view.saved = data.text || '';
@@ -1754,7 +1782,7 @@
       // keepEditor - не трогать текст в редакторе (после автоотката правки
       // пользователя не должны пропасть), только обновить base/сохранённое.
       function reload(okText, kind, keepEditor) {
-        fetchJson('/api/config').then(function (d) {
+        fetchConfigJson('/api/config', 'text').then(function (d) {
           view.base = d.base; view.saved = d.text || '';
           if (!keepEditor) { view.editor.setValue(view.saved); view.editor.markLine(0); }
           setDirty();
@@ -1810,7 +1838,7 @@
               x.addEventListener('click', fn); td.appendChild(x);
             }
             function withBackup(fn) {
-              fetchJson('/api/config/backup' + q).then(fn)
+              fetchConfigJson('/api/config/backup' + q, 'text').then(fn)
                 ['catch'](function (e) { msg('Не удалось прочитать бэкап: ' + e.message, 'err'); });
             }
             act('Сравнить', function () {
