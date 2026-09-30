@@ -229,7 +229,7 @@ cached_plan_header() {
   safe_path "$cache_plan"
   for cache_file in identity.txt manifest.txt; do
     safe_path "$cache_plan/$cache_file"
-    [ -f "$cache_plan/$cache_file" ] || die 'подготовленный план не найден'
+    [ -f "$cache_plan/$cache_file" ] || die 'скачанное обновление не найдено; запустите обновление заново'
     cache_bytes=$(wc -c < "$cache_plan/$cache_file" | tr -d ' ')
     [ "$cache_bytes" -le 262144 ] || die 'повреждён подготовленный план'
   done
@@ -460,7 +460,7 @@ case $cmd in
     # Прогресс-строки в этом блоке - см. комментарий у "Подготовка
     # обновления" выше (мини консоль /updates, задача веб-редизайна):
     # каждая - отдельная команда, ничего не гейтит, только диагностика.
-    if [ "$cmd" = apply ]; then echo 'Проверка подготовленного плана...' >&2; fi
+    if [ "$cmd" = apply ]; then echo 'Проверка скачанного обновления...' >&2; fi
     verify_plan
     if [ "$cmd" = show-config-diff ]; then show_config_diff; fi
     if [ "$cmd" = apply ]; then

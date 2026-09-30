@@ -152,23 +152,6 @@ read_json_or_null() {
   [ -f "$1" ] && cat "$1" || printf 'null'
 }
 
-# Локальное чтение одного поля из FORMAT_VERSION=2-манифеста (то же самое,
-# что manifest_field() в update.sh) - update.sh запускается ОТДЕЛЬНЫМ
-# процессом (sh "$UPDATE_SCRIPT" ...), его shell-функции сюда не
-# пробрасываются, поэтому копия нужна: используется только для чтения
-# installed_version при формировании notes (см. fetch_release_notes()
-# ниже) и НЕ меняет схему update_plan.awk/update.sh (задача веб-редизайна -
-# минимизация отпечатка изменения).
-su_manifest_field() { awk -F= -v k="$2" '$1==k{print $2; exit}' "$1" 2>/dev/null; }
-
-# Путь к установленному манифесту - та же логика по умолчанию, что и в
-# update.sh (DIR/UPDATE_STATE_DIR/INSTALLED_MANIFEST_PATH), но вычисляется
-# здесь заново: update.sh не экспортирует свои переменные наружу.
-su_installed_manifest_path() {
-  su_state_dir=${UPDATE_STATE_DIR:-$DIR/.update}
-  printf '%s' "${INSTALLED_MANIFEST_PATH:-$su_state_dir/installed-manifest.txt}"
-}
-
 # Забирает текст релиза (поле "body") с GitHub API для одного тега -
 # $1=тег (например "v10"). Печатает уже готовую JSON-строку В КАВЫЧКАХ
 # (json.dumps дал бы то же самое, но парсер здесь наивный - экранирование
@@ -204,17 +187,17 @@ except Exception:
   return $frn_rc
 }
 
-# Собирает JSON-массив "notes" с описанием только нового релиза плана:
-# с тегами-датами (v26.9.29) промежуточные теги по номеру не вычислить.
-# $1=целевой RELEASE_VERSION (число), $2=его тег. Печатает "[]", если
-# установлена та же или более новая версия либо текст не добыт
-# (сеть/API недоступны) - check из-за заметок не блокируется.
+# Собирает JSON-массив "notes" с описанием последнего релиза (того, что
+# в плане): и когда он новее установленного, и когда уже установлен -
+# тогда это "что нового" в текущей версии. Промежуточные релизы не
+# собираются: с тегами-датами (v26.9.29) их не вычислить по номеру.
+# $1=RELEASE_VERSION плана (число), $2=его тег. Печатает "[]", если тега
+# нет или текст не добыт (сеть/API недоступны) - check из-за заметок не
+# блокируется.
 fetch_release_notes() {
   frs_target=$1
   frs_tag=$2
-  frs_installed=$(su_manifest_field "$(su_installed_manifest_path)" RELEASE_VERSION)
-  case $frs_installed in *[!0-9]*|'') frs_installed=0 ;; esac
-  if [ "$frs_installed" -ge "$frs_target" ] || [ -z "$frs_tag" ]; then
+  if [ -z "$frs_tag" ]; then
     printf '[]'
     return 0
   fi

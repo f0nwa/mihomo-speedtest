@@ -194,7 +194,7 @@ prepare_files() {
   done < "$WORK/records"
   # После загрузки не должен сохраниться план уже изменившегося состояния.
   build_snapshot
-  [ "$plan_id" = "$initial_id" ] || die 'локальное состояние изменилось при подготовке; постройте новый план'
+  [ "$plan_id" = "$initial_id" ] || die 'локальное состояние изменилось при подготовке; запустите обновление заново'
   if [ "$migration_required" = 1 ]; then
     prepare_config_candidate
     build_snapshot
@@ -220,14 +220,14 @@ discard_plan() {
   safe_path "$PLANS/$plan_id"
   lock_plans
   rm -rf "$PLANS/$plan_id"
-  say 'Подготовленный план удалён из /tmp'
+  say 'Скачанное обновление удалено из /tmp'
 }
 verify_plan() {
   validate_plan_id
   expected_id=$plan_id
   saved=$PLANS/$plan_id
   safe_path "$saved"
-  [ -d "$saved" ] || die 'подготовленный план не найден'
+  [ -d "$saved" ] || die 'скачанное обновление не найдено; запустите обновление заново'
   lock_plans
   if [ "$cmd" = apply ]; then assert_no_transaction; fi
   for saved_file in identity.txt manifest.txt request.txt created-at; do
@@ -240,14 +240,14 @@ verify_plan() {
   created=$(cat "$saved/created-at")
   case $created in *[!0-9]*|'') die 'неверный срок плана' ;; esac
   now=$(date +%s)
-  [ "$created" -le "$now" ] && [ "$created" -gt "$((now - 86400))" ] || die 'срок подготовленного плана истёк'
+  [ "$created" -le "$now" ] && [ "$created" -gt "$((now - 86400))" ] || die 'скачанное обновление устарело (старше суток); запустите обновление заново'
   download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144
-  [ "$(sha256_of "$MANIFEST_TMP")" = "$stored_manifest" ] || die 'релиз изменился; постройте новый план'
+  [ "$(sha256_of "$MANIFEST_TMP")" = "$stored_manifest" ] || die 'релиз изменился; запустите обновление заново'
   components=$(cat "$saved/request.txt")
   awk -v MANIFEST="$MANIFEST_TMP" -v VALIDATE_ONLY=1 -v SELECTED="$components" -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
   build_snapshot
   if [ "$migration_required" != 1 ]; then
-    [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+    [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; запустите обновление заново'
   fi
   check_schema_release
   total=$(file_budget) || exit 1
@@ -269,7 +269,7 @@ verify_plan() {
     [ "$(mode_of "$saved/engine/$src")" = "${mode#0}" ] || die 'изменён режим движка плана'
   done < "$WORK/bootstrap-files"
   if [ "$migration_required" = 1 ]; then verify_config_candidate; fi
-  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; запустите обновление заново'
   overwrite=$(run_parser json | awk '/"overwrite_required":true/{print "yes"}')
   if [ -n "$overwrite" ] && [ "$confirm_local" != 1 ] && [ "$cmd" != show-config-diff ]; then die 'локальные изменения требуют отдельного подтверждения --confirm-local'; fi
   prepared=1
@@ -400,16 +400,16 @@ verify_config_candidate() {
   done
   check_config_source_snapshot
   bind_config_identity
-  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; постройте новый план'
+  [ "$plan_id" = "$expected_id" ] || die 'локальное состояние изменилось; запустите обновление заново'
   config_confirm_required=$(manifest_field "$WORK/config-info.txt" CONFIRM)
   CONFIG_PAYLOAD=$saved
   config_tools
   # Повторная сборка гарантирует связь результата с проверенными инструментами.
   sh "$WORK/migration-tools/migrate_config.sh" --source "$WORK/config-source.yaml" --template "$WORK/migration-tools/config.example.yaml" \
     --output "$WORK/config-rebuilt.yaml" --report "$WORK/config-rebuilt-report.txt" > "$WORK/migration.log" 2>&1 || die 'повторная сборка конфига не прошла'
-  cmp -s "$WORK/config-rebuilt.yaml" "$WORK/candidate.yaml" && cmp -s "$WORK/config-rebuilt-report.txt" "$WORK/migration-report.txt" || die 'результат миграции изменился; постройте новый план'
+  cmp -s "$WORK/config-rebuilt.yaml" "$WORK/candidate.yaml" && cmp -s "$WORK/config-rebuilt-report.txt" "$WORK/migration-report.txt" || die 'результат миграции изменился; запустите обновление заново'
   awk -v OLD="$WORK/config-source.yaml" -v NEW="$WORK/candidate.yaml" -f "$WORK/migration-tools/config_diff.awk" > "$WORK/config-rebuilt-diff.json" || die 'повторная проверка diff не прошла'
-  cmp -s "$WORK/config-rebuilt-diff.json" "$WORK/config-diff.json" || die 'diff изменился; постройте новый план'
+  cmp -s "$WORK/config-rebuilt-diff.json" "$WORK/config-diff.json" || die 'diff изменился; запустите обновление заново'
   run_config_test
   verified_confirm=$config_confirm_required
   build_snapshot

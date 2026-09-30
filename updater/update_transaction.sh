@@ -500,7 +500,7 @@ transaction_apply() (
   tx_expected=$plan_id
   build_snapshot
   if [ "${migration_required:-0}" = 1 ]; then check_config_source_snapshot; bind_config_identity; fi
-  [ "$plan_id" = "$tx_expected" ] || die 'локальное состояние изменилось; постройте новый план'
+  [ "$plan_id" = "$tx_expected" ] || die 'локальное состояние изменилось; запустите обновление заново'
   tx_build_installed || die 'несовместимая смесь компонентов'
   while IFS='|' read -r tx_collision_kind tx_collision_cid tx_collision_src tx_collision_dest tx_collision_rest; do
     case $tx_collision_kind in

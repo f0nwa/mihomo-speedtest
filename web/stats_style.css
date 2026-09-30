@@ -93,6 +93,8 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;p
 .node-chip.off{opacity:.4;text-decoration:line-through}
 .node-chip.off.match{opacity:.7}
 .node-chip-wins{color:var(--muted)}
+.node-chip.collapsed{display:none}
+.node-chip-more{color:var(--muted);border-style:dashed}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:600}

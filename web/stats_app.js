@@ -353,7 +353,10 @@
   // (настройка «Сколько нод показывать на графике сразу»). Выбор хранится
   // здесь, вне DOM, по имени ноды - как stabilityFilter ниже, переживает
   // перерисовку после прогона и сбрасывается только перезагрузкой страницы.
-  var nodeChartState = { vis: {}, query: '' };
+  // Скрытые ноды в легенде свёрнуты (страница не раздувается от длинного
+  // списка зачёркнутых чипов): видны только совпавшие с поиском, остальные
+  // раскрывает кнопка «+ N скрытых» в конце легенды (showHidden).
+  var nodeChartState = { vis: {}, query: '', showHidden: false };
 
   // withAlpha(color, a) - тот же цвет с прозрачностью: "#rrggbb" или
   // "hsl(h, s%, l%)" (оба формата отдаёт node_color() в render_stats.awk).
@@ -432,10 +435,19 @@
       chip.addEventListener('click', function () {
         nodeChartState.vis[node.name] = !isVisible(i);
         applyVisibility();
+        // чип мог свернуться из-под курсора - mouseleave тогда не придёт
+        if (chip.classList.contains('collapsed')) { setHighlight(null); }
       });
       legend.appendChild(chip);
       return chip;
     });
+    var hiddenToggle = el('button', 'node-chip node-chip-more');
+    hiddenToggle.type = 'button';
+    hiddenToggle.addEventListener('click', function () {
+      nodeChartState.showHidden = !nodeChartState.showHidden;
+      applyVisibility();
+    });
+    legend.appendChild(hiddenToggle);
     wrap.appendChild(legend);
 
     var highlighted = null;
@@ -475,17 +487,23 @@
     }
 
     function applyVisibility() {
-      var shown = 0, found = 0;
+      var shown = 0, found = 0, folded = 0;
       chips.forEach(function (c, i) {
         var vis = isVisible(i), m = matches(i);
+        var fold = !vis && !m && !nodeChartState.showHidden;
         if (vis) { shown++; }
         if (m) { found++; }
+        if (fold) { folded++; }
+        c.classList.toggle('collapsed', fold);
         c.classList.toggle('off', !vis);
         c.classList.toggle('match', m);
         c.classList.toggle('dim', !!nodeChartState.query && !m);
         if (chart) { chart.setDatasetVisibility(i, vis); }
       });
       counter.textContent = 'показано ' + shown + ' из ' + top.length;
+      // кнопка не нужна, если нечего раскрывать/сворачивать
+      hiddenToggle.classList.toggle('collapsed', shown === top.length || (!nodeChartState.showHidden && folded === 0));
+      hiddenToggle.textContent = nodeChartState.showHidden ? 'свернуть скрытые' : '+ ' + folded + ' скрытых';
       onlyFoundBtn.textContent = 'Только найденные (' + found + ')';
       onlyFoundBtn.disabled = found === 0;
       if (chart) { chart.update('none'); }
@@ -1956,11 +1974,12 @@
       row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }
       summary.appendChild(row);
       app.appendChild(summary);
-      // Вместо полного списка файлов - текст релиза(ов) "что нового" (п.4
-      // задачи редизайна). lc.notes заполняется cmd_check() на backend -
-      // один элемент на каждый пропущенный релиз, от старого к новому.
+      // Вместо полного списка файлов - текст последнего релиза "что
+      // нового" (п.4 задачи редизайна). lc.notes заполняет cmd_check() на
+      // backend: и для доступного обновления, и для уже установленной
+      // версии.
       if (lc && lc.ok && lc.notes && lc.notes.length) {
-        var notesCard = card('Что нового');
+        var notesCard = card(available ? 'Что нового' : 'Что нового в установленной версии');
         lc.notes.forEach(function (n) {
           notesCard.appendChild(el('h2', null, 'Релиз ' + n.tag));
           notesCard.appendChild(el('pre', 'release-notes', n.body || '(описание не указано)'));

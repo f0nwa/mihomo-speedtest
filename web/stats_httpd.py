@@ -389,7 +389,10 @@ API_ALIASES = {
     "api/settings": ("cgi-bin/config", {"API_JSON": "1"}),
     "api/stats": ("stats.json", {}),
     "api/progress": ("progress.json", {}),
-    "api/updates/check": ("cgi-bin/update", {"MST_UPDATE_ACTION": "check"}),
+    # check синхронно качает манифест, хеши и заметки релиза с GitHub -
+    # на медленном канале роутера 30 с по умолчанию не хватало: CGI
+    # обрывался с 500, а новая версия появлялась только после F5.
+    "api/updates/check": ("cgi-bin/update", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),
     "api/updates/status": ("cgi-bin/update", {"MST_UPDATE_ACTION": "status"}),
     "api/updates/prepare": ("cgi-bin/update", {"MST_UPDATE_ACTION": "prepare"}),
     "api/updates/apply": ("cgi-bin/update", {"MST_UPDATE_ACTION": "apply"}),
