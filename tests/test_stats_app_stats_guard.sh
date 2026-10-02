@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILE="$ROOT/web/stats_app.js"
+FILE="$ROOT/web/stats_app_stats.js"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # Баг: на свежей установке (или сразу после переустановки) stats.json ещё
@@ -23,7 +23,7 @@ uses=$(grep -o 'runsCount' "$FILE" | wc -l | tr -d ' ')
 [ "$uses" -ge 3 ] || fail "ожидалось минимум 3 упоминания runsCount (объявление + 2 использования), найдено $uses"
 
 if command -v node >/dev/null 2>&1; then
-  node --check "$FILE"
+  node --input-type=module --check < "$FILE"
 fi
 
 echo "test_stats_app_stats_guard.sh: OK"

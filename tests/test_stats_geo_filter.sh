@@ -1,9 +1,9 @@
 #!/bin/sh
 # Логика карточки "Какие ноды не проверять" (гео-фильтр BLOCK) в
-# web/stats_app.js: блок GEO-LOGIC-BEGIN/END вырезается и проверяется в node.
+# web/stats_app_settings.js: блок GEO-LOGIC-BEGIN/END вырезается и проверяется в node.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILE="$ROOT/web/stats_app.js"
+FILE="$ROOT/web/stats_app_settings.js"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 grep -q "GEO-LOGIC-BEGIN" "$FILE" || fail "нет метки GEO-LOGIC-BEGIN"
@@ -13,9 +13,9 @@ grep -q "hidden.name = 'geo_filter'" "$FILE" || fail "готовая строк�
 grep -q "\.geo-grid" "$ROOT/web/stats_style.css" || fail "нет стилей карточки в stats_style.css"
 
 command -v node >/dev/null 2>&1 || { echo "test_stats_geo_filter.sh: OK (без node - только grep)"; exit 0; }
-node --check "$FILE"
+node --input-type=module --check < "$FILE"
 
-LOGIC=$(awk '/GEO-LOGIC-BEGIN/{on=1;next} /GEO-LOGIC-END/{on=0} on' "$FILE")
+LOGIC=$(awk '/GEO-LOGIC-BEGIN/{on=1;next} /GEO-LOGIC-END/{on=0} on' "$FILE" | sed 's/^export //')
 TMP=$(mktemp "${TMPDIR:-/tmp}/geo-test.XXXXXX")
 trap 'rm -f "$TMP"' EXIT INT TERM
 {

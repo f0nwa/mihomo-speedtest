@@ -68,7 +68,6 @@ import stats_auth
 
 AUTH_COOKIE = "mst_session"
 AUTH_BODY_LIMIT = 16 * 1024
-PUBLIC_ASSETS = {"index.html", "style.css", "app.js", "chart.js", "favicon.ico"}
 
 
 # ----- состояние системы для футера (GET /api/system) -----
@@ -453,10 +452,19 @@ STATIC_FILES = {
     "index.html": "stats_index.html",
     "style.css": "stats_style.css",
     "app.js": "stats_app.js",
+    "app-core.js": "stats_app_core.js",
+    "app-stats.js": "stats_app_stats.js",
+    "app-settings.js": "stats_app_settings.js",
+    "app-updates.js": "stats_app_updates.js",
+    "app-log.js": "stats_app_log.js",
+    "app-config.js": "stats_app_config.js",
     "chart.js": "stats_chart.js",
     "codemirror.js": "stats_codemirror.js",
     "codemirror.css": "stats_codemirror.css",
 }
+
+# Файлы интерфейса доступны без входа: экран входа - тот же SPA.
+PUBLIC_ASSETS = set(STATIC_FILES) | {"favicon.ico"}
 
 # Данные, которые пишет speedtest2.sh в docroot.
 DATA_FILES = {

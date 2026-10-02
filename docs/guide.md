@@ -707,7 +707,7 @@ install.sh будет смотреть на старую версию или
 ```sh
 scp -O -P <порт SSH, если не 22> install.sh speedtest-runtime/speedtest2.sh speedtest-runtime/prep.awk \
     speedtest-runtime/providers.awk web/render_stats.awk web/stats_cgi.sh web/stats_run.sh \
-    web/stats_httpd.py web/stats_index.html web/stats_style.css web/stats_app.js \
+    web/stats_httpd.py web/stats_index.html web/stats_style.css web/stats_app*.js \
     web/stats_chart.js speedtest-runtime/node_stats_update.awk speedtest-runtime/sub_convert.awk web/render_progress.awk \
     web/stats_service.sh \
     root@<IP роутера>:/opt/etc/mihomo-speedtest/
@@ -739,7 +739,7 @@ sh /opt/etc/mihomo-speedtest/speedtest2.sh --force
 2/3 независимой службы (см. выше) обычные прогоны `speedtest2.sh` больше
 не управляют веб-сервисом и не раскладывают его файлы в раздаваемый
 каталог. Если менялись `stats_cgi.sh`, `stats_run.sh`, `stats_httpd.py`,
-`stats_index.html`/`stats_style.css`/`stats_app.js`/`stats_chart.js`,
+`stats_index.html`/`stats_style.css`/`stats_app*.js`/`stats_chart.js`,
 `stats_service.sh`, `stats_init.sh` или настройки в `speedtest2.env`,
 влияющие на сам веб-сервис (`STATS_HTTP_*`, `STATS_AUTH_*`) - применить их
 явным перезапуском независимой службы:

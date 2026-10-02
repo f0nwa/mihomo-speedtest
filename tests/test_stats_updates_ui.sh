@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILE="$ROOT/web/stats_app.js"
+FILE="$ROOT/web/stats_app_updates.js"
 CSS="$ROOT/web/stats_style.css"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -69,7 +69,7 @@ grep -q "'Последнее обновление применено'" "$FILE" |
 grep -q "'Последнее обновление не применено'" "$FILE" || fail "раздел не показывает ошибку последнего применения"
 
 if command -v node >/dev/null 2>&1; then
-  node --check "$FILE"
+  node --input-type=module --check < "$FILE"
 fi
 
 echo "test_stats_updates_ui.sh: OK"

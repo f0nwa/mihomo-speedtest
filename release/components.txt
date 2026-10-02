@@ -41,6 +41,12 @@ FILE|web|web/stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|0755|sh
 FILE|web|web/stats_index.html|/opt/etc/mihomo-speedtest/stats_index.html|0644|none
 FILE|web|web/stats_style.css|/opt/etc/mihomo-speedtest/stats_style.css|0644|none
 FILE|web|web/stats_app.js|/opt/etc/mihomo-speedtest/stats_app.js|0644|none
+FILE|web|web/stats_app_core.js|/opt/etc/mihomo-speedtest/stats_app_core.js|0644|none
+FILE|web|web/stats_app_stats.js|/opt/etc/mihomo-speedtest/stats_app_stats.js|0644|none
+FILE|web|web/stats_app_settings.js|/opt/etc/mihomo-speedtest/stats_app_settings.js|0644|none
+FILE|web|web/stats_app_updates.js|/opt/etc/mihomo-speedtest/stats_app_updates.js|0644|none
+FILE|web|web/stats_app_log.js|/opt/etc/mihomo-speedtest/stats_app_log.js|0644|none
+FILE|web|web/stats_app_config.js|/opt/etc/mihomo-speedtest/stats_app_config.js|0644|none
 FILE|web|web/stats_chart.js|/opt/etc/mihomo-speedtest/stats_chart.js|0644|none
 FILE|web|web/stats_codemirror.js|/opt/etc/mihomo-speedtest/stats_codemirror.js|0644|none
 FILE|web|web/stats_codemirror.css|/opt/etc/mihomo-speedtest/stats_codemirror.css|0644|none

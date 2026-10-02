@@ -37,7 +37,7 @@ label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
 label:first-child{margin-top:0}
 input[type=text],input[type=password],input[type=number]{width:100%;padding:7px 9px;border:1px solid var(--card-border);border-radius:0;background:var(--bg);color:var(--text);font-size:14px}
 .hint{color:var(--muted);font-size:12px;margin:4px 0 0}
-/* Настройки: поле с подробной подсказкой (attachHelp() в stats_app.js), свёрнутые блоки */
+/* Настройки: поле с подробной подсказкой (attachHelp() в stats_app_settings.js), свёрнутые блоки */
 .field{position:relative}
 .field-head{display:flex;align-items:flex-end;gap:8px}
 .field-head label{flex:0 1 auto}
@@ -69,13 +69,13 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;p
 .sw.sw-alive{background:var(--accent)}
 .sw.sw-down{background:var(--danger)}
 .sw.sw-absent{background:var(--muted)}
-/* График по нодам (buildNodeChart() в stats_app.js) - Chart.js рисует
+/* График по нодам (buildNodeChart() в stats_app_stats.js) - Chart.js рисует
    сам на canvas внутри .chart-wrap (оси, таймлайн, тултип); тут только
    размер контейнера - canvas растягивается на всю его ширину/высоту
    (responsive+maintainAspectRatio:false в опциях графика). */
 .chart-wrap{position:relative;height:240px}
 .chart-wrap canvas{max-width:100%}
-/* График «Скорость по нодам»: поиск, быстрые кнопки, строка под курсором, легенда-чипы (buildNodeChart() в stats_app.js) */
+/* График «Скорость по нодам»: поиск, быстрые кнопки, строка под курсором, легенда-чипы (buildNodeChart() в stats_app_stats.js) */
 .node-chart .chart-wrap{height:300px}
 .node-chart-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px}
 .node-chart-bar input[type=text]{width:240px;flex:0 1 240px;font-size:13px}
@@ -121,7 +121,7 @@ label.stability-filter-item{display:inline-flex;align-items:center;gap:6px;margi
 .update-console.live-log{max-height:70vh;min-height:240px}
 .update-console .log-line.sep{color:#8b97a6}
 .update-console .log-line.ok{color:#7ee2a8}
-/* Журнал применения конфига (renderConfig() в stats_app.js) */
+/* Журнал применения конфига (renderConfig() в stats_app_config.js) */
 .config-apply{margin-top:14px}
 .config-apply-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .config-apply-head h2{margin:0}
@@ -142,7 +142,7 @@ label.stability-filter-item{display:inline-flex;align-items:center;gap:6px;margi
 .sys-footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--card-border);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11.5px;letter-spacing:.3px}
 
 /* Карточка "Какие ноды не проверять" (гео-фильтр BLOCK) - см.
-   stats_app.js:buildGeoFilterCard(). */
+   stats_app_settings.js:buildGeoFilterCard(). */
 textarea{width:100%;padding:7px 9px;border:1px solid var(--card-border);border-radius:0;background:var(--bg);color:var(--text);font:inherit;font-size:14px;resize:vertical}
 select{padding:6px 8px;border:1px solid var(--card-border);border-radius:0;background:var(--bg);color:var(--text);font:inherit;font-size:13px;max-width:100%}
 button.small{padding:6px 12px;border:1px solid var(--accent);border-radius:0;background:transparent;color:var(--accent);font:inherit;font-size:13px;cursor:pointer}
