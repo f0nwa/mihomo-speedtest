@@ -6,8 +6,6 @@
 // Порядок модулей не важен: модули ссылаются друг на друга только внутри
 // функций, состояние общее только через session (app-core.js),
 // configDirty()/leaveConfig() (app-config.js) и экспортируемые функции.
-// График по нодам рисует Chart.js (stats_chart.js, подключается в
-// stats_index.html обычным <script> до этого модуля, глобальный Chart).
 
 import { app, card, clearApp, el, fetchJson, logoutBtn, mainNav, nextView, session, setLoading, setUnauthorizedHandler, showError, showFormMessage } from './app-core.js';
 import { renderStats, stopProgressPolling } from './app-stats.js';

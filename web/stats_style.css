@@ -61,22 +61,16 @@ button.submit.secondary{background:transparent;color:var(--accent);border:1px so
 .msg-err{background:#d1453b22;border:1px solid var(--danger);border-radius:0;padding:8px 12px;margin-bottom:16px;font-size:13px}
 pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;padding:12px;overflow:auto;font-size:12px}
 
-/* Раздел "Статистика" (шаг 4, /api/stats): легенда графика по нодам,
-   сам SVG-график и таблица доступности пула. */
+/* Раздел "Статистика" (/api/stats): легенда, лента доступности и
+   таблица доступности пула. */
 .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-bottom:8px;font-size:12px;color:var(--muted)}
 .legend-item{display:inline-flex;align-items:center;gap:5px}
 .sw{display:inline-block;width:10px;height:10px;border-radius:0}
 .sw.sw-alive{background:var(--accent)}
 .sw.sw-down{background:var(--danger)}
 .sw.sw-absent{background:var(--muted)}
-/* График по нодам (buildNodeChart() в stats_app_stats.js) - Chart.js рисует
-   сам на canvas внутри .chart-wrap (оси, таймлайн, тултип); тут только
-   размер контейнера - canvas растягивается на всю его ширину/высоту
-   (responsive+maintainAspectRatio:false в опциях графика). */
-.chart-wrap{position:relative;height:240px}
-.chart-wrap canvas{max-width:100%}
-/* График «Скорость по нодам»: поиск, быстрые кнопки, строка под курсором, легенда-чипы (buildNodeChart() в stats_app_stats.js) */
-.node-chart .chart-wrap{height:300px}
+/* Лента доступности по нодам (buildUptimeTimeline() в stats_app_stats.js):
+   строка на ноду - имя, canvas с клетками прогонов, аптайм. */
 .node-chart-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px}
 .node-chart-bar input[type=text]{width:240px;flex:0 1 240px;font-size:13px}
 .node-chart-bar .theme-btn{font-size:12.5px}
@@ -84,16 +78,16 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;p
 .node-chart-count{margin:0 auto 0 4px;font-size:12px}
 .node-chart-readout{min-height:1.5em;margin:0 0 6px;font-size:12.5px}
 .node-chart-readout.active{color:var(--text)}
-.node-legend{gap:6px;margin:10px 0 0}
-.node-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
-.node-chip:hover,.node-chip.hl{background:var(--card-border)}
-.node-chip.match{border-color:var(--accent)}
-.node-chip.dim{opacity:.35}
-.node-chip.off{opacity:.4;text-decoration:line-through}
-.node-chip.off.match{opacity:.7}
-.node-chip-wins{color:var(--muted)}
-.node-chip.collapsed{display:none}
-.node-chip-more{color:var(--muted);border-style:dashed}
+.uptime-rows{display:flex;flex-direction:column;gap:2px}
+.uptime-row{display:flex;align-items:center;gap:10px}
+.uptime-name{flex:0 0 200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.uptime-strip{flex:1 1 auto;min-width:0;height:14px;display:block;cursor:crosshair}
+.uptime-pct{flex:0 0 44px;text-align:right;font-size:12px;color:var(--muted)}
+.uptime-axis{display:flex;justify-content:space-between;margin:4px 54px 8px 210px;font-size:11px;color:var(--muted)}
+.uptime-axis span{flex:1}
+.sw.sw-skip{background:var(--muted);height:5px;margin-top:5px}
+.sw.sw-none{background:transparent;border:1px solid var(--card-border)}
+@media (max-width:640px){.uptime-name{flex-basis:110px}.uptime-axis{margin-left:120px}}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:600}

@@ -461,7 +461,6 @@ STATIC_FILES = {
     "app-updates.js": "stats_app_updates.js",
     "app-log.js": "stats_app_log.js",
     "app-config.js": "stats_app_config.js",
-    "chart.js": "stats_chart.js",
     "codemirror.js": "stats_codemirror.js",
     "codemirror.css": "stats_codemirror.css",
 }

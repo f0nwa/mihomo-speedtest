@@ -1,5 +1,5 @@
 // Раздел «Статистика» (/stats): KPI, кнопка запуска, живой прогресс,
-// график скорости по нодам (Chart.js) и таблица доступности нод.
+// лента доступности по нодам и таблица доступности нод.
 
 import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, fmtSigned, setLoading, showError, showNotYetMoved, statusLabel, viewGuard } from './app-core.js';
 import { refreshUpdatesBadge } from './app-updates.js';
@@ -131,7 +131,7 @@ function startProgressPolling(container, insertBefore) {
 
 // fmtDateShort/fmtTimeShort - как fmt_date_short()/fmt_time_short() в
 // render_stats.awk: iso в формате "YYYY-MM-DD HH:MM:SS". Используются
-// для подписей оси X в buildNodeChart().
+// для подписей оси времени ленты доступности.
 function fmtDateShort(iso) {
   return iso.slice(8, 10) + '.' + iso.slice(5, 7);
 }
@@ -160,287 +160,198 @@ function sameCalendarDay(labels) {
   return true;
 }
 
-// Вертикальное перекрестие в точке наведения - тултип Chart.js рисует
-// сам, а линию под курсором - нет, поэтому небольшой локальный плагин
-// (afterDraw поверх уже нарисованного графика). Регистрируется только
-// на этом графике (через options.plugins ниже), глобально не нужен.
-function makeCrosshairPlugin() {
-  return {
-    id: 'nodeCrosshair',
-    afterDraw: function (chart) {
-      var active = chart.getActiveElements();
-      if (!active.length) { return; }
-      var x = active[0].element.x;
-      var area = chart.chartArea;
-      var ctx = chart.ctx;
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(x, area.top);
-      ctx.lineTo(x, area.bottom);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted') || '#9aa0a6';
-      ctx.stroke();
-      ctx.restore();
-    }
-  };
+// ----- лента доступности по нодам -----
+// Строка на ноду, клетка на прогон: жива / не ответила / не проверялась.
+// Данные - поле window из node_stability.tsv (node_stats_update.awk: по
+// символу на прогон, последний справа), на роутере ничего не считается.
+// Ноды уже отсортированы по аптайму (render_stats.awk); по умолчанию
+// показываются первые node_history.cap (настройка «Сколько нод
+// показывать»), остальные - кнопкой «Все» или поиском.
+
+var UPTIME_ROW_H = 14;      // высота строки, CSS px
+var UPTIME_CELL_GAP = 1;    // зазор между клетками, если клетка шире 3 px
+var uptimeState = { query: '', all: false };
+
+function cssVar(name, fallback) {
+  var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+  return (v && v.trim()) || fallback;
 }
 
-// График «Скорость по нодам» (вариант A из макетов): все ноды истории,
-// легенда-чипы под графиком. Наведение на чип или на линию подсвечивает
-// ноду (остальные притухают, тултип - только по ней), клик по чипу
-// скрывает/показывает, поиск отбирает чипы, «Только найденные» оставляет
-// на графике их. Сразу показаны первые nodeHistory.cap нод по числу побед
-// (настройка «Сколько нод показывать на графике сразу»). Выбор хранится
-// здесь, вне DOM, по имени ноды - как stabilityFilter ниже, переживает
-// перерисовку после прогона и сбрасывается только перезагрузкой страницы.
-// Скрытые ноды в легенде свёрнуты (страница не раздувается от длинного
-// списка зачёркнутых чипов): видны только совпавшие с поиском, остальные
-// раскрывает кнопка «+ N скрытых» в конце легенды (showHidden).
-var nodeChartState = { vis: {}, query: '', showHidden: false };
+var UPTIME_LABELS = { A: 'жива', D: 'не ответила', S: 'не проверялась', '.': 'не было в подписке' };
 
-// withAlpha(color, a) - тот же цвет с прозрачностью: "#rrggbb" или
-// "hsl(h, s%, l%)" (оба формата отдаёт node_color() в render_stats.awk).
-function withAlpha(color, a) {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    return color + ('0' + Math.round(a * 255).toString(16)).slice(-2);
+function buildUptimeTimeline(nodes, runsSeries, cap) {
+  var wrap = el('div', 'uptime');
+  var cols = 0;
+  nodes.forEach(function (n) { cols = Math.max(cols, (n.window || '').length); });
+  if (!cols) {
+    wrap.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
+    return wrap;
   }
-  var m = /^hsl\((.*)\)$/.exec(color);
-  return m ? 'hsla(' + m[1] + ', ' + a + ')' : color;
-}
-
-function buildNodeChart(nodeHistory, runsSeries) {
-  var top = nodeHistory.top || [];
-  var cap = nodeHistory.cap || 8;
-  var labels = runsSeries.map(function (r) { return r.iso; });
-  var wrap = el('div', 'node-chart');
-
-  function isVisible(i) {
-    var v = nodeChartState.vis[top[i].name];
-    return v === undefined ? i < cap : v;
+  // Клетка col (0..cols-1) - прогон runsSeries[runs - cols + col], если он
+  // ещё есть в сводке (сводку могли обрезать по сроку хранения раньше окна).
+  function runIso(col) {
+    var r = runsSeries[runsSeries.length - cols + col];
+    return r ? r.iso : '';
   }
-  function matches(i) {
-    var q = nodeChartState.query.toLowerCase();
-    return !!q && top[i].name.toLowerCase().indexOf(q) >= 0;
+  function cell(node, col) {
+    var w = node.window || '';
+    var i = col - (cols - w.length);
+    return i >= 0 ? w.charAt(i) : '.';
   }
 
-  // --- панель: поиск, счётчик, быстрые кнопки ---
+  // --- панель: поиск и переключатель количества ---
   var bar = el('div', 'node-chart-bar');
   var search = el('input');
   search.type = 'text';
   search.placeholder = 'поиск ноды';
-  search.setAttribute('aria-label', 'Поиск ноды на графике');
-  search.value = nodeChartState.query;
-  var onlyFoundBtn = el('button', 'theme-btn');
-  onlyFoundBtn.type = 'button';
+  search.setAttribute('aria-label', 'Поиск ноды в ленте доступности');
+  search.value = uptimeState.query;
   var counter = el('span', 'hint node-chart-count');
+  var toggle = el('button', 'theme-btn');
+  toggle.type = 'button';
   bar.appendChild(search);
-  bar.appendChild(onlyFoundBtn);
   bar.appendChild(counter);
-  function quickBtn(text, fn) {
-    var b = el('button', 'theme-btn', text);
-    b.type = 'button';
-    b.addEventListener('click', fn);
-    bar.appendChild(b);
-  }
-  quickBtn('Все', function () { top.forEach(function (n) { nodeChartState.vis[n.name] = true; }); applyVisibility(); });
-  quickBtn('Топ-' + Math.min(cap, top.length), function () { top.forEach(function (n, i) { nodeChartState.vis[n.name] = i < cap; }); applyVisibility(); });
-  quickBtn('Скрыть все', function () { top.forEach(function (n) { nodeChartState.vis[n.name] = false; }); applyVisibility(); });
+  bar.appendChild(toggle);
   wrap.appendChild(bar);
 
-  var readout = el('p', 'hint node-chart-readout');
+  var readout = el('p', 'hint node-chart-readout', 'Наведите курсор на клетку - покажет время прогона и статус ноды.');
   wrap.appendChild(readout);
 
-  var chartWrap = el('div', 'chart-wrap');
-  wrap.appendChild(chartWrap);
-  var chart = null;
-  if (typeof Chart === 'undefined') {
-    chartWrap.appendChild(el('p', 'hint', 'chart.js не загрузился - график недоступен (переустановите install.sh).'));
-  }
+  var rowsBox = el('div', 'uptime-rows');
+  wrap.appendChild(rowsBox);
+  var axis = el('div', 'uptime-axis');
+  wrap.appendChild(axis);
 
-  // --- легенда-чипы ---
-  var legend = el('div', 'legend node-legend');
-  var chips = top.map(function (node, i) {
-    var chip = el('button', 'node-chip');
-    chip.type = 'button';
-    var sw = el('span', 'sw');
-    sw.style.background = node.color || '#2a78d6';
-    chip.appendChild(sw);
-    chip.appendChild(el('span', null, node.name));
-    chip.appendChild(el('span', 'node-chip-wins', String(node.wins)));
-    chip.title = 'побед: ' + node.wins + ' - клик скрывает/показывает';
-    chip.addEventListener('mouseenter', function () { setHighlight(i); });
-    chip.addEventListener('mouseleave', function () { setHighlight(null); });
-    chip.addEventListener('focus', function () { setHighlight(i); });
-    chip.addEventListener('blur', function () { setHighlight(null); });
-    chip.addEventListener('click', function () {
-      nodeChartState.vis[node.name] = !isVisible(i);
-      applyVisibility();
-      // чип мог свернуться из-под курсора - mouseleave тогда не придёт
-      if (chip.classList.contains('collapsed')) { setHighlight(null); }
-    });
-    legend.appendChild(chip);
-    return chip;
+  var legend = el('div', 'legend');
+  [['sw-alive', 'жива'], ['sw-down', 'не ответила'], ['sw-skip', 'не проверялась'], ['sw-none', 'не было в подписке']].forEach(function (it) {
+    var li = el('span', 'legend-item');
+    li.appendChild(el('span', 'sw ' + it[0]));
+    li.appendChild(document.createTextNode(it[1]));
+    legend.appendChild(li);
   });
-  var hiddenToggle = el('button', 'node-chip node-chip-more');
-  hiddenToggle.type = 'button';
-  hiddenToggle.addEventListener('click', function () {
-    nodeChartState.showHidden = !nodeChartState.showHidden;
-    applyVisibility();
-  });
-  legend.appendChild(hiddenToggle);
   wrap.appendChild(legend);
 
-  var highlighted = null;
+  var colors = {
+    A: cssVar('--accent', '#35c7c7'),
+    D: cssVar('--danger', '#d1453b'),
+    S: cssVar('--muted', '#8b9096'),
+    grid: cssVar('--border', '#26292c'),
+    hover: cssVar('--text', '#e7e6e2')
+  };
+  var rows = [];      // {node, canvas}
+  var hoverCol = -1;
 
-  function fmtVal(v) { return v === null || v === undefined ? '-' : bytesToMbit(v) + ' Мбит/с'; }
+  function draw(row) {
+    var c = row.canvas;
+    var wCss = c.clientWidth;
+    if (!wCss) { return; }
+    var dpr = window.devicePixelRatio || 1;
+    c.width = Math.round(wCss * dpr);
+    c.height = Math.round(UPTIME_ROW_H * dpr);
+    var ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, wCss, UPTIME_ROW_H);
+    var cw = wCss / cols;
+    var gap = cw > 3 ? UPTIME_CELL_GAP : 0;
+    ctx.fillStyle = colors.grid;
+    ctx.fillRect(0, UPTIME_ROW_H - 1, wCss, 1);
+    for (var col = 0; col < cols; col++) {
+      var ch = cell(row.node, col);
+      if (ch === '.') { continue; }
+      var x = col * cw;
+      ctx.fillStyle = colors[ch] || colors.S;
+      if (ch === 'S') {
+        // «не проверялась» - половина высоты: отличается не только цветом
+        ctx.fillRect(x, UPTIME_ROW_H / 2, Math.max(1, cw - gap), UPTIME_ROW_H / 2 - 1);
+      } else {
+        ctx.fillRect(x, 1, Math.max(1, cw - gap), UPTIME_ROW_H - 2);
+      }
+    }
+    if (hoverCol >= 0) {
+      ctx.fillStyle = colors.hover;
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(hoverCol * cw, 0, Math.max(1, cw - gap), UPTIME_ROW_H);
+      ctx.globalAlpha = 1;
+    }
+  }
+  function drawAll() { rows.forEach(draw); }
 
-  function updateReadout() {
-    if (highlighted === null) {
-      readout.textContent = 'Наведите курсор на ноду в легенде или на линию - она подсветится. Клик по ноде в легенде скрывает/показывает её.';
+  function setHover(row, col) {
+    hoverCol = col;
+    drawAll();
+    if (col < 0 || !row) {
+      readout.textContent = 'Наведите курсор на клетку - покажет время прогона и статус ноды.';
       readout.classList.remove('active');
       return;
     }
-    var n = top[highlighted];
-    var got = n.values.filter(function (v) { return v !== null && v !== undefined; });
-    var avg = got.length ? got.reduce(function (a, b) { return a + b; }, 0) / got.length : null;
-    readout.textContent = n.name + '  ·  средняя ' + fmtVal(avg) + '  ·  последний ' + fmtVal(n.values[n.values.length - 1]) +
-      '  ·  в победителях ' + n.wins + ' раз' + (isVisible(highlighted) ? '' : '  (скрыта)');
+    var iso = runIso(col);
+    readout.textContent = row.node.name + ' · ' + (iso ? fmtLastSeen(iso) : 'прогон старше сводки') + ' · ' + UPTIME_LABELS[cell(row.node, col)];
     readout.classList.add('active');
   }
 
-  // Цвет/толщина линий - scriptable-опции датасетов (см. new Chart ниже):
-  // Chart.js кэширует обычные опции точек, поэтому смена цвета через
-  // свойства датасета не доходила бы до точек. Здесь - только порядок
-  // отрисовки (подсвеченная линия поверх остальных) и перерисовка.
-  function styleDatasets() {
-    if (!chart) { return; }
-    chart.data.datasets.forEach(function (ds, i) { ds.order = highlighted === i ? -1 : i; });
-    chart.update('none');
+  function visibleNodes() {
+    var q = uptimeState.query.toLowerCase();
+    if (q) { return nodes.filter(function (n) { return n.name.toLowerCase().indexOf(q) >= 0; }); }
+    return uptimeState.all ? nodes : nodes.slice(0, cap);
   }
 
-  function setHighlight(i) {
-    if (highlighted === i) { return; }
-    highlighted = i;
-    chips.forEach(function (c, k) { c.classList.toggle('hl', k === i); });
-    styleDatasets();
-    updateReadout();
-  }
-
-  function applyVisibility() {
-    var shown = 0, found = 0, folded = 0;
-    chips.forEach(function (c, i) {
-      var vis = isVisible(i), m = matches(i);
-      var fold = !vis && !m && !nodeChartState.showHidden;
-      if (vis) { shown++; }
-      if (m) { found++; }
-      if (fold) { folded++; }
-      c.classList.toggle('collapsed', fold);
-      c.classList.toggle('off', !vis);
-      c.classList.toggle('match', m);
-      c.classList.toggle('dim', !!nodeChartState.query && !m);
-      if (chart) { chart.setDatasetVisibility(i, vis); }
+  function rebuild() {
+    while (rowsBox.firstChild) { rowsBox.removeChild(rowsBox.firstChild); }
+    rows = [];
+    var list = visibleNodes();
+    list.forEach(function (node) {
+      var r = el('div', 'uptime-row');
+      var name = el('span', 'uptime-name', node.name);
+      name.title = node.name;
+      var canvas = document.createElement('canvas');
+      canvas.className = 'uptime-strip';
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', node.name + ': аптайм ' + (node.uptime_pct === null ? 'нет данных' : node.uptime_pct + '%'));
+      var pct = el('span', 'uptime-pct', node.uptime_pct === null ? '-' : node.uptime_pct + '%');
+      r.appendChild(name); r.appendChild(canvas); r.appendChild(pct);
+      rowsBox.appendChild(r);
+      var row = { node: node, canvas: canvas };
+      rows.push(row);
+      canvas.addEventListener('mousemove', function (e) {
+        var rect = canvas.getBoundingClientRect();
+        var col = Math.floor((e.clientX - rect.left) / rect.width * cols);
+        setHover(row, Math.max(0, Math.min(cols - 1, col)));
+      });
+      canvas.addEventListener('mouseleave', function () { setHover(null, -1); });
     });
-    counter.textContent = 'показано ' + shown + ' из ' + top.length;
-    // кнопка не нужна, если нечего раскрывать/сворачивать
-    hiddenToggle.classList.toggle('collapsed', shown === top.length || (!nodeChartState.showHidden && folded === 0));
-    hiddenToggle.textContent = nodeChartState.showHidden ? 'свернуть скрытые' : '+ ' + folded + ' скрытых';
-    onlyFoundBtn.textContent = 'Только найденные (' + found + ')';
-    onlyFoundBtn.disabled = found === 0;
-    if (chart) { chart.update('none'); }
-    updateReadout();
+    if (!list.length) { rowsBox.appendChild(el('p', 'hint', 'Нет нод по запросу.')); }
+    counter.textContent = 'показано ' + list.length + ' из ' + nodes.length;
+    toggle.textContent = uptimeState.all ? 'Топ-' + Math.min(cap, nodes.length) : 'Все (' + nodes.length + ')';
+    toggle.disabled = !!uptimeState.query || nodes.length <= cap;
+    drawAll();
   }
 
-  search.addEventListener('input', function () {
-    nodeChartState.query = search.value.trim();
-    applyVisibility();
-  });
-  onlyFoundBtn.addEventListener('click', function () {
-    top.forEach(function (n, i) { nodeChartState.vis[n.name] = matches(i); });
-    applyVisibility();
-  });
-
-  if (typeof Chart !== 'undefined') {
-    var sameDay = sameCalendarDay(labels);
-    var canvas = document.createElement('canvas');
-    chartWrap.appendChild(canvas);
-    var lineColor = function (ctx) {
-      var i = ctx.datasetIndex, color = top[i].color || '#2a78d6';
-      return highlighted !== null && highlighted !== i ? withAlpha(color, 0.12) : color;
-    };
-    var datasets = top.map(function (node) {
-      return {
-        label: node.name,
-        data: node.values.map(function (v) { return v === null || v === undefined ? null : bytesToMbit(v); }),
-        borderColor: lineColor,
-        backgroundColor: lineColor,
-        pointBackgroundColor: lineColor,
-        pointBorderColor: lineColor,
-        pointRadius: function (ctx) { return highlighted === ctx.datasetIndex ? 3.5 : 2.5; },
-        pointHoverRadius: 4,
-        borderWidth: function (ctx) { return highlighted === ctx.datasetIndex ? 3.5 : 2; },
-        spanGaps: false,
-        tension: 0
-      };
+  // подписи оси времени: первый, средний и последний прогон окна
+  function buildAxis() {
+    var isos = [];
+    for (var col = 0; col < cols; col++) { isos.push(runIso(col)); }
+    var known = isos.filter(Boolean);
+    var sameDay = sameCalendarDay(known);
+    [0, Math.floor((cols - 1) / 2), cols - 1].forEach(function (col, k) {
+      var iso = isos[col];
+      var s = el('span', '', iso ? (sameDay ? fmtTimeShort(iso) : fmtDateShort(iso) + ' ' + fmtTimeShort(iso)) : '');
+      s.style.textAlign = ['left', 'center', 'right'][k];
+      axis.appendChild(s);
     });
-
-    chart = new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels: labels, datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: 'index', intersect: false },
-        // Подсветка линии под курсором: ближайшая точка видимой ноды не
-        // дальше 12 px от курсора.
-        onHover: function (evt, active, ch) {
-          var near = ch.getElementsAtEventForMode(evt, 'nearest', { intersect: false, axis: 'xy' }, false);
-          var idx = null;
-          if (near.length) {
-            var p = near[0].element;
-            if (Math.abs(p.x - evt.x) <= 12 && Math.abs(p.y - evt.y) <= 12) { idx = near[0].datasetIndex; }
-          }
-          if (idx === null && highlighted !== null && chips[highlighted] === document.activeElement) { return; }
-          setHighlight(idx);
-        },
-        plugins: {
-          legend: { display: false }, // своя легенда - чипы под графиком
-          tooltip: {
-            filter: function (item) { return highlighted === null || item.datasetIndex === highlighted; },
-            callbacks: {
-              title: function (items) { return items.length ? items[0].label : ''; },
-              label: function (item) {
-                return item.dataset.label + ': ' + (item.parsed.y === null ? '-' : item.parsed.y) + ' Мбит/с';
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            ticks: {
-              autoSkip: true,
-              maxTicksLimit: 6,
-              maxRotation: 0,
-              callback: function (value, index) {
-                var iso = labels[index];
-                return iso ? (sameDay ? fmtTimeShort(iso) : fmtDateShort(iso)) : '';
-              }
-            }
-          },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              callback: function (value) { return value + ' Мбит/с'; }
-            }
-          }
-        }
-      },
-      plugins: [makeCrosshairPlugin()]
-    });
-    canvas.addEventListener('mouseleave', function () { setHighlight(null); });
   }
 
-  applyVisibility();
+  search.addEventListener('input', function () { uptimeState.query = search.value; rebuild(); });
+  toggle.addEventListener('click', function () { uptimeState.all = !uptimeState.all; rebuild(); });
+  var onResize = function () {
+    if (!wrap.isConnected) { window.removeEventListener('resize', onResize); return; }
+    drawAll();
+  };
+  window.addEventListener('resize', onResize);
+
+  buildAxis();
+  rebuild();
+  // canvas получает ширину только после вставки в документ
+  requestAnimationFrame(drawAll);
   return wrap;
 }
 
@@ -642,11 +553,12 @@ export function renderStats() {
     }
     app.appendChild(lastMeasureCard);
 
-    var chartCard = card('Скорость по нодам (последние ' + runsCount + ' прогонов)');
-    if (data.node_history && data.node_history.total_unique > 0) {
-      chartCard.appendChild(buildNodeChart(data.node_history, data.runs.series));
+    var chartCard = card('Доступность нод по прогонам');
+    if (data.node_stability && data.node_stability.length) {
+      var cap = (data.node_history && data.node_history.cap) || 8;
+      chartCard.appendChild(buildUptimeTimeline(data.node_stability, (data.runs && data.runs.series) || [], cap));
     } else {
-      chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для графика.'));
+      chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
     }
     app.appendChild(chartCard);
 

@@ -19,9 +19,10 @@ function geoCountry(code, flag, ru, en, extra, common) {
 // имён ("RU" - Brussels, Peru; "USA" - Jerusalem). У России - ещё
 // привычные метки нод из шаблона (MSK/SPB оставлены сознательно).
 var GEO_CATALOG = [
-  geoCountry('RU', '🇷🇺', 'Россия', 'Russia', ['RU-', 'RU_', 'Moscow', 'Москва', 'MSK', 'SPB', 'СПб'], true),
+  geoCountry('RU', '🇷🇺', 'Россия', 'Russia', ['RU-', 'RU_', 'Moscow', 'Москва', 'MSK', 'МСК', 'SPB', 'СПб'], true),
   geoCountry('UA', '🇺🇦', 'Украина', 'Ukraine', [], true),
   geoCountry('KZ', '🇰🇿', 'Казахстан', 'Kazakhstan', [], true),
+  geoCountry('BY', '🇧🇾', 'Беларусь', 'Belarus', ['Minsk', 'Минск'], true),
   geoCountry('TR', '🇹🇷', 'Турция', 'Turkey', ['Türkiye'], true),
   geoCountry('IL', '🇮🇱', 'Израиль', 'Israel', [], true),
   geoCountry('IN', '🇮🇳', 'Индия', 'India', [], true),
@@ -52,7 +53,39 @@ var GEO_CATALOG = [
   geoCountry('CH', '🇨🇭', 'Швейцария', 'Switzerland', ['Zurich']),
   geoCountry('AT', '🇦🇹', 'Австрия', 'Austria', ['Vienna']),
   geoCountry('SG', '🇸🇬', 'Сингапур', 'Singapore', []),
-  geoCountry('HK', '🇭🇰', 'Гонконг', 'Hong Kong', [])
+  geoCountry('HK', '🇭🇰', 'Гонконг', 'Hong Kong', []),
+  geoCountry('BG', '🇧🇬', 'Болгария', 'Bulgaria', ['Sofia', 'София']),
+  geoCountry('RO', '🇷🇴', 'Румыния', 'Romania', ['Bucharest', 'Бухарест']),
+  geoCountry('MD', '🇲🇩', 'Молдова', 'Moldova', ['Chisinau', 'Кишинёв']),
+  geoCountry('CZ', '🇨🇿', 'Чехия', 'Czech', ['Prague', 'Прага']),
+  geoCountry('SK', '🇸🇰', 'Словакия', 'Slovakia', ['Bratislava']),
+  geoCountry('HU', '🇭🇺', 'Венгрия', 'Hungary', ['Budapest', 'Будапешт']),
+  geoCountry('SI', '🇸🇮', 'Словения', 'Slovenia', ['Ljubljana']),
+  geoCountry('HR', '🇭🇷', 'Хорватия', 'Croatia', ['Zagreb']),
+  geoCountry('RS', '🇷🇸', 'Сербия', 'Serbia', ['Belgrade', 'Белград']),
+  geoCountry('GR', '🇬🇷', 'Греция', 'Greece', ['Athens', 'Афины']),
+  geoCountry('CY', '🇨🇾', 'Кипр', 'Cyprus', ['Limassol', 'Nicosia']),
+  geoCountry('IT', '🇮🇹', 'Италия', 'Italy', ['Milan', 'Милан']),
+  geoCountry('ES', '🇪🇸', 'Испания', 'Spain', ['Madrid', 'Мадрид']),
+  geoCountry('PT', '🇵🇹', 'Португалия', 'Portugal', ['Lisbon', 'Лиссабон']),
+  geoCountry('IE', '🇮🇪', 'Ирландия', 'Ireland', ['Dublin']),
+  geoCountry('BE', '🇧🇪', 'Бельгия', 'Belgium', []),
+  geoCountry('LU', '🇱🇺', 'Люксембург', 'Luxembourg', []),
+  geoCountry('DK', '🇩🇰', 'Дания', 'Denmark', ['Copenhagen']),
+  geoCountry('NO', '🇳🇴', 'Норвегия', 'Norway', ['Oslo']),
+  geoCountry('IS', '🇮🇸', 'Исландия', 'Iceland', ['Reykjavik']),
+  geoCountry('GE', '🇬🇪', 'Грузия', 'Georgia', ['Tbilisi', 'Тбилиси']),
+  geoCountry('AM', '🇦🇲', 'Армения', 'Armenia', ['Yerevan', 'Ереван']),
+  geoCountry('AZ', '🇦🇿', 'Азербайджан', 'Azerbaijan', ['Baku', 'Баку']),
+  geoCountry('UZ', '🇺🇿', 'Узбекистан', 'Uzbekistan', ['Tashkent', 'Ташкент']),
+  geoCountry('KG', '🇰🇬', 'Киргизия', 'Kyrgyzstan', ['Bishkek', 'Бишкек']),
+  geoCountry('AE', '🇦🇪', 'ОАЭ', 'United Arab Emirates', ['Dubai', 'Дубай', 'Emirates']),
+  geoCountry('TW', '🇹🇼', 'Тайвань', 'Taiwan', ['Taipei']),
+  geoCountry('VN', '🇻🇳', 'Вьетнам', 'Vietnam', ['Hanoi']),
+  geoCountry('TH', '🇹🇭', 'Таиланд', 'Thailand', ['Bangkok']),
+  geoCountry('ID', '🇮🇩', 'Индонезия', 'Indonesia', ['Jakarta']),
+  geoCountry('PH', '🇵🇭', 'Филиппины', 'Philippines', ['Manila']),
+  geoCountry('NZ', '🇳🇿', 'Новая Зеландия', 'New Zealand', ['Auckland'])
 ];
 
 function geoLc(s) { return String(s).toLowerCase(); }
@@ -438,11 +471,11 @@ var FIELD_DEFS = {
     ]
   },
   node_cap: {
-    label: 'Сколько нод показывать на графике сразу (1-50)', type: 'number', min: 1, max: 50,
-    hint: 'Первые по числу побед. Остальные можно включить в легенде графика.',
+    label: 'Сколько нод показывать в ленте доступности сразу (1-50)', type: 'number', min: 1, max: 50,
+    hint: 'Самые стабильные. Остальные - кнопкой «Все» или через поиск.',
     help: [
-      ['Что это', 'Только отображение: сколько нод график «Скорость по нодам» показывает при открытии страницы. На отбор нод не влияет.'],
-      ['Как работает', 'Ноды упорядочены по тому, сколько раз попадали в пул. Остальные ноды истории есть в легенде под графиком - включаются кликом или через поиск.'],
+      ['Что это', 'Только отображение: сколько нод лента «Доступность нод по прогонам» показывает при открытии страницы. На отбор нод не влияет.'],
+      ['Как работает', 'Ноды упорядочены по аптайму за последние прогоны - сверху самые живые. Остальные показывает кнопка «Все», любую ноду можно найти поиском.'],
       ['Когда действует', 'Сразу после сохранения.']
     ]
   },
@@ -746,17 +779,17 @@ function buildSettingsForm(values) {
   return form;
 }
 
-// Полный сброс статистики: сводка прогонов, график «Скорость по нодам» и
-// таблица «Статистика доступности нод» (reset_node_stats() в stats_cgi.sh).
+// Полный сброс статистики: сводка прогонов, история нод-победителей и
+// доступность нод (лента и таблица) (reset_node_stats() в stats_cgi.sh).
 // Настройки не меняются.
 function buildResetStatsCard() {
   var c = card('Сброс статистики');
-  c.appendChild(el('p', 'hint', 'Очищает всю статистику: историю прогонов, график «Скорость по нодам» и таблицу «Статистика доступности нод» - они начнут копиться заново со следующего прогона. Настройки не меняются.'));
+  c.appendChild(el('p', 'hint', 'Очищает всю статистику: историю прогонов, ленту «Доступность нод по прогонам» и таблицу «Статистика доступности нод» - они начнут копиться заново со следующего прогона. Настройки не меняются.'));
   var msg = el('p', 'hint');
   var btn = el('button', 'submit secondary', 'Сбросить статистику');
   btn.type = 'button';
   btn.addEventListener('click', function () {
-    if (!window.confirm('Сбросить всю статистику: историю прогонов, «Скорость по нодам» и «Статистика доступности нод»? Отменить сброс нельзя.')) { return; }
+    if (!window.confirm('Сбросить всю статистику: историю прогонов, ленту и таблицу доступности нод? Отменить сброс нельзя.')) { return; }
     btn.disabled = true;
     msg.className = 'hint';
     msg.textContent = 'Сбрасываю...';

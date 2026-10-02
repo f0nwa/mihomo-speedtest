@@ -57,6 +57,24 @@ GEO_CATALOG.forEach(function (c) {
   });
 });
 
+// Слово одной страны не входит подстрокой в слово другой: BLOCK ищет
+// подстроку без учёта регистра, иначе выбор одной страны отсекал бы
+// ноды другой (например "Oman" внутри "Romania").
+var codes = {};
+GEO_CATALOG.forEach(function (c) {
+  assert.ok(!codes[c.code], 'повтор кода ' + c.code); codes[c.code] = true;
+});
+GEO_CATALOG.forEach(function (a) {
+  GEO_CATALOG.forEach(function (b) {
+    if (a === b) { return; }
+    a.words.forEach(function (wa) {
+      b.words.forEach(function (wb) {
+        assert.ok(wb.toLowerCase().indexOf(wa.toLowerCase()) < 0, a.code + ' "' + wa + '" входит в ' + b.code + ' "' + wb + '"');
+      });
+    });
+  });
+});
+
 // Свои слова: по строке, | внутри строки тоже делит.
 assert.deepStrictEqual(geoCustomList('whitelist\r\n\n Обход|RU- \n'), ['whitelist', 'Обход', 'RU-']);
 
