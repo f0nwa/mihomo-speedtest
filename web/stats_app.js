@@ -1579,23 +1579,24 @@
     return form;
   }
 
-  // Сброс графика «Скорость по нодам» и таблицы «Статистика доступности нод»
-  // (reset_node_stats() в stats_cgi.sh). Сводка прогонов остаётся.
+  // Полный сброс статистики: сводка прогонов, график «Скорость по нодам» и
+  // таблица «Статистика доступности нод» (reset_node_stats() в stats_cgi.sh).
+  // Настройки не меняются.
   function buildResetStatsCard() {
-    var c = card('Сброс статистики нод');
-    c.appendChild(el('p', 'hint', 'Очищает график «Скорость по нодам» и таблицу «Статистика доступности нод» - они начнут копиться заново со следующего прогона. Сводка прогонов и настройки не меняются.'));
+    var c = card('Сброс статистики');
+    c.appendChild(el('p', 'hint', 'Очищает всю статистику: историю прогонов, график «Скорость по нодам» и таблицу «Статистика доступности нод» - они начнут копиться заново со следующего прогона. Настройки не меняются.'));
     var msg = el('p', 'hint');
-    var btn = el('button', 'submit secondary', 'Сбросить статистику нод');
+    var btn = el('button', 'submit secondary', 'Сбросить статистику');
     btn.type = 'button';
     btn.addEventListener('click', function () {
-      if (!window.confirm('Сбросить статистику «Скорость по нодам» и «Статистика доступности нод»? Отменить сброс нельзя.')) { return; }
+      if (!window.confirm('Сбросить всю статистику: историю прогонов, «Скорость по нодам» и «Статистика доступности нод»? Отменить сброс нельзя.')) { return; }
       btn.disabled = true;
       msg.className = 'hint';
       msg.textContent = 'Сбрасываю...';
       fetchJson('/api/settings', { method: 'POST', body: new URLSearchParams({ action: 'reset_node_stats' }) }).then(function (resp) {
         if (resp.ok) {
           msg.className = 'msg-ok';
-          msg.textContent = 'Статистика нод сброшена.';
+          msg.textContent = 'Статистика сброшена.';
         } else {
           var errs = resp.errors || {};
           msg.className = 'msg-err';
