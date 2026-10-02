@@ -1,63 +1,125 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo0ODAyOWEzOC1lMTVmLTQ5NTEtOWQxOS04OTlmZjk0ODQ3NWUAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaJD1y/Uj32zZJRycQVDZwBIAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDowMTk2YzIxZS0xN2U4LTQ4ZTctOTYyZC02ZWVhNGY0ZTFjNWFscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoEyXGp7QU4Tcx82wV8VWpwwAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggM7SFqbdgs1NH0p3XTrha3TuQsfA6J/TXfWLlHpLiebakZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaIdBY7SC0+Rq7JbHivBxwCgAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRNAAAAAAAAAAAAAAAAAGRoYXNoWCC+pdC5sYqlggbdyW/0EDhvXM5CPz0F3Fbqk0WPDSUtnmRuYW1lbmp1bWJmIG1hbmlmZXN0amV4Y2x1c2lvbnOBomVzdGFydBjAZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjQ4MDI5YTM4LWUxNWYtNDk1MS05ZDE5LTg5OWZmOTQ4NDc1ZS9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjU0NjE1MTI4LWFhNzAtNGU0MS1iODYzLWQ1ZWM0Yzc0MjQ3OHJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCAztIWpt2CzU0fSnddOuFrdO5Cx8Don9Nd9YuUekuJ5tqJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggZuCzSOijTtWCe4hEbyd0ePTNY6WWmQklv/YH//O1+KeiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggQkZrNGBfUMXtEDPC1kxyQwF9NHpJ7APjqee4n2VOlAV0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQEwTk2LSvosxq69UkNuC2jf2HfwNPdaordrypMvkieTE9U99k/uaQOWVxq3nFu+z74V/zbdySyuzUZwNIxJfrsE=</c2pa:manifest></metadata>
   <title id="title">Mihomo-Speedtest</title>
-  <desc id="desc">Реальные замеры скорости прокси на Keenetic: подписки проходят проверку и замер загрузки, после чего проект обновляет быстрый пул и статистику.</desc>
-
-  <defs>
-    <linearGradient id="chart" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#38bdf8"/>
-      <stop offset="1" stop-color="#34d399"/>
-    </linearGradient>
-  </defs>
-
-  <rect width="1200" height="420" rx="28" fill="#0d1117"/>
-  <path d="M0 334 H1200" stroke="#212936"/>
-
-  <g id="title-block" transform="translate(64 58)">
-    <text x="0" y="26" fill="#7dd3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="2">KEENETIC · XKEEN · MIHOMO</text>
-    <text x="0" y="98" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="58" font-weight="700">Mihomo-Speedtest</text>
-    <text x="0" y="148" fill="#a8b3c2" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">Реальные замеры скорости прокси</text>
-    <text x="0" y="184" fill="#a8b3c2" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="25">и автоматический быстрый пул</text>
-
-    <g transform="translate(0 238)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
-      <rect width="200" height="42" rx="21" fill="#142533" stroke="#24506a"/>
-      <circle cx="23" cy="21" r="5" fill="#38bdf8"/>
-      <text x="39" y="27" fill="#c9d6e2">REAL DOWNLOAD</text>
-      <rect x="214" width="200" height="42" rx="21" fill="#142921" stroke="#245c45"/>
-      <circle cx="237" cy="21" r="5" fill="#34d399"/>
-      <text x="253" y="27" fill="#c9d6e2">ATOMIC UPDATE</text>
+  <desc id="desc">Mihomo-Speedtest для Keenetic с XKeen: замеряет реальную скорость нод из подписок, собирает быстрый пул fast.yaml и ведёт статистику доступности - какие ноды живут стабильно.</desc>
+  <rect width="1200" height="400" rx="24" fill="#17191b"/>
+  <g transform="translate(64 56) scale(0.5)">
+    <rect x="0.5" y="0.5" width="199" height="199" rx="35" fill="#0e151b" stroke="#26323c"/>
+    <g transform="translate(-14 -3)" fill="#fff">
+      <path d="M50 140.5H65" fill="none" stroke="#fff" stroke-width="7.5" stroke-linecap="round"/>
+      <path fill-rule="evenodd" d="M75 92.5 87.4 46.7Q89 38.7 95.4 44.3L112.5 60.8H140L158.8 45.3Q164.7 41.4 165.6 48.7L170 88C172.4 109.7 185.2 122.3 188.4 140.6Q189 147.6 186.8 143.3C174.3 114.6 151.8 102.3 130.8 103.7 110.7 104.2 96.1 114.2 87.6 125Q85.2 128.2 81 128.2H40A3.75 3.75 0 0 1 40 120.7H82A5.725 5.725 0 0 0 82 109.25H48A3.75 3.75 0 0 1 48 101.75H86.9A3.275 3.275 0 0 0 86.9 95.2H77Q74.4 95.2 75 92.5ZM113.6 79.1C106 79.1 106 95.2 113.6 95.2 121.1 95.2 121.1 79.1 113.6 79.1ZM148 79.1C140.6 79.1 140.6 95.2 148 95.2 155.5 95.2 155.5 79.1 148 79.1Z"/>
+      <path fill="#c9ced3" d="M74.2 163.3C78.8 139.4 94 120.7 114.3 113.3 131.1 107.1 148.8 110.4 162 120.4L153.8 127.3C141.9 119 130 118.1 117.8 122.2 100.4 128 88 142.5 81.3 163.3Z"/>
+      <path d="M163 125.6 138 164.6A8.85 8.85 0 1 1 125.4 152.6Z"/>
     </g>
   </g>
-
-  <g id="project-flow" transform="translate(680 52)">
-    <rect width="456" height="284" rx="20" fill="#111821" stroke="#293342"/>
-    <text x="28" y="42" fill="#6e7d90" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17">SPEEDTEST2.SH / RUN</text>
-
-    <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20">
-      <rect x="28" y="68" width="116" height="52" rx="10" fill="#182331" stroke="#304258"/>
-      <text x="48" y="100" fill="#d7e1ec">Подписки</text>
-      <path d="M144 94 H174" stroke="#52647a" stroke-width="2"/>
-      <path d="M168 88 L176 94 L168 100" fill="none" stroke="#52647a" stroke-width="2"/>
-
-      <rect x="178" y="68" width="114" height="52" rx="10" fill="#182331" stroke="#304258"/>
-      <text x="201" y="100" fill="#d7e1ec">Mihomo</text>
-      <path d="M292 94 H322" stroke="#52647a" stroke-width="2"/>
-      <path d="M316 88 L324 94 L316 100" fill="none" stroke="#52647a" stroke-width="2"/>
-
-      <rect x="326" y="68" width="102" height="52" rx="10" fill="#152a2a" stroke="#2f7668"/>
-      <text x="347" y="100" fill="#bdf7df">Замер</text>
-    </g>
-
-    <g transform="translate(28 150)">
-      <path d="M0 72 L42 56 L84 62 L126 35 L168 48 L210 12 L252 30 L294 20 L336 34 L400 5" fill="none" stroke="url(#chart)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M0 88 H400" stroke="#273140"/>
-      <circle cx="210" cy="12" r="6" fill="#34d399" stroke="#0d1117" stroke-width="3"/>
-      <circle cx="400" cy="5" r="6" fill="#34d399" stroke="#0d1117" stroke-width="3"/>
-    </g>
+  <g id="title-block" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="184" y="88" fill="#8b9096" font-size="18" letter-spacing="2">KEENETIC · XKEEN · MIHOMO</text>
+    <text x="184" y="134" fill="#e7e6e2" font-size="38" font-weight="700" letter-spacing="1">MIHOMO-SPEEDTEST</text>
   </g>
-
-  <g transform="translate(680 361)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">
-    <text x="0" y="0" fill="#38bdf8">fast.yaml</text>
-    <text x="102" y="0" fill="#56677c">+</text>
-    <text x="126" y="0" fill="#34d399">история и веб-статистика</text>
+  <g id="promise" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" fill="#e7e6e2">
+    <text x="64" y="218">Выбирает ноды по реальной</text>
+    <text x="64" y="250">скорости и показывает, какие</text>
+    <text x="64" y="282">из них живут стабильно</text>
+  </g>
+  <g id="pillars" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">
+    <rect x="64" y="314" width="16" height="16" fill="#35c7c7"/>
+    <text x="92" y="328" fill="#e7e6e2">замер скорости → fast.yaml</text>
+    <rect x="64" y="346" width="16" height="16" fill="#35c7c7"/>
+    <rect x="64" y="346" width="8" height="16" fill="#d1453b"/>
+    <text x="92" y="360" fill="#e7e6e2">аптайм нод → лента и таблица</text>
+  </g>
+  <g id="uptime-panel">
+    <rect x="650" y="56" width="490" height="300" fill="#1e2124" stroke="#33383c"/>
+    <text x="674" y="94" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="1">ДОСТУПНОСТЬ НОД ПО ПРОГОНАМ</text>
+    <text x="816" y="142" text-anchor="end" fill="#e7e6e2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">NL Амстердам</text>
+    <rect x="830" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="844" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="858" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="872" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="886" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="900" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="914" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="928" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="942" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="956" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="970" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="984" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="998" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1012" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1026" y="128" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1040" y="128" width="12" height="18" fill="#35c7c7"/>
+    <text x="1120" y="142" text-anchor="end" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">100%</text>
+    <text x="816" y="176" text-anchor="end" fill="#e7e6e2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">DE Франкфурт</text>
+    <rect x="830" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="844" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="858" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="872" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="886" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="900" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="914" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="928" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="942" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="956" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="970" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="984" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="998" y="162" width="12" height="18" fill="#d1453b"/>
+    <rect x="1012" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1026" y="162" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1040" y="162" width="12" height="18" fill="#d1453b"/>
+    <text x="1120" y="176" text-anchor="end" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">88%</text>
+    <text x="816" y="210" text-anchor="end" fill="#e7e6e2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">FI Хельсинки</text>
+    <rect x="830" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="844" y="196" width="12" height="18" fill="#d1453b"/>
+    <rect x="858" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="872" y="196" width="12" height="18" fill="#d1453b"/>
+    <rect x="886" y="196" width="12" height="18" fill="#d1453b"/>
+    <rect x="900" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="914" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="928" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="942" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="956" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="970" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="984" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="998" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1012" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1026" y="196" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1040" y="196" width="12" height="18" fill="#35c7c7"/>
+    <text x="1120" y="210" text-anchor="end" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">81%</text>
+    <text x="816" y="244" text-anchor="end" fill="#e7e6e2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">PL Варшава</text>
+    <rect x="830" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="844" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="858" y="230" width="12" height="18" fill="#d1453b"/>
+    <rect x="872" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="886" y="230" width="12" height="18" fill="#d1453b"/>
+    <rect x="900" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="914" y="230" width="12" height="18" fill="#d1453b"/>
+    <rect x="928" y="230" width="12" height="18" fill="#d1453b"/>
+    <rect x="942" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="956" y="230" width="12" height="18" fill="#d1453b"/>
+    <rect x="970" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="984" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="998" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1012" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1026" y="230" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1040" y="230" width="12" height="18" fill="#d1453b"/>
+    <text x="1120" y="244" text-anchor="end" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">62%</text>
+    <text x="816" y="278" text-anchor="end" fill="#e7e6e2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">TR Стамбул</text>
+    <rect x="830" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="844" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="858" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="872" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="886" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="900" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="914" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="928" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="942" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="956" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="970" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="984" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="998" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1012" y="264" width="12" height="18" fill="#35c7c7"/>
+    <rect x="1026" y="264" width="12" height="18" fill="#d1453b"/>
+    <rect x="1040" y="264" width="12" height="18" fill="#d1453b"/>
+    <text x="1120" y="278" text-anchor="end" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">38%</text>
+    <text x="674" y="318" fill="#8b9096" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">прогон раз в 3 часа · сверху самые живые</text>
   </g>
 </svg>
