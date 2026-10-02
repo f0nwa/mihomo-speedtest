@@ -1,6 +1,6 @@
 // Раздел «Обновления» (/updates) и бейдж новой версии в меню.
 
-import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMessage } from './app-core.js';
+import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMessage, viewGuard } from './app-core.js';
 import { stopProgressPolling } from './app-stats.js';
 import { stopLogPolling } from './app-log.js';
 
@@ -174,7 +174,9 @@ export function renderUpdates() {
   stopUpdateJobPolling();
   stopLogPolling();
   setLoading();
+  var alive = viewGuard();
   fetchJson('/api/updates/status').then(function (data) {
+    if (!alive()) { return; }
     clearApp();
     var lc = data.last_check;
     var job = data.job;
@@ -225,7 +227,7 @@ export function renderUpdates() {
     // при актуальной версии и после неудачной проверки кнопки нет вовсе.
     checkBtn.addEventListener('click', function () {
       checkBtn.disabled = true; updateBtn.disabled = true;
-      fetchJson('/api/updates/check', { method: 'POST' }).then(function () { renderUpdates(); refreshUpdatesBadge(); })
+      fetchJson('/api/updates/check', { method: 'POST' }).then(function () { if (alive()) { renderUpdates(); } refreshUpdatesBadge(); })
         ['catch'](function (err) {
           showFormMessage(summary, 'Не удалось проверить: ' + err.message, 'err');
           checkBtn.disabled = false; updateBtn.disabled = false;
@@ -264,5 +266,5 @@ export function renderUpdates() {
       });
       app.appendChild(notesCard);
     }
-  })['catch'](function (err) { showError('Не удалось загрузить раздел обновлений: ', err); });
+  })['catch'](function (err) { if (alive()) { showError('Не удалось загрузить раздел обновлений: ', err); } });
 }

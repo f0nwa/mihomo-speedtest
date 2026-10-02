@@ -1,7 +1,7 @@
 // Раздел «Статистика» (/stats): KPI, кнопка запуска, живой прогресс,
 // график скорости по нодам (Chart.js) и таблица доступности нод.
 
-import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, fmtSigned, setLoading, showError, showNotYetMoved, statusLabel } from './app-core.js';
+import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, fmtSigned, setLoading, showError, showNotYetMoved, statusLabel, viewGuard } from './app-core.js';
 import { refreshUpdatesBadge } from './app-updates.js';
 
 // ----- кнопка "Запустить сейчас" (уже полностью рабочая часть, шаг 1) -----
@@ -99,13 +99,16 @@ function updateProgressCard(progress) {
 }
 
 function progressPollTick() {
+  var alive = viewGuard();
   fetchJson('/api/progress').then(function (data) {
+    if (!alive()) { return; }
     // {} - прогона ещё не было (файла progress.json нет) - трактуем как
     // "прогресса ещё нет", а не как ошибку.
     updateProgressCard(data && typeof data.tested === 'number' ? data : null);
   })['catch'](function () { /* временная сетевая заминка - опрос продолжится следующим тиком */ });
 
   fetchJson('/api/run').then(function (d) {
+    if (!alive()) { return; }
     if (!d.running) {
       stopProgressPolling();
       renderStats();
@@ -596,7 +599,9 @@ function buildKpiRow(runsCount, lastRun) {
 export function renderStats() {
   stopProgressPolling();
   setLoading();
+  var alive = viewGuard();
   fetchJson('/api/stats').then(function (data) {
+    if (!alive()) { return; }
     clearApp();
 
     // {} - stats.json ещё нет - трактуем как "прогонов ещё не было", а не
@@ -657,6 +662,7 @@ export function renderStats() {
     }
     app.appendChild(stabilityCard);
   })['catch'](function (err) {
+    if (!alive()) { return; }
     if (err.message === 'not_implemented') {
       showNotYetMoved('Раздел статистики ещё переезжает на новый интерфейс.');
       renderRunButton(app, function () { startProgressPolling(app, null); });

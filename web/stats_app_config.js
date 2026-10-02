@@ -1,6 +1,6 @@
 // Вкладка «Конфиг» (/config): редактор config.yaml на CodeMirror 5.
 
-import { app, card, clearApp, el, fetchJson, setLoading, showError } from './app-core.js';
+import { app, card, clearApp, el, fetchJson, setLoading, showError, viewGuard } from './app-core.js';
 
 // ----- раздел "Конфиг" (/api/config/*, stats_config.sh) -----
 //
@@ -237,7 +237,9 @@ export function renderConfig() {
   setLoading();
   configView = { dirty: false };
   var view = configView;
+  var alive = viewGuard();
   fetchConfigJson('/api/config', 'text').then(function (data) {
+    if (!alive()) { return; }
     clearApp();
     view.base = data.base;
     view.saved = data.text || '';
@@ -567,6 +569,7 @@ export function renderConfig() {
         .then(function () { busy(false); return stopApplyLog(); });
     });
   })['catch'](function (err) {
+    if (!alive()) { return; }
     var d = err.data || {};
     showError('Не удалось загрузить конфиг: ', d.message ? new Error(d.message) : err);
   });

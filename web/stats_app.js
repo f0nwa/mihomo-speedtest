@@ -9,7 +9,7 @@
 // График по нодам рисует Chart.js (stats_chart.js, подключается в
 // stats_index.html обычным <script> до этого модуля, глобальный Chart).
 
-import { app, card, clearApp, el, fetchJson, logoutBtn, mainNav, session, setLoading, setUnauthorizedHandler, showError, showFormMessage } from './app-core.js';
+import { app, card, clearApp, el, fetchJson, logoutBtn, mainNav, nextView, session, setLoading, setUnauthorizedHandler, showError, showFormMessage } from './app-core.js';
 import { renderStats, stopProgressPolling } from './app-stats.js';
 import { renderSettings } from './app-settings.js';
 import { refreshUpdatesBadge, renderUpdates, stopUpdateJobPolling } from './app-updates.js';
@@ -54,6 +54,7 @@ window.addEventListener('popstate', function () {
 });
 
 function render(path) {
+  nextView();
   leaveConfig();
   stopProgressPolling();
   stopUpdateJobPolling();
@@ -139,6 +140,7 @@ function authInput(form, name, labelText, type, autocomplete) {
 }
 
 function renderAuthForm(mode) {
+  nextView();
   stopProgressPolling();
   stopUpdateJobPolling();
   stopLogPolling();
@@ -195,6 +197,7 @@ function renderAuthForm(mode) {
 }
 
 function renderUninitialized() {
+  nextView();
   stopProgressPolling();
   stopUpdateJobPolling();
   stopLogPolling();

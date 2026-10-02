@@ -1,7 +1,7 @@
 // Раздел «Настройки» (/settings): гео-фильтр, параметры отбора и
 // сброс статистики.
 
-import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMessage, showNotYetMoved } from './app-core.js';
+import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMessage, showNotYetMoved, viewGuard } from './app-core.js';
 
 // ----- гео-фильтр спидтеста (BLOCK): карточка "Какие ноды не проверять" -----
 // Дизайн: docs/superpowers/specs/2026-09-28-block-filter-ui-design.md.
@@ -703,6 +703,7 @@ function buildSettingsForm(values) {
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
+    var alive = viewGuard();
     var shouldRun = runAfterSave;
     setFormButtonsDisabled(true);
     showFormMessage(form, null);
@@ -725,15 +726,16 @@ function buildSettingsForm(values) {
         setFormButtonsDisabled(false);
         return;
       }
+      if (!alive()) { return; }
       if (!shouldRun) {
         renderSettings('Настройки сохранены.');
         return;
       }
       return fetchJson('/api/run', { method: 'POST' }).then(function (d) {
         var msg = d.started ? 'Настройки сохранены, прогон запущен.' : 'Настройки сохранены, прогон уже шёл - новый не запускался.';
-        renderSettings(msg);
+        if (alive()) { renderSettings(msg); }
       })['catch'](function (err) {
-        renderSettings('Настройки сохранены, но не удалось запустить прогон: ' + err.message);
+        if (alive()) { renderSettings('Настройки сохранены, но не удалось запустить прогон: ' + err.message); }
       });
     })['catch'](function (err) {
       showFormMessage(form, 'Не удалось сохранить: ' + err.message, 'err');
@@ -783,7 +785,9 @@ function buildResetStatsCard() {
 
 export function renderSettings(justSavedMsg) {
   setLoading();
+  var alive = viewGuard();
   fetchJson('/api/settings').then(function (data) {
+    if (!alive()) { return; }
     clearApp();
     var values = data.values || {};
     var form = buildSettingsForm(values);
@@ -791,6 +795,7 @@ export function renderSettings(justSavedMsg) {
     app.appendChild(buildResetStatsCard());
     if (justSavedMsg) { showFormMessage(form, justSavedMsg, 'ok'); }
   })['catch'](function (err) {
+    if (!alive()) { return; }
     if (err.message === 'not_implemented') {
       showNotYetMoved('Форма настройки ещё переезжает на новый интерфейс.');
       return;

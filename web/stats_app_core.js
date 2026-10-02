@@ -13,6 +13,17 @@ export var session = { auth: null };
 var onUnauthorized = null;
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
+// Номер открытого раздела: render() в app.js увеличивает его при каждом
+// переходе. viewGuard() запоминает текущий номер и возвращает проверку
+// "раздел всё ещё тот же" - ответ сервера, пришедший после ухода из
+// раздела, не должен перерисовывать уже открытый другой.
+var viewSeq = 0;
+export function nextView() { viewSeq += 1; }
+export function viewGuard() {
+  var seq = viewSeq;
+  return function () { return seq === viewSeq; };
+}
+
 export function clearApp() {
   while (app.firstChild) { app.removeChild(app.firstChild); }
 }

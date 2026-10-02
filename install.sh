@@ -509,6 +509,11 @@ install_files() {
   ensure_mihomo_speedtest_symlink "$DIR/mihomo-speedtest.sh"
 }
 
+format_mbit() {
+  # байт/с -> Мбит/с с одним знаком, как в журнале speedtest2.sh
+  LC_ALL=C awk -v speed="$1" 'BEGIN { printf "%.1f", speed / 125000 }'
+}
+
 write_env() {
   dst=$1
   dstdir=${dst%/*}
@@ -889,12 +894,12 @@ main() {
   CHANNEL=$(measure_channel)
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
-    echo "Канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
+    echo "Канал $(format_mbit "$CHANNEL") Мбит/с, порог $(format_mbit "$MIN_SPEED") Мбит/с" >&2
   else
     # MIN_SPEED в шапке speedtest2.sh - не в кавычках (число), в отличие
     # от BLOCK; читаем тем же read_speedtest_const, что и MIN_RATIO/MIN_FLOOR.
     MIN_SPEED=$(read_speedtest_const MIN_SPEED 1048576)
-    echo "Прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
+    echo "Прямой замер канала не удался, порог из дефолта: $(format_mbit "$MIN_SPEED") Мбит/с" >&2
   fi
 
   write_env "$DIR/speedtest2.env" || {
@@ -960,7 +965,7 @@ recalibrate_main() {
     return 1
   fi
   recalibrate_env "$ENVFILE" "$NEW_MIN" || return 1
-  echo "MIN_SPEED пересчитан: $((NEW_MIN/1048576)) МБ/с" >&2
+  echo "Порог пересчитан: $(format_mbit "$NEW_MIN") Мбит/с" >&2
 }
 
 if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then
