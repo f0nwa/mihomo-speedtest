@@ -2,18 +2,13 @@
 # Независимая служба веб-интерфейса статистики (supervisor). Дизайн:
 # docs/superpowers/specs/2026-09-15-independent-stats-service-design.md.
 #
-# В отличие от ensure_stats_httpd() в speedtest2.sh (которая проверяет и
-# поднимает HTTP-бэкенд заново только при следующем прогоне speedtest,
-# раз в HISTORY-интервал по cron), этот скрипт держит собственный цикл
-# supervisor: запускает HTTP-бэкенд в foreground, ждёт его завершения и
-# при неожиданном выходе перезапускает с нарастающей задержкой (backoff).
-# Не запускает speedtest, не меняет историю замеров и не генерирует
-# stats.json - этим занимается speedtest2.sh (render_stats()).
+# Держит цикл supervisor: запускает HTTP-бэкенд в foreground, ждёт его
+# завершения и при неожиданном выходе перезапускает с нарастающей задержкой
+# (backoff). Не запускает speedtest, не меняет историю замеров и не
+# генерирует stats.json - этим занимается speedtest2.sh (render_stats()).
 #
 # Переиспользует функции speedtest2.sh (say(), publish_file(),
-# write_stats_cgi(), write_stats_run(), write_stats_update(),
-# write_stats_static(), cleanup_old_zash_stats(), start_stats_httpd_backend(),
-# stats_httpd_advertise_host()) тем же приёмом, что и stats_cgi.sh/stats_run.sh:
+# write_stats_*(), cleanup_old_zash_stats()) тем же приёмом, что и stats_cgi.sh/stats_run.sh:
 # подключение с MST_LIB_ONLY=1, без запуска main(). Поэтому DIR должен
 # указывать на каталог, где рядом лежит сам speedtest2.sh (обычная
 # установка - /opt/etc/mihomo, ставится install.sh).
@@ -56,7 +51,7 @@ fi
 
 export MST_LIB_ONLY=1
 . "$SPEEDTEST_SCRIPT"
-export DIR MIHOMO_DIR ENV   # то же самое, что делает ensure_stats_httpd() - дочерний httpd и его
+export DIR MIHOMO_DIR ENV   # дочерний httpd и его
                   # CGI (stats_cgi.sh/stats_run.sh) должны видеть тот же speedtest2.env
 export LIVE_LOG_DIR   # живой журнал: stats_httpd.py должен смотреть в тот же каталог, что и say()
 LOG_TAG=service     # метка строк службы в живом журнале (не экспортируется - дочерним прогонам своя)
@@ -75,11 +70,7 @@ pid_from_file() {
 }
 
 prepare() {
-  # Готовит раздаваемый каталог: копии CGI-скриптов и
-  # статические файлы SPA-shell. Те же шаги, что в начале
-  # ensure_stats_httpd() в speedtest2.sh (до выбора и запуска бэкенда) -
-  # см. design, порция 2 переносит этот код сюда окончательно и убирает
-  # дублирование в speedtest2.sh.
+  # Готовит раздаваемый каталог: копии CGI-скриптов и статические файлы SPA.
   export DIR MIHOMO_DIR ENV
   cleanup_old_zash_stats
   if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
@@ -96,20 +87,10 @@ prepare() {
 }
 
 try_backend() {
-  # $1 = команда сервера ("$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY" -
-  # единственный поддерживаемый бэкенд), тот же формат, что у start_stats_httpd_backend()
-  # в speedtest2.sh - но, в отличие от неё, не через "$(...)".
-  # Оригинальная start_stats_httpd_backend() возвращает pid через
-  # command substitution ("newpid=$(start_stats_httpd_backend ...)"), что
-  # годится для ensure_stats_httpd() (та только сохраняет pid в файл и
-  # проверяет его позже через kill -0 из СОВСЕМ ДРУГОГО процесса - следующего
-  # прогона speedtest2.sh по cron). supervise() же должен именно ЖДАТЬ
-  # завершения этого бэкенда через "wait", а wait умеет ждать только
-  # прямого потомка текущего шелла - процесс, порождённый "&" внутри
-  # подшелла command substitution, таким потомком не является (в bash
-  # "wait" на чужой pid тут же возвращает 127). Поэтому запуск "&" здесь
-  # выполняется прямо в текущем шелле (без "$(...)"), а pid берётся из
-  # "$!" и кладётся в глобальную $BACKEND_PID.
+  # $1 = команда сервера ("$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY").
+  # Запуск "&" идёт прямо в текущем шелле, без "$(...)": supervise() ждёт
+  # бэкенд через "wait", а wait видит только прямых потомков. pid
+  # кладётся в глобальную $BACKEND_PID.
   cmd=$1
   bin=${cmd%% *}
   if ! command -v "$bin" >/dev/null 2>&1; then

@@ -96,7 +96,6 @@ STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
 STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # обязательный сервер на Python 3: чистые URL, API и общая авторизация
 STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для основного сервера
-STATS_HTTPD_IP_CMD=${STATS_HTTPD_IP_CMD:-ip}            # чем определять LAN-адрес роутера для адреса в консоли, см. stats_httpd_advertise_host()
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод графика по нодам показывать сразу, 1..50 (см. render_stats.awk)
 STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
 STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
@@ -387,27 +386,14 @@ trim_nodes_since() {
   awk -F'\t' -v c="$cutoff" '$1 + 0 >= c + 0' "$src" > "$dst"
 }
 
-stop_stats_httpd() {
-  # Останавливает веб-сервис статистики, если он поднят (используется, когда
-  # STATS_HTTP_ENABLE=0, и внутри ensure_stats_httpd() перед перезапуском на
-  # новый адрес/порт). Отсутствие pid-файла или мёртвый pid - не ошибка.
-  pid=$(cat "$STATS_HTTP_PIDFILE" 2>/dev/null) || true
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null || true
-    say "Веб-сервис статистики остановлен (pid $pid)"
-  fi
-  rm -f "$STATS_HTTP_PIDFILE" "$STATS_HTTP_PIDFILE.addr"
-}
-
 write_stats_cgi() {
   # Копирует CGI-скрипт формы настройки статистики ($STATS_CGI_SOURCE,
   # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
   # ($STATS_CGI_SCRIPT), откуда его запускает busybox httpd. Сам скрипт
   # подключает speedtest2.sh через экспортированные DIR/ENV (см.
-  # ensure_stats_httpd() ниже и комментарий в начале stats_cgi.sh) - здесь
+  # prepare() в stats_service.sh ниже и комментарий в начале stats_cgi.sh) - здесь
   # только физическое размещение файла внутри cgi-bin, логика не меняется.
-  # Каталог $STATS_CGI_SCRIPT уже создан вызывающим ensure_stats_httpd()
+  # Каталог $STATS_CGI_SCRIPT уже создан вызывающим prepare() в stats_service.sh
   # (mkdir -p "$STATS_HTTP_DIR/cgi-bin"), отдельная проверка не нужна.
   if [ ! -f "$STATS_CGI_SOURCE" ]; then
     say "WARN: $STATS_CGI_SOURCE не найден, форма настройки статистики недоступна (переустановите install.sh)"
@@ -425,7 +411,7 @@ write_stats_run() {
   # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
   # ($STATS_RUN_SCRIPT) - см. комментарий в начале stats_run.sh. Как и
   # write_stats_cgi(), каталог $STATS_HTTP_DIR/cgi-bin уже создан
-  # вызывающим ensure_stats_httpd(), отдельная проверка не нужна.
+  # вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
   if [ ! -f "$STATS_RUN_SOURCE" ]; then
     say "WARN: $STATS_RUN_SOURCE не найден, кнопка force-прогона недоступна (переустановите install.sh)"
     return 0
@@ -441,7 +427,7 @@ write_stats_update() {
   # Копирует CGI-обёртку раздела "Обновления" ($STATS_UPDATE_SOURCE, ставится
   # install.sh рядом со speedtest2.sh) в раздаваемый каталог ($STATS_UPDATE_SCRIPT) -
   # тот же приём, что write_stats_run(). Каталог $STATS_HTTP_DIR/cgi-bin уже
-  # создан вызывающим ensure_stats_httpd(), отдельная проверка не нужна.
+  # создан вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
   if [ ! -f "$STATS_UPDATE_SOURCE" ]; then
     say "WARN: $STATS_UPDATE_SOURCE не найден, раздел обновлений недоступен (переустановите install.sh)"
     return 0
@@ -457,7 +443,7 @@ write_stats_system() {
   # Копирует CGI-обёртку футера ($STATS_SYSTEM_SOURCE, ставится install.sh
   # рядом со speedtest2.sh) в раздаваемый каталог ($STATS_SYSTEM_SCRIPT) -
   # тот же приём, что write_stats_update(). Каталог $STATS_HTTP_DIR/cgi-bin
-  # уже создан вызывающим ensure_stats_httpd(), отдельная проверка не нужна.
+  # уже создан вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
   if [ ! -f "$STATS_SYSTEM_SOURCE" ]; then
     say "WARN: $STATS_SYSTEM_SOURCE не найден, футер веб-интерфейса недоступен (переустановите install.sh)"
     return 0
@@ -495,7 +481,7 @@ write_stats_static() {
   # нодам (buildNodeChart() в stats_app.js), не наш код - тоже просто
   # копируется как есть, отдельной логики не требует. Как и
   # write_stats_cgi()/write_stats_run() - отсутствие источника или
-  # неудачная запись только логируют WARN и НЕ прерывают ensure_stats_httpd()
+  # неудачная запись только логируют WARN и НЕ прерывают prepare() в stats_service.sh
   # (return 0 в любом случае): без index.html stats_httpd.py отдаёт 404
   # - см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
   # покажет "chart.js не загрузился", см. buildNodeChart() в stats_app.js).
@@ -537,7 +523,7 @@ zash_ui_dir() {
 cleanup_old_zash_stats() {
   # Убирает хвост старой схемы (см. TODO.md - "убрать старую страницу
   # статистики из встроенного веб-UI mihomo"): до появления отдельного
-  # веб-сервиса статистики (см. комментарий в начале ensure_stats_httpd())
+  # веб-сервиса статистики (см. комментарий в начале prepare() в stats_service.sh)
   # stats.html лежал прямо в каталоге external-ui и раздавался вместе с
   # zashboard на порту API_MAIN (обычно 9090, например
   # http://<роутер>:9090/ui/stats.html). Текущий код туда больше ничего
@@ -546,7 +532,7 @@ cleanup_old_zash_stats() {
   # только дублирует новый сервис и путает читателя двумя разными
   # адресами с похожим содержимым.
   #
-  # Вызывается из ensure_stats_httpd() при каждом прогоне (включая
+  # Вызывается из prepare() в stats_service.sh при каждом прогоне (включая
   # --force), поэтому самовосстанавливается так же, как остальной код
   # этого файла: если zashboard когда-нибудь переустановят и туда снова
   # вручную скопируют stats.html - следующий прогон уберёт его опять.
@@ -565,163 +551,9 @@ cleanup_old_zash_stats() {
   fi
 }
 
-ensure_stats_httpd() {
-  # Поднимает (или перезапускает при смене адреса/порта) отдельный веб-сервис
-  # для stats.html - раньше страница раздавалась только вместе с zashboard
-  # через external-ui mihomo (порт 9090), теперь у неё свой процесс и порт,
-  # не зависящий от того, установлен ли zashboard. Самовосстанавливается: при
-  # каждом прогоне (раз в HISTORY-интервал через cron) проверяет, жив ли
-  # процесс, и поднимает заново, если умер, - отдельного demon/init.d-скрипта
-  # для автозапуска после перезагрузки роутера пока нет, см. TODO.md.
-  # DIR и ENV экспортируются, чтобы дочерний httpd и порождаемые им CGI-запросы
-  # (stats_cgi.sh) видели те же настройки, что и текущий прогон - см.
-  # комментарий в начале stats_cgi.sh.
-  #
-  # Python 3 обязателен: stats_httpd.py реализует общую авторизацию UI/API.
-  export DIR ENV
-
-  cleanup_old_zash_stats
-
-  if [ "$STATS_HTTP_ENABLE" != 1 ]; then
-    stop_stats_httpd
-    return 0
-  fi
-
-  if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
-    say "WARN: Не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
-    return 0
-  fi
-
-  write_stats_cgi
-  write_stats_run
-  write_stats_update
-  write_stats_system
-  write_stats_config
-  write_stats_static
-
-  want="$STATS_HTTP_BIND:$STATS_HTTP_PORT"
-  pid=$(cat "$STATS_HTTP_PIDFILE" 2>/dev/null) || true
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    have=$(cat "$STATS_HTTP_PIDFILE.addr" 2>/dev/null) || true
-    if [ "$have" = "$want" ]; then
-      return 0
-    fi
-    say "Веб-сервис статистики: адрес изменился, перезапускаю"
-    stop_stats_httpd
-  fi
-
-  backend=""
-  if [ -f "$STATS_HTTPD_PY" ] && command -v "$STATS_HTTPD_PY_CMD" >/dev/null 2>&1; then
-    newpid=$(start_stats_httpd_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY") && backend="$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY"
-  else
-    say "WARN: Python 3 или $STATS_HTTPD_PY не найден - веб-интерфейс не запущен"
-  fi
-  if [ -z "$backend" ]; then
-    say "WARN: Веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
-    return 0
-  fi
-  if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
-    echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
-    url_host=$(stats_httpd_advertise_host "$STATS_HTTP_BIND")
-    [ -n "$url_host" ] || url_host=$STATS_HTTP_BIND
-    say "OK: Веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats"
-  else
-    say "WARN: Не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
-  fi
-}
-
-start_stats_httpd_backend() {
-  # $1 = команда "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY". При успехе
-  # печатает pid в stdout и возвращает 0; при неудаче - WARN в лог через
-  # say() и возврат 1. Не трогает $STATS_HTTP_PIDFILE - это решает вызывающий
-  # код (ensure_stats_httpd), он же выбирает, пробовать ли запасной вариант.
-  cmd=$1
-  bin=${cmd%% *}
-  if ! command -v "$bin" >/dev/null 2>&1; then
-    say "WARN: $bin не найден"
-    return 1
-  fi
-  $cmd -f -p "$STATS_HTTP_BIND:$STATS_HTTP_PORT" -h "$STATS_HTTP_DIR" \
-    > "$STATS_HTTP_LOG" 2>&1 < /dev/null &
-  newpid=$!
-  sleep 1
-  if ! kill -0 "$newpid" 2>/dev/null; then
-    say "WARN: $cmd запустился и сразу завершился (порт занят? см. $STATS_HTTP_LOG)"
-    return 1
-  fi
-  echo "$newpid"
-}
-
-stats_httpd_advertise_host() {
-  # $1 = STATS_HTTP_BIND. Печатает адрес для строки "OK: веб-сервис
-  # статистики ..." в консоли/логе - "0.0.0.0" (слушать все интерфейсы,
-  # значение по умолчанию) в браузер не подставишь, оператору нужен
-  # реальный IP роутера. Если bind - конкретный адрес, он и есть ответ.
-  # Если это "все интерфейсы" - пробуем определить LAN-адрес через
-  # STATS_HTTPD_IP_CMD (по умолчанию "ip", есть из коробки в Entware и
-  # KeeneticOS): берём все глобальные IPv4 из "ip -4 -o addr show scope
-  # global" (формат: "N: iface    inet A.B.C.D/N ..." - $4 после awk,
-  # обрезаем маску через cut).
-  #
-  # На роутере "scope global" адресов может быть НЕСКОЛЬКО сразу - не
-  # только LAN-мост (обычно br0), но и WAN, и виртуальные интерфейсы
-  # xkeen/mihomo (VPN-туннели подписок), которым провайдер вправе выдать
-  # что угодно, вплоть до адреса из зарезервированного диапазона вроде
-  # 198.51.100.0/24 (RFC 5737) - на практике встречалось. Раньше брали
-  # просто первую строку вывода "ip", что зависело от порядка интерфейсов
-  # в ядре и могло показать оператору совсем не тот адрес, по которому он
-  # реально заходит в браузере. Теперь среди всех найденных адресов
-  # приоритет отдаётся частным диапазонам (RFC 1918: 10.0.0.0/8,
-  # 172.16.0.0/12, 192.168.0.0/16) - это и есть обычный домашний LAN;
-  # если ни одного частного адреса нет (нетипичная сеть) - как и раньше,
-  # берём первый попавшийся, чтобы не остаться совсем без адреса.
-  #
-  # Если определить не удалось совсем - молча печатаем пусто, вызывающий
-  # код (ensure_stats_httpd) сам подставит обратно "$STATS_HTTP_BIND" как
-  # раньше, чтобы строка не осталась пустой.
-  case "$1" in
-    0.0.0.0|"") ;;
-    *) printf '%s' "$1"; return 0 ;;
-  esac
-  command -v "$STATS_HTTPD_IP_CMD" >/dev/null 2>&1 || return 0
-  "$STATS_HTTPD_IP_CMD" -4 -o addr show scope global 2>/dev/null \
-    | awk '{print $4}' | cut -d/ -f1 | awk '
-        function is_private(ip,    o, n) {
-          n = split(ip, o, ".")
-          if (n != 4) return 0
-          if (o[1] == 10) return 1
-          if (o[1] == 192 && o[2] == 168) return 1
-          if (o[1] == 172 && o[2] >= 16 && o[2] <= 31) return 1
-          return 0
-        }
-        !got_any { first = $0; got_any = 1 }
-        is_private($0) && !got_priv { priv = $0; got_priv = 1 }
-        END {
-          if (got_priv) print priv
-          else if (got_any) print first
-        }
-      '
-}
-
 render_stats() {
-  # С порции 2 задачи "независимая служба веб-интерфейса статистики"
-  # (docs/superpowers/specs/2026-09-15-independent-stats-service-design.md)
-  # render_stats() больше НЕ вызывает ensure_stats_httpd() - обычные
-  # прогоны speedtest2.sh (cron, --force) не поднимают, не проверяют и не
-  # перезапускают HTTP-бэкенд. Это отдельная забота stats_service.sh
-  # (supervisor с собственным respawn/backoff, см. design). render_stats()
-  # отвечает только за атомарную публикацию stats.json - как и
-  # write_progress() отдельно отвечает за progress.json.
-  #
-  # С порции 3 stats_cgi.sh (после сохранения серверных настроек) тоже
-  # переключён - вместо ensure_stats_httpd() он вызывает
-  # "$STATS_INIT_SCRIPT reconfigure". ensure_stats_httpd() и
-  # её вспомогательные функции (write_stats_*(), cleanup_old_zash_stats() -
-  # переиспользуются stats_service.sh; start_stats_httpd_backend(),
-  # stats_httpd_advertise_host(), stop_stats_httpd() - больше не
-  # переиспользуются никем) сейчас не вызываются ни из одного места в
-  # проекте и оставлены только как задел под будущую отдельную чистку,
-  # а не потому что design запрещает их убрать.
+  # Атомарно публикует stats.json. HTTP-бэкенд запускает и перезапускает
+  # stats_service.sh, прогоны speedtest2.sh его не трогают.
   statsdir=${STATS_JSON%/*}
   if [ ! -d "$statsdir" ]; then
     say "WARN: Каталог $statsdir не найден, stats.json не записан"
