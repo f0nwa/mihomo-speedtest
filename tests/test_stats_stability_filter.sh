@@ -1,10 +1,10 @@
 #!/bin/sh
-# Фильтр по статусу в «Статистики доступности нод» (stats_app.js): фильтрует
+# Фильтр по статусу в «Статистики доступности нод» (stats_app_stats.js): фильтрует
 # уже полученные строки в браузере, без запросов к серверу, и переживает
 # перерисовку карточки renderStats().
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILE=$ROOT/web/stats_app.js
+FILE=$ROOT/web/stats_app_stats.js
 CSS=$ROOT/web/stats_style.css
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -16,13 +16,13 @@ grep -q "Нет нод с выбранными статусами." "$FILE" || f
 grep -q "label.stability-filter-item" "$CSS" || fail "нет стилей фильтра"
 
 # Фильтр не должен ходить на сервер: внутри функции нет fetch.
-awk '/function buildStabilityFilter/{f=1} f&&/fetch/{bad=1} f&&/^  }$/{exit} END{exit bad}' "$FILE" || fail "фильтр обращается к серверу"
+awk '/function buildStabilityFilter/{f=1} f&&/fetch/{bad=1} f&&/^}$/{exit} END{exit bad}' "$FILE" || fail "фильтр обращается к серверу"
 
 # Поведение группировки: skipped и неизвестные статусы попадают в other.
 if command -v node >/dev/null 2>&1; then
   node -e '
     var src = require("fs").readFileSync(process.argv[1], "utf8");
-    var m = src.match(/function stabilityGroup\(status\) \{[\s\S]*?\n  \}/);
+    var m = src.match(/function stabilityGroup\(status\) \{[\s\S]*?\n\}/);
     if (!m) { process.exit(2); }
     var g = new Function(m[0] + "; return stabilityGroup;")();
     var ok = g("alive") === "alive" && g("down") === "down" && g("skipped") === "other" && g(undefined) === "other";
@@ -35,9 +35,9 @@ fi
 if command -v node >/dev/null 2>&1; then
   node -e '
     var src = require("fs").readFileSync(process.argv[1], "utf8");
-    var a = src.indexOf("  var STATUS_ORDER"), b = src.indexOf("  function buildStabilityTable(");
+    var a = src.indexOf("var STATUS_ORDER"), b = src.indexOf("function buildStabilityTable(");
     if (a < 0 || b < 0) { process.exit(2); }
-    var api = new Function(src.slice(a, b) + "; return { sort: sortStabilityRows, st: stabilitySort };")();
+    var api = new Function(src.slice(a, b).replace(/^export /gm, "") + "; return { sort: sortStabilityRows, st: stabilitySort };")();
     var rows = [
       { name: "b", status: "down", last_seen: "2026-09-28 10:00:00", uptime_pct: 40, avg_speed_bytes: 5 },
       { name: "A", status: "skipped", last_seen: "", uptime_pct: null, avg_speed_bytes: null },

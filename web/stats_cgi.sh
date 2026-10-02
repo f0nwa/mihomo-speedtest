@@ -1,6 +1,6 @@
 #!/bin/sh
 # CGI-скрипт настроек веб-интерфейса (JSON для /api/settings, см.
-# API_ROUTES в stats_httpd.py и renderSettings() в stats_app.js). Ставится
+# API_ROUTES в stats_httpd.py и renderSettings() в stats_app_settings.js). Ставится
 # install.sh в $DIR/stats_cgi.sh, stats_httpd.py запускает его оттуда.
 #
 # Полагается на то, что stats_httpd.py передаёт скрипту окружение

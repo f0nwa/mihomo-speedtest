@@ -26,7 +26,7 @@ PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh u
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_chart.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -280,7 +280,7 @@ warn_regex_block() {
   # Куски BLOCK с символами регулярных выражений (\ ^ $ * + ? ( ) [ ] { }):
   # в спидтесте они ищутся буквально, так что такой кусок почти наверняка
   # ничего не отсечёт. Установку не останавливает - только предупреждает
-  # (то же правило, что замечание в веб-форме, stats_app.js:geoWarnings()).
+  # (то же правило, что замечание в веб-форме, stats_app_settings.js:geoWarnings()).
   bad=$(printf '%s\n' "$1" | awk -F'|' '{
     for (i = 1; i <= NF; i++) if ($i ~ /[][\\^$*+?(){}]/) printf "  %s\n", $i
   }')
@@ -467,10 +467,13 @@ install_files() {
   # веб-сервиса статистики - stats_httpd.py раздаёт их прямо из $DIR;
   # исполняемый бит не нужен.
   # stats_chart.js - вендоренная UMD-сборка Chart.js для графика по нодам
-  # (buildNodeChart() в stats_app.js), не наш код, ставится так же.
+  # (buildNodeChart() в stats_app_stats.js), не наш код, ставится так же.
   atomic_install "$SELFDIR/stats_index.html" "$DIR/stats_index.html" || return 1
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
+  for m in core stats settings updates log config; do
+    atomic_install "$SELFDIR/stats_app_$m.js" "$DIR/stats_app_$m.js" || return 1
+  done
   atomic_install "$SELFDIR/stats_chart.js" "$DIR/stats_chart.js" || return 1
   # stats_codemirror.js/.css - вендоренный CodeMirror 5 для вкладки "Конфиг".
   atomic_install "$SELFDIR/stats_codemirror.js" "$DIR/stats_codemirror.js" || return 1

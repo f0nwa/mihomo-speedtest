@@ -90,7 +90,7 @@ new_dir() {
 }
 
 CORE_LIST="speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh \
-stats_index.html stats_style.css stats_app.js stats_chart.js stats_httpd.py stats_auth.py stats_auth.sh \
+stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_chart.js stats_httpd.py stats_auth.py stats_auth.sh \
 node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh"
 
 # =====================================================================

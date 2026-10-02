@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-JS="$ROOT/web/stats_app.js"
+JS="$ROOT/web/stats_app_updates.js"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # Пункт 3 фидбека: после успешного "Обновить" бейдж на вкладке Обновления
