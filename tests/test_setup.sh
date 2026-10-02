@@ -1,0 +1,670 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SCRIPT="$ROOT/config-tools/setup.sh"
+FAILED=0
+
+assert_eq() {
+  if [ "$1" != "$2" ]; then
+    echo "FAIL: '$1' != '$2' ($3)" >&2
+    FAILED=1
+  fi
+}
+
+# setup.sh сорсит version_check.sh через $SELFDIR при подключении (даже
+# под SETUP_LIB_ONLY=1). Дефолт SELFDIR=. не годится - рабочий каталог
+# этого теста не обязательно каталог tests/, а корень репозитория (см.
+# инструкцию запуска "sh tests/test_setup.sh"). Указываем реальный
+# каталог, где лежит version_check.sh; отдельные сценарии ниже (WORK3,
+# WORK4 и т.п.) переопределяют SELFDIR локально в своих подшеллах под
+# свои нужды.
+SELFDIR=$(mktemp -d)
+cp "$ROOT"/install.sh "$ROOT"/uninstall.sh "$ROOT"/*/*.sh "$ROOT"/*/*.awk "$ROOT"/*/*.py "$ROOT"/*/*.html "$ROOT"/*/*.css "$ROOT"/*/*.js "$ROOT"/*/*.yaml "$SELFDIR/" 2>/dev/null
+
+SETUP_LIB_ONLY=1 . "$SCRIPT"
+unset SETUP_LIB_ONLY
+
+WORK=$(mktemp -d)
+DIR="$WORK" CONFIG="$WORK/config.yaml" SUB_URLS='https://sub1.example/AAA https://sub2.example/BBB' \
+  collect_subscriptions > "$WORK/collected.txt"
+assert_eq "$(wc -l < "$WORK/collected.txt" | tr -d ' ')" "2" "две ссылки из SUB_URLS"
+grep -q '^https://sub1.example/AAA$' "$WORK/collected.txt" || { echo "FAIL: sub1 missing" >&2; FAILED=1; }
+rm -rf "$WORK"
+unset SUB_URLS DIR CONFIG
+
+WORK=$(mktemp -d)
+cat > "$WORK/config.yaml" <<'EOF'
+proxy-providers:
+  provider-a:
+    type: http
+    url: "https://old1.example/AAA"
+    path: ./proxy-providers/provider-a.yaml
+  provider-b:
+    type: http
+    url: "https://old2.example/BBB"
+    path: ./proxy-providers/provider-b.yaml
+EOF
+OUT=$(printf '1\n\n' | DIR="$WORK" CONFIG="$WORK/config.yaml" SELFDIR="$SELFDIR" collect_subscriptions)
+assert_eq "$OUT" "$(printf 'https://old2.example/BBB\t\tprovider-b')" "удалили подписку №1, оставили №2, новых не добавили (имя provider-b перенесено третьим полем)"
+rm -rf "$WORK"
+unset SUB_URLS DIR CONFIG
+
+FAKEBIN=$(mktemp -d)
+cat > "$FAKEBIN/curl" <<'EOF'
+#!/bin/sh
+# Фиктивный curl: разбирает -A UA и -o OUT из аргументов, эмулирует
+# панель, которая отдаёт полный clash YAML только под UA "clash.meta".
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    -w) shift 2 ;;
+    -m) shift 2 ;;
+    -s) shift ;;
+    *) shift ;;
+  esac
+done
+if [ "$ua" = "clash.meta" ]; then
+  printf 'mixed-port: 7890\nproxy-groups: []\nproxies: []\n' > "$out"
+else
+  printf '{"v": 2}' > "$out"
+fi
+printf '200'
+EOF
+chmod +x "$FAKEBIN/curl"
+
+WORK2=$(mktemp -d)
+printf 'https://sub1.example/AAA\n' > "$WORK2/urls.txt"
+PATH="$FAKEBIN:$PATH" build_provider_specs "$WORK2/urls.txt" > "$WORK2/specs.txt"
+grep -q "$(printf 'https://sub1.example/AAA\tclash.meta')" "$WORK2/specs.txt" || { echo "FAIL: expected clash.meta to be picked" >&2; FAILED=1; }
+rm -rf "$FAKEBIN" "$WORK2"
+
+# URL<TAB>UA (перенесённый из старого конфига header: User-Agent:) должен
+# приниматься как есть, без вызова curl/pick_ua вообще - подсовываем
+# заведомо неработающий curl, чтобы убедиться, что он не вызывается.
+FAKEBIN_UA=$(mktemp -d)
+cat > "$FAKEBIN_UA/curl" <<'EOF'
+#!/bin/sh
+echo "curl не должен вызываться для строки с уже известным UA" >&2
+exit 1
+EOF
+chmod +x "$FAKEBIN_UA/curl"
+
+WORK_UA=$(mktemp -d)
+printf 'https://sub1.example/AAA\tv2rayNG/1.8.0\n' > "$WORK_UA/urls.txt"
+PATH="$FAKEBIN_UA:$PATH" build_provider_specs "$WORK_UA/urls.txt" > "$WORK_UA/specs.txt" 2>"$WORK_UA/specs.err"
+grep -q "$(printf 'https://sub1.example/AAA\tv2rayNG/1.8.0')" "$WORK_UA/specs.txt" || { echo "FAIL: сохранённый UA должен перейти в specs как есть" >&2; FAILED=1; }
+grep -q 'не должен вызываться' "$WORK_UA/specs.err" && { echo "FAIL: build_provider_specs не должен запускать detect_ua для строки с уже известным UA" >&2; FAILED=1; }
+rm -rf "$FAKEBIN_UA" "$WORK_UA"
+
+# Список на выбор (drop-prompt) должен явно показывать перенесённый UA.
+WORK_LIST=$(mktemp -d)
+cat > "$WORK_LIST/config.yaml" <<'EOF'
+proxy-providers:
+  provider-a:
+    type: http
+    url: "https://old1.example/AAA"
+    path: ./proxy-providers/provider-a.yaml
+    header:
+      User-Agent:
+        - "v2rayNG/1.8.0"
+EOF
+LIST_OUT=$(DIR="$WORK_LIST" CONFIG="$WORK_LIST/config.yaml" SELFDIR="$SELFDIR" collect_subscriptions < /dev/null 2>&1 >/dev/null)
+case "$LIST_OUT" in
+  *"1) https://old1.example/AAA (свой UA: v2rayNG/1.8.0, имя: provider-a)"*) ;;
+  *) echo "FAIL: список подписок должен показывать перенесённый UA и имя: $LIST_OUT" >&2; FAILED=1 ;;
+esac
+rm -rf "$WORK_LIST"
+
+# Панель вроде v2ray/xray (например Durev VPN) отдаёт один и тот же
+# base64-список ссылок (vless://...) для любого UA - это валидный
+# для mihomo формат (см. classify_body), и build_provider_specs должен
+# принять первый же проверенный UA, а не исключать подписку.
+FAKEBIN_V2RAY=$(mktemp -d)
+cat > "$FAKEBIN_V2RAY/curl" <<'EOF'
+#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    -A) shift 2 ;;
+    -w) shift 2 ;;
+    -m) shift 2 ;;
+    -s) shift ;;
+    *) shift ;;
+  esac
+done
+printf 'dmxlc3M6Ly9iMzM2N2IzYy05YmQyLTUwMTAtYTliOC03NzM4ODQxY2FmMTJAYXV0by5leGFtcGxlLmNvbTo4NDQz' > "$out"
+printf '200'
+EOF
+chmod +x "$FAKEBIN_V2RAY/curl"
+
+WORK_V2RAY=$(mktemp -d)
+printf 'https://durev.example/sub/XXXX\n' > "$WORK_V2RAY/urls.txt"
+PATH="$FAKEBIN_V2RAY:$PATH" build_provider_specs "$WORK_V2RAY/urls.txt" > "$WORK_V2RAY/specs.txt" 2>"$WORK_V2RAY/specs.err"
+grep -q 'durev.example/sub/XXXX' "$WORK_V2RAY/specs.txt" || { echo "FAIL: v2ray base64-подписка должна приниматься, а не исключаться" >&2; cat "$WORK_V2RAY/specs.err" >&2; FAILED=1; }
+grep -qE 'WARN|исключена' "$WORK_V2RAY/specs.err" && { echo "FAIL: не должно быть WARN/исключения для валидной v2ray-подписки" >&2; cat "$WORK_V2RAY/specs.err" >&2; FAILED=1; }
+rm -rf "$FAKEBIN_V2RAY" "$WORK_V2RAY"
+
+FAKEBIN3=$(mktemp -d)
+WORK3=$(mktemp -d)
+mkdir -p "$WORK3/proxy-providers"
+
+cat > "$FAKEBIN3/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN3/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)\n  Ядро проксирования Mihomo версии 1.19.29\n' ;;
+  -restart) exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN3/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)\n  ndm.core.version: "5.1.4 (KeeneticOS)"\n'
+EOF
+cat > "$FAKEBIN3/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) printf '{"version":"1.19.29"}'; exit 0 ;;
+  esac
+done
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890\nproxy-groups: []\nproxies: []\n' > "$out"
+printf '200'
+EOF
+cat > "$FAKEBIN3/mihomo" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$FAKEBIN3"/*
+
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK3/"
+cat > "$WORK3/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+# setup.sh должен запускать install.sh через оболочку, даже если при переносе
+# файлов исполняемый бит install.sh был потерян.
+chmod 644 "$WORK3/install.sh"
+chmod +x "$WORK3/setup.sh"
+
+# < /dev/null: assign_provider_names() спросит подтверждение имени
+# (новая подписка без импорта - коллизий нет, пустой ответ = имя по
+# домену), EOF безопасно принимается как "Enter" - см. assign_provider_names().
+PATH="$FAKEBIN3:$PATH" DIR="$WORK3" BIN=mihomo CONFIG="$WORK3/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK3" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' SKIP_CONFIRM=1 sh "$WORK3/setup.sh" \
+    >"$WORK3/run.log" 2>&1 < /dev/null || { echo "FAIL: full run should succeed" >&2; cat "$WORK3/run.log" >&2; FAILED=1; }
+grep -q 'install.sh (заглушка): запущен' "$WORK3/run.log" || { echo "FAIL: install.sh not invoked" >&2; FAILED=1; }
+[ -f "$WORK3/config.yaml" ] || { echo "FAIL: config.yaml not written" >&2; FAILED=1; }
+# Имя провайдера теперь по домену ссылки (sub1.example -> "sub1"), а не
+# сгенерированный provider-1 - см. docs/plans/2026-09-07-provider-naming-design.md.
+grep -q 'sub1:' "$WORK3/config.yaml" || { echo "FAIL: имя провайдера по домену (sub1) отсутствует в сгенерированном конфиге" >&2; FAILED=1; }
+grep -q 'provider-1:' "$WORK3/config.yaml" && { echo "FAIL: провайдер не должен называться provider-1" >&2; FAILED=1; }
+
+cat > "$FAKEBIN3/mihomo" <<'EOF'
+#!/bin/sh
+echo "test: invalid config field xyz" >&2
+exit 1
+EOF
+chmod +x "$FAKEBIN3/mihomo"
+cp "$WORK3/config.yaml" "$WORK3/config.yaml.before"
+# SUB_URLS убран во втором прогоне: config.yaml уже содержит подписку
+# sub1 из первого прогона (импортируется заново с уже известными UA и
+# именем), повторное добавление того же URL через SUB_URLS создавало бы
+# у assign_provider_names неразрешимую коллизию имён без интерактивного
+# ввода (два источника претендуют на одно и то же доменное имя "sub1").
+if PATH="$FAKEBIN3:$PATH" DIR="$WORK3" BIN=mihomo CONFIG="$WORK3/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK3" API_MAIN=127.0.0.1:9090 \
+    SKIP_CONFIRM=1 sh "$WORK3/setup.sh" \
+    >"$WORK3/run2.log" 2>&1 < /dev/null; then
+  echo "FAIL: run should fail when mihomo -t rejects the rendered config" >&2
+  FAILED=1
+fi
+cmp -s "$WORK3/config.yaml" "$WORK3/config.yaml.before" || { echo "FAIL: existing config.yaml must stay untouched when validation fails" >&2; FAILED=1; }
+grep -q 'test: invalid config field xyz' "$WORK3/run2.log" || { echo "FAIL: mihomo -t output must be shown, not swallowed" >&2; FAILED=1; }
+rejected_path=$(sed -n 's/^Непринятый конфиг оставлен в \(.*\) для разбора.*$/\1/p' "$WORK3/run2.log")
+[ -n "$rejected_path" ] || { echo "FAIL: path to the rejected rendered config not reported" >&2; FAILED=1; }
+[ -n "$rejected_path" ] && [ -f "$rejected_path" ] || { echo "FAIL: rejected rendered config was deleted instead of kept for inspection" >&2; FAILED=1; }
+[ -n "$rejected_path" ] && rm -f "$rejected_path"
+
+rm -rf "$FAKEBIN3" "$WORK3"
+
+FAKEBIN4=$(mktemp -d)
+WORK4=$(mktemp -d)
+cat > "$WORK4/config.yaml" <<'EOF'
+dns:
+  enable: true
+  nameserver:
+    - 8.8.8.8
+
+proxy-providers:
+  provider-a:
+    type: http
+    url: "https://old1.example/AAA"
+    path: ./proxy-providers/provider-a.yaml
+
+proxies:
+  - name: 'Real Node'
+    type: hysteria2
+    server: real.proxy.io
+    password: "s3cr3t"
+
+listeners:
+  - name: my-socks
+    type: socks
+    port: 7777
+EOF
+cat > "$FAKEBIN4/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN4/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)\n  Ядро проксирования Mihomo версии 1.19.29\n' ;;
+  -restart) exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN4/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)\n  ndm.core.version: "5.1.4 (KeeneticOS)"\n'
+EOF
+cat > "$FAKEBIN4/mihomo" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat > "$FAKEBIN4/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) exit 1 ;;
+  esac
+done
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890\nproxy-groups: []\nproxies: []\n' > "$out"
+printf '200'
+EOF
+chmod +x "$FAKEBIN4"/*
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK4/"
+cat > "$WORK4/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh не должен запускаться" >&2
+exit 1
+EOF
+chmod +x "$WORK4/install.sh" "$WORK4/setup.sh"
+
+# Порядок ответов на stdin: (1) drop-prompt импорта - Enter, оставить
+# provider-a; (2,3) assign_provider_names - Enter дважды, принять имя
+# provider-a (перенесено) и имя по домену sub2 (для новой подписки);
+# (4) подтверждение переноса блока proxies - "Y".
+if printf '\n\n\nY\n' | env PATH="$FAKEBIN4:$PATH" DIR="$WORK4" BIN=mihomo CONFIG="$WORK4/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK4" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub2.example/BBB' SKIP_CONFIRM=1 sh "$WORK4/setup.sh" >"$WORK4/run.log" 2>&1; then
+  echo "FAIL: run should fail when API never comes up after restart" >&2
+  FAILED=1
+fi
+grep -q 'mihomo не поднялся после xkeen -restart' "$WORK4/run.log" || { echo "FAIL: missing API-timeout diagnostic" >&2; FAILED=1; }
+grep -q 'install.sh не должен запускаться' "$WORK4/run.log" && { echo "FAIL: install.sh must not run when API never comes up" >&2; FAILED=1; }
+grep -q 'Real Node' "$WORK4/config.yaml" || { echo "FAIL: static proxies block (confirmed Y) should still be merged into config.yaml even though the run later fails on the API wait" >&2; FAILED=1; }
+grep -q '8.8.8.8' "$WORK4/config.yaml" || { echo "FAIL: dns block from old config.yaml should be transferred into the new config.yaml" >&2; FAILED=1; }
+grep -q '^  - name: my-socks$' "$WORK4/config.yaml" || { echo "FAIL: свой вход my-socks должен переноситься в новый config.yaml" >&2; FAILED=1; }
+[ "$(grep -c '^  - name: mst-speedtest$' "$WORK4/config.yaml")" = 1 ] || { echo "FAIL: служебный вход mst-speedtest должен быть ровно один" >&2; FAILED=1; }
+
+# Сквозной сценарий имён провайдеров (Задача 4 плана provider-naming):
+# импортированная подписка сохраняет старое имя (provider-a, принято
+# Enter'ом), новая подписка из SUB_URLS получает имя по домену ссылки
+# (sub2.example -> "sub2", тоже принято Enter'ом) - ни одна не должна
+# называться provider-N.
+grep -q 'provider-a:' "$WORK4/config.yaml" || { echo "FAIL: имя provider-a (перенесено при импорте) отсутствует в сгенерированном конфиге" >&2; FAILED=1; }
+grep -q 'sub2:' "$WORK4/config.yaml" || { echo "FAIL: имя sub2 (по домену новой подписки) отсутствует в сгенерированном конфиге" >&2; FAILED=1; }
+grep -q 'provider-1:' "$WORK4/config.yaml" && { echo "FAIL: провайдер не должен называться provider-1" >&2; FAILED=1; }
+grep -q 'provider-2:' "$WORK4/config.yaml" && { echo "FAIL: провайдер не должен называться provider-2" >&2; FAILED=1; }
+
+rm -rf "$FAKEBIN4" "$WORK4"
+
+# Портция 2 плана "DNS-guard": xkeen_ui_dns_protection_active() (см.
+# tests/test_dns_guard.sh) подключена в main() перед перезаписью
+# config.yaml. Общий фейковый ndmc для всех трёх сценариев ниже: сообщает
+# оба признака активной защиты Xkeen UI (opkg dns-override + "no
+# name-servers" на WAN) вперемешку со строками, нужными check_versions()
+# (все фейковые ndmc в этом файле игнорируют сам аргумент команды и всегда
+# печатают один и тот же вывод - см. существующие FAKEBIN2/3/4 выше).
+FAKEBIN5=$(mktemp -d)
+cat > "$FAKEBIN5/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN5/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)\n  Ядро проксирования Mihomo версии 1.19.29\n' ;;
+  -restart) exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN5/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)\n  ndm.core.version: "5.1.4 (KeeneticOS)"\n'
+printf 'interface ISP\n\tip dhcp client no name-servers\n!\nopkg dns-override\n!\n'
+EOF
+cat > "$FAKEBIN5/mihomo" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat > "$FAKEBIN5/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) printf '{"version":"1.19.29"}'; exit 0 ;;
+  esac
+done
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890\nproxy-groups: []\nproxies: []\n' > "$out"
+printf '200'
+EOF
+chmod +x "$FAKEBIN5"/*
+
+# Сценарий "отказ": защита активна, подтверждения нет ("n") - установка
+# должна остановиться ДО первого же вопроса про подписки, config.yaml не
+# должен появиться, install.sh не должен запускаться.
+WORK5A=$(mktemp -d)
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5A/"
+cat > "$WORK5A/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh не должен запускаться" >&2
+exit 1
+EOF
+chmod +x "$WORK5A/install.sh" "$WORK5A/setup.sh"
+if printf 'n\n' | env PATH="$FAKEBIN5:$PATH" DIR="$WORK5A" BIN=mihomo CONFIG="$WORK5A/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK5A" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' sh "$WORK5A/setup.sh" >"$WORK5A/run.log" 2>&1; then
+  echo "FAIL: run should abort when DNS-guard confirmation is declined" >&2
+  FAILED=1
+fi
+grep -q 'Установка отменена' "$WORK5A/run.log" || { echo "FAIL: missing DNS-guard cancellation message" >&2; FAILED=1; }
+grep -q 'install.sh не должен запускаться' "$WORK5A/run.log" && { echo "FAIL: install.sh must not run after DNS-guard decline" >&2; FAILED=1; }
+[ -f "$WORK5A/config.yaml" ] && { echo "FAIL: config.yaml must not be written after DNS-guard decline" >&2; FAILED=1; }
+rm -rf "$WORK5A"
+
+# Сценарий "обход DNS-guard": та же активная защита, но
+# SKIP_DNS_GUARD_CHECK=1 - именно этот абзац показываться не должен, но
+# общее предупреждение+подтверждение (см. confirm_config_replace()) всё
+# равно задаётся - SKIP_DNS_GUARD_CHECK отключает только проверку Xkeen
+# UI, не весь вопрос целиком (для этого есть отдельный SKIP_CONFIRM).
+WORK5B=$(mktemp -d)
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5B/"
+cat > "$WORK5B/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+chmod +x "$WORK5B/install.sh" "$WORK5B/setup.sh"
+if ! printf 'y\n' | env PATH="$FAKEBIN5:$PATH" DIR="$WORK5B" BIN=mihomo CONFIG="$WORK5B/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK5B" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' SKIP_DNS_GUARD_CHECK=1 sh "$WORK5B/setup.sh" \
+    >"$WORK5B/run.log" 2>&1; then
+  echo "FAIL: run with SKIP_DNS_GUARD_CHECK=1 should succeed after confirming the general warning" >&2
+  cat "$WORK5B/run.log" >&2
+  FAILED=1
+fi
+grep -q 'Похоже, на роутере сейчас активна' "$WORK5B/run.log" && { echo "FAIL: SKIP_DNS_GUARD_CHECK=1 must suppress the DNS-guard paragraph" >&2; FAILED=1; }
+grep -q 'config.yaml будет создан заново или полностью заменён' "$WORK5B/run.log" || { echo "FAIL: SKIP_DNS_GUARD_CHECK=1 must NOT suppress the general confirmation" >&2; FAILED=1; }
+[ -f "$WORK5B/config.yaml" ] || { echo "FAIL: config.yaml should be written when the guard is skipped and the general confirmation is accepted" >&2; FAILED=1; }
+rm -rf "$WORK5B"
+
+# Сценарий "подтверждение": та же активная защита, ответ "y" - установка
+# должна пройти как обычно, предупреждение должно быть показано.
+WORK5C=$(mktemp -d)
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5C/"
+cat > "$WORK5C/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+chmod +x "$WORK5C/install.sh" "$WORK5C/setup.sh"
+if ! printf 'y\n' | env PATH="$FAKEBIN5:$PATH" DIR="$WORK5C" BIN=mihomo CONFIG="$WORK5C/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK5C" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' sh "$WORK5C/setup.sh" \
+    >"$WORK5C/run.log" 2>&1; then
+  echo "FAIL: run should succeed after DNS-guard confirmation (y)" >&2
+  cat "$WORK5C/run.log" >&2
+  FAILED=1
+fi
+grep -q 'Похоже, на роутере сейчас активна' "$WORK5C/run.log" || { echo "FAIL: DNS-guard warning was not shown" >&2; FAILED=1; }
+grep -q 'install.sh (заглушка): запущен' "$WORK5C/run.log" || { echo "FAIL: install.sh not invoked after confirmation" >&2; FAILED=1; }
+[ -f "$WORK5C/config.yaml" ] || { echo "FAIL: config.yaml should be written after confirmation" >&2; FAILED=1; }
+rm -rf "$WORK5C"
+
+rm -rf "$FAKEBIN5"
+
+# --- Финальный обзор (C1b): mihomo -t должен проверять отрендеренный
+# конфиг относительно MIHOMO_DIR (каталог самой Mihomo), а не DIR
+# (каталог проекта speedtest2-stats) - см.
+# docs/superpowers/specs/2026-09-25-install-dir-separation-design.md.
+# До исправления setup.sh передавал сюда "$DIR".
+FAKEBIN6=$(mktemp -d)
+WORK6=$(mktemp -d)
+mkdir -p "$WORK6/proxy-providers"
+
+cat > "$FAKEBIN6/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN6/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)
+  Ядро проксирования Mihomo версии 1.19.29
+' ;;
+  -restart) exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN6/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)
+  ndm.core.version: "5.1.4 (KeeneticOS)"
+'
+EOF
+cat > "$FAKEBIN6/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) printf '{"version":"1.19.29"}'; exit 0 ;;
+  esac
+done
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890
+proxy-groups: []
+proxies: []
+' > "$out"
+printf '200'
+EOF
+
+MIHOMO_ARG_LOG6=$(mktemp "${TMPDIR:-/tmp}/setup-mihomo-arg.XXXXXX")
+cat > "$FAKEBIN6/mihomo" <<EOF
+#!/bin/sh
+echo "\$@" > "$MIHOMO_ARG_LOG6"
+exit 0
+EOF
+chmod +x "$FAKEBIN6"/*
+
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK6/"
+cat > "$WORK6/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+chmod +x "$WORK6/install.sh" "$WORK6/setup.sh"
+
+# Каталог самой Mihomo нарочно ОТЛИЧАЕТСЯ от DIR - суть регрессии C1b:
+# если setup.sh перепутает их местами, в логе окажется "-d $WORK6" вместо
+# "-d $MIHOMO_HOME6".
+MIHOMO_HOME6=$(mktemp -d)
+
+PATH="$FAKEBIN6:$PATH" DIR="$WORK6" MIHOMO_DIR="$MIHOMO_HOME6" BIN=mihomo CONFIG="$WORK6/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK6" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' SKIP_CONFIRM=1 sh "$WORK6/setup.sh" \
+    >"$WORK6/run.log" 2>&1 < /dev/null || { echo "FAIL: C1b full run should succeed" >&2; cat "$WORK6/run.log" >&2; FAILED=1; }
+
+[ -f "$MIHOMO_ARG_LOG6" ] || { echo "FAIL: setup.sh не вызвал \$BIN (mihomo -t) - регрессионный тест C1b не может ничего проверить" >&2; FAILED=1; }
+if [ -f "$MIHOMO_ARG_LOG6" ]; then
+  grep -qF -- "-d $MIHOMO_HOME6 " "$MIHOMO_ARG_LOG6" \
+    || { echo "FAIL: setup.sh передал mihomo -t не тот -d: ожидался MIHOMO_DIR ($MIHOMO_HOME6), получено: $(cat "$MIHOMO_ARG_LOG6")" >&2; FAILED=1; }
+  grep -qF -- "-d $WORK6 " "$MIHOMO_ARG_LOG6" \
+    && { echo "FAIL: setup.sh передал mihomo -t каталог DIR ($WORK6) вместо MIHOMO_DIR - регрессия C1b" >&2; FAILED=1; }
+fi
+
+rm -rf "$FAKEBIN6" "$WORK6" "$MIHOMO_HOME6" "$MIHOMO_ARG_LOG6"
+
+# --- Общее предупреждение+подтверждение перед заменой config.yaml
+# (confirm_config_replace(), без активного DNS-guard Xkeen UI) - владелец
+# попросил безусловное предупреждение о том, что config.yaml будет
+# создан/заменён и в него попадут вспомогательные прокси-группы, самым
+# первым шагом main(), до сбора подписок. ---
+FAKEBIN7=$(mktemp -d)
+WORK7=$(mktemp -d)
+mkdir -p "$WORK7/proxy-providers"
+
+cat > "$FAKEBIN7/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN7/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)
+  Ядро проксирования Mihomo версии 1.19.29
+' ;;
+  -restart) exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN7/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)
+  ndm.core.version: "5.1.4 (KeeneticOS)"
+'
+EOF
+cat > "$FAKEBIN7/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) printf '{"version":"1.19.29"}'; exit 0 ;;
+  esac
+done
+ua=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -A) ua=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890
+proxy-groups: []
+proxies: []
+' > "$out"
+printf '200'
+EOF
+cat > "$FAKEBIN7/mihomo" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$FAKEBIN7"/*
+
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK7/"
+cat > "$WORK7/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+chmod +x "$WORK7/install.sh" "$WORK7/setup.sh"
+
+# Без ответа (EOF на stdin, DNS-guard не активен - FAKEBIN7 его не
+# симулирует) - установка должна остановиться ДО первого же вопроса про
+# подписки, config.yaml не должен появиться, install.sh не должен
+# запускаться. Предупреждение про замену конфига и вспомогательные
+# прокси-группы должно быть показано, абзац про Xkeen UI - нет.
+if PATH="$FAKEBIN7:$PATH" DIR="$WORK7" BIN=mihomo CONFIG="$WORK7/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK7" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' sh "$WORK7/setup.sh" \
+    >"$WORK7/run.log" 2>&1 < /dev/null; then
+  echo "FAIL: run should abort when the general confirmation gets no answer" >&2
+  cat "$WORK7/run.log" >&2
+  FAILED=1
+fi
+grep -q 'config.yaml будет создан заново или полностью заменён' "$WORK7/run.log" \
+  || { echo "FAIL: missing general config-replace warning" >&2; FAILED=1; }
+grep -q 'вспомогательные группы автоматического выбора прокси' "$WORK7/run.log" \
+  || { echo "FAIL: warning must mention the auxiliary proxy-selection groups" >&2; FAILED=1; }
+grep -q 'Похоже, на роутере сейчас активна' "$WORK7/run.log" \
+  && { echo "FAIL: DNS-guard paragraph must not appear when the guard is not active" >&2; FAILED=1; }
+grep -q 'Установка отменена' "$WORK7/run.log" || { echo "FAIL: missing cancellation message" >&2; FAILED=1; }
+grep -q 'install.sh (заглушка): запущен' "$WORK7/run.log" && { echo "FAIL: install.sh must not run before confirmation" >&2; FAILED=1; }
+[ -f "$WORK7/config.yaml" ] && { echo "FAIL: config.yaml must not be written before confirmation" >&2; FAILED=1; }
+
+# С ответом "y" - установка должна пройти как обычно.
+if ! printf 'y\n' | env PATH="$FAKEBIN7:$PATH" DIR="$WORK7" BIN=mihomo CONFIG="$WORK7/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK7" API_MAIN=127.0.0.1:9090 \
+    SUB_URLS='https://sub1.example/AAA' sh "$WORK7/setup.sh" \
+    >"$WORK7/run2.log" 2>&1; then
+  echo "FAIL: run should succeed after confirming the general warning (y)" >&2
+  cat "$WORK7/run2.log" >&2
+  FAILED=1
+fi
+grep -q 'install.sh (заглушка): запущен' "$WORK7/run2.log" || { echo "FAIL: install.sh not invoked after confirmation" >&2; FAILED=1; }
+[ -f "$WORK7/config.yaml" ] || { echo "FAIL: config.yaml should be written after confirmation" >&2; FAILED=1; }
+
+rm -rf "$FAKEBIN7" "$WORK7"
+
+if [ "$FAILED" = 1 ]; then
+  echo "test_setup.sh: FAILED" >&2
+  exit 1
+fi
+echo "test_setup.sh: OK (шаг 1, C1b regression covered)"
