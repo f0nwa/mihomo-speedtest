@@ -66,6 +66,10 @@ REPO_DIR=$DIR
 DIR=$(mktemp -d)
 cp -p "$REPO_DIR/updater/update.sh" "$REPO_DIR/updater/update_plan.awk" \
    "$REPO_DIR/updater/update_prepare.sh" "$REPO_DIR/updater/update_transaction.sh" "$DIR/"
+# Режимы как в манифесте (0755/0644), а не как в рабочем дереве: на
+# некоторых дисках (сетевые, exFAT) файлы видны с правами 700/600.
+chmod 755 "$DIR/update.sh" "$DIR/update_prepare.sh" "$DIR/update_transaction.sh"
+chmod 644 "$DIR/update_plan.awk"
 . "$REPO_DIR/updater/update_transaction.sh"
 transaction_apply
 [ "$(cat "$TARGET_ROOT/opt/etc/mihomo-speedtest/a.txt")" = new ]

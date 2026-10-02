@@ -149,6 +149,7 @@ echo
 echo "config_action=${MST_CONFIG_ACTION:-}"
 CGI
 PORT2=$((BASE_PORT + 1))
+export STATS_PROGRESS=$TEST_ROOT/w2/progress.json
 PID2=$(start_server "$W2" "$PORT2" "$A2")
 CLEANUP_PIDS="$CLEANUP_PIDS $PID2"
 wait_up "$PORT2" || fail "сервер (часть 2) не поднялся"
@@ -184,6 +185,21 @@ code=$(curl -s -m 2 -o "$TEST_ROOT/body2" -w '%{http_code}' "http://127.0.0.1:$P
 [ "$code" = "503" ] || fail "/api/run без stats_run.sh: ожидался 503, получено $code"
 grep -q '"script_missing"' "$TEST_ROOT/body2" || fail "/api/run без stats_run.sh: нет error=script_missing"
 
+# Content-Length: не число -> 400, больше предела -> 413 (без чтения тела)
+for case in "abc 400" "-5 400" "999999999 413"; do
+  cl=${case% *}; want=${case#* }
+  got=$(python3 - "$PORT2" "$AUTH_COOKIE" "$AUTH_CSRF" "$cl" <<'RAW'
+import socket, sys
+port, cookie, csrf, cl = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+s = socket.create_connection(("127.0.0.1", port), timeout=5)
+s.sendall(("POST /api/settings HTTP/1.1\r\nHost: x\r\nCookie: %s\r\nX-CSRF-Token: %s\r\n"
+           "Content-Length: %s\r\nConnection: close\r\n\r\n" % (cookie, csrf, cl)).encode())
+print(s.recv(64).decode("latin-1").split(" ")[1])
+RAW
+)
+  [ "$got" = "$want" ] || fail "Content-Length=$cl: ожидался $want, получено $got"
+done
+
 code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/whatever")
 [ "$code" = "501" ] || fail "/api/whatever: должен отвечать 501, получено $code"
 
@@ -199,6 +215,12 @@ CT3=$(curl -s -m 2 -D - -o /dev/null "http://127.0.0.1:$PORT2/api/stats" | tr -d
 echo "$CT3" | grep -qi "application/json" || fail "/api/stats: Content-Type [$CT3]"
 OUT=$(curl -s -m 2 -w ' %{http_code}' "http://127.0.0.1:$PORT2/api/progress")
 [ "$OUT" = "{} 200" ] || fail "/api/progress без файла: ожидалось '{} 200', получено [$OUT]"
+printf '{"marker":"progress-json-marker"}' > "$STATS_PROGRESS"
+curl -s -m 2 "http://127.0.0.1:$PORT2/api/progress" | grep -q "progress-json-marker" \
+  || fail "/api/progress должен читать файл из STATS_PROGRESS (в /tmp), а не из docroot"
+printf '{"marker":"stale-docroot"}' > "$W2/progress.json"
+curl -s -m 2 "http://127.0.0.1:$PORT2/api/progress" | grep -q "stale-docroot" \
+  && fail "/api/progress не должен отдавать старый progress.json из docroot"
 code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT2/api/stats")
 [ "$code" = "405" ] || fail "POST /api/stats: ожидался 405, получено $code"
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/stats")

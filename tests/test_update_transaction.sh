@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+# Не трогаем общие /tmp/mihomo-speedtest-*.
+RT=$(mktemp -d "${TMPDIR:-/tmp}/update-tx-test.XXXXXX")
+trap 'rm -rf "$RT"' EXIT INT TERM
+export STATS_AUTH_RUNTIME_DIR="$RT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$RT/update-runtime"
 python3 - "$ROOT" <<'PYTEST'
 import pathlib,sys,unittest,json,hashlib,os,re,subprocess,time,importlib.util
 ROOT=pathlib.Path(sys.argv[1])

@@ -39,8 +39,8 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
 Маршрутизация (таблицы STATIC_FILES, DATA_FILES, API_ROUTES ниже):
   - "/", "/style.css", "/app.js", ... - файлы интерфейса прямо из каталога
     приложения ($DIR, рядом с этим файлом; в тестах - STATS_APP_DIR).
-  - "/api/stats", "/api/progress" - stats.json/progress.json из docroot
-    (их пишет speedtest2.sh). Файла нет - ответ "{}" с кодом 200:
+  - "/api/stats" - stats.json из docroot, "/api/progress" - progress.json
+    из /tmp (оба пишет speedtest2.sh). Файла нет - ответ "{}" с кодом 200:
     фронтенд трактует это как "данных ещё нет".
   - "/api/system" - версия, аптайм, CPU, память, mihomo (system_status()).
   - "/api/run", "/api/settings", "/api/updates/*",
@@ -68,6 +68,9 @@ import stats_auth
 
 AUTH_COOKIE = "mst_session"
 AUTH_BODY_LIMIT = 16 * 1024
+# Тело запроса к скриптам API: самое большое - config.yaml в редакторе
+# (stats_config.sh сам ограничивает его 1 МиБ), с запасом на кодирование.
+SCRIPT_BODY_LIMIT = 4 * 1024 * 1024
 
 
 # ----- состояние системы для футера (GET /api/system) -----
@@ -469,8 +472,15 @@ PUBLIC_ASSETS = set(STATIC_FILES) | {"favicon.ico"}
 # Данные, которые пишет speedtest2.sh в docroot.
 DATA_FILES = {
     "api/stats": "stats.json",
-    "api/progress": "progress.json",
 }
+
+
+def progress_path():
+    # Прогресс текущего прогона пишется после каждой ноды - держим его в
+    # RAM, а не на USB. Путь тот же, что STATS_PROGRESS в speedtest2.sh
+    # (stats_service.sh экспортирует его серверу).
+    return os.environ.get("STATS_PROGRESS") or os.path.join(
+        os.environ.get("TMPROOT", "/tmp"), "mihomo-speedtest-progress.json")
 
 # API на скриптах: URL -> (скрипт в каталоге приложения, доп. переменные).
 # MST_CGI_TIMEOUT - таймаут скрипта в секундах (по умолчанию 30).
@@ -812,7 +822,16 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
 
         def _run_script(self, full_path, extra_env=None):
             parsed = urllib.parse.urlsplit(self.path)
-            length = int(self.headers.get("Content-Length", "0") or "0")
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                length = -1
+            if length < 0:
+                self._send_json(400, {"error": "invalid_content_length"})
+                return
+            if length > SCRIPT_BODY_LIMIT:
+                self._send_json(413, {"error": "request_too_large"})
+                return
             # Content-Length может быть враньём клиента (случайным или нет)
             # - без self.timeout (см. класс Handler выше) чтение тела ждало
             # бы недостающие байты бесконечно, вешая процесс целиком на
@@ -957,11 +976,14 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
                 self._run_script(path, env)
                 return
 
-            if rel in DATA_FILES:
+            if rel in DATA_FILES or rel == "api/progress":
                 if self.command not in ("GET", "HEAD"):
                     self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
                     return
-                path = os.path.join(docroot, DATA_FILES[rel])
+                if rel == "api/progress":
+                    path = progress_path()
+                else:
+                    path = os.path.join(docroot, DATA_FILES[rel])
                 if os.path.isfile(path):
                     self._serve_file(path)
                 else:

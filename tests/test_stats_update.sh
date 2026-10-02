@@ -3,6 +3,8 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/web/stats_update.sh
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/stats-update-test.XXXXXX")
+# Не трогаем общие /tmp/mihomo-speedtest-*.
+export STATS_AUTH_RUNTIME_DIR="$TEST_ROOT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime"
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

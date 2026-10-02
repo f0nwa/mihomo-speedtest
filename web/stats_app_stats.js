@@ -42,12 +42,10 @@ function renderRunButton(container, onRunning) {
 }
 
 // ----- живой прогресс скоростного теста по нодам ТЕКУЩЕГО прогона
-// (/api/progress, шаг 3 задачи "видно по нодам при прогоне" - шаги 1-2
-// см. CHANGELOG.md) -----
+// (/api/progress) -----
 //
-// У /api/progress нет отдельного признака "прогона нет вовсе" (см.
-// комментарий в stats_httpd.py про SPA-фоллбек, если progress.json ещё
-// не существует) - поэтому "идёт ли прогон" проверяется тем же
+// У /api/progress нет отдельного признака "прогона нет вовсе" (до первого
+// прогона сервер отвечает {}) - поэтому "идёт ли прогон" проверяется тем же
 // /api/run, что и раньше у кнопки "Запустить сейчас" (см. renderRunButton
 // выше). Карточка обновляется НА МЕСТЕ (без переотрисовки всей
 // страницы) - полный renderStats() зовётся только один раз, когда
@@ -102,11 +100,8 @@ function updateProgressCard(progress) {
 
 function progressPollTick() {
   fetchJson('/api/progress').then(function (data) {
-    // {} - /api/progress без файла на диске (см. комментарий в
-    // stats_httpd.py: ещё не было прогона с этой версией speedtest2.sh -
-    // SPA-фоллбек отдаёт index.html, fetchJson() превращает
-    // нераспарсенный JSON в {}) - трактуем как "прогресса ещё нет", а
-    // не как ошибку.
+    // {} - прогона ещё не было (файла progress.json нет) - трактуем как
+    // "прогресса ещё нет", а не как ошибку.
     updateProgressCard(data && typeof data.tested === 'number' ? data : null);
   })['catch'](function () { /* временная сетевая заминка - опрос продолжится следующим тиком */ });
 
@@ -604,9 +599,8 @@ export function renderStats() {
   fetchJson('/api/stats').then(function (data) {
     clearApp();
 
-    // {} - /api/stats без файла на диске (см. комментарий в
-    // progressPollTick() и в stats_httpd.py про SPA-фоллбек) - трактуем
-    // как "прогонов ещё не было", а не как ошибку.
+    // {} - stats.json ещё нет - трактуем как "прогонов ещё не было", а не
+    // как ошибку.
     var runsCount = data.runs && typeof data.runs.count === 'number' ? data.runs.count : 0;
 
     var meta = el('p', 'hint', 'Обновлено: ' + (data.generated || '-') + ' · прогонов в истории: ' + runsCount);

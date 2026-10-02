@@ -4,6 +4,10 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/install.sh
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/install-test.XXXXXX")
+# Не трогаем общие /tmp/mihomo-speedtest-* - там могут быть каталоги
+# настоящей установки или другого пользователя.
+export STATS_AUTH_RUNTIME_DIR="$TEST_ROOT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime"
+export STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/service-runtime" LIVE_LOG_DIR="$TEST_ROOT/live-log" STATS_PROGRESS="$TEST_ROOT/progress.json"
 
 # Общий фикстур для всего файла: фиктивные pidof/xkeen/ndmc, отвечающие
 # версиями не ниже минимума из version_check.sh (см. Task 1). main()

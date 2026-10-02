@@ -110,6 +110,21 @@ kill -0 "$SUP_PID" 2>/dev/null || fail "1: supervisor не запущен"
 sh "$SERVICE" status | grep -q "httpd: работает" || fail "1: status не подтверждает работающий httpd"
 stop_supervise
 
+# --- 13: service.log (в RAM) обрезается до последних строк при старте цикла ---
+new_case c13
+mkdir -p "$RUNTIME"
+i=0
+while [ "$i" -lt 3000 ]; do echo "старая строка $i"; i=$((i + 1)); done > "$LOGFILE"
+export STATS_SERVICE_LOG_LIMIT=10000
+run_supervise_bg
+wait_for 5 [ -f "$STATS_HTTP_PIDFILE" ] || fail "13: httpd.pid не появился"
+stop_supervise
+unset STATS_SERVICE_LOG_LIMIT
+[ "$(wc -l < "$LOGFILE")" -le 310 ] || fail "13: service.log не обрезан ($(wc -l < "$LOGFILE") строк)"
+grep -q "старая строка 2999" "$LOGFILE" || fail "13: после обрезки потерялись последние строки"
+grep -q "старая строка 0$" "$LOGFILE" && fail "13: старые строки не удалены"
+true
+
 # --- 6: TERM останавливает supervisor и бэкенд без повторного запуска ---
 new_case c6
 run_supervise_bg

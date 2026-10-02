@@ -11,6 +11,10 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 UNINSTALL=$ROOT/uninstall.sh
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/uninstall-test.XXXXXX")
+# Не трогаем общие /tmp/mihomo-speedtest-* - там могут быть каталоги
+# настоящей установки или другого пользователя.
+export STATS_AUTH_RUNTIME_DIR="$TEST_ROOT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime"
+export STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/service-runtime" LIVE_LOG_DIR="$TEST_ROOT/live-log" STATS_PROGRESS="$TEST_ROOT/progress.json"
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
 
 FAILED=0

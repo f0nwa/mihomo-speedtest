@@ -86,12 +86,12 @@ STABILITY_DROP_AFTER=${STABILITY_DROP_AFTER:-$HISTORY_KEEP_RUNS}  # прогон
 STATS_JSON=${STATS_JSON:-$DIR/stats_www/stats.json}   # данные статистики (render_stats.awk) - раздаётся веб-сервисом как /api/stats
 STATS_HTML=${STATS_HTML:-$DIR/stats_www/stats.html}   # устаревшая HTML-страница (удалена 2026-09-28): больше не пишется, render_stats() удаляет оставшуюся от старых версий
 RENDER_STATS=${RENDER_STATS:-$DIR/render_stats.awk}
-STATS_PROGRESS=${STATS_PROGRESS:-$DIR/stats_www/progress.json}   # прогресс скоростного теста по нодам текущего прогона (см. write_progress() ниже) - шаг 1 задачи "видно по нодам при прогоне", пока без раздачи через веб-сервис (см. TODO.md)
+STATS_PROGRESS=${STATS_PROGRESS:-$TMPROOT/mihomo-speedtest-progress.json}   # прогресс текущего прогона по нодам (/api/progress); в RAM - пишется после каждой ноды
 RENDER_PROGRESS=${RENDER_PROGRESS:-$DIR/render_progress.awk}
 STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
 STATS_HTTP_BIND=${STATS_HTTP_BIND:-0.0.0.0}        # адрес привязки (0.0.0.0 = вся локальная сеть, как и 9090)
 STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-сервиса статистики; должен быть свободен (не 5000/5001/9090)
-STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # данные веб-интерфейса (stats.json, progress.json); создаётся сам
+STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # данные веб-интерфейса (stats.json); создаётся сам
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
 STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # обязательный сервер на Python 3: чистые URL, API и общая авторизация

@@ -51,7 +51,7 @@ fi
 
 export MST_LIB_ONLY=1
 . "$SPEEDTEST_SCRIPT"
-export DIR MIHOMO_DIR ENV   # дочерний httpd и его
+export DIR MIHOMO_DIR ENV STATS_PROGRESS   # дочерний httpd и его
                   # CGI (stats_cgi.sh/stats_run.sh) должны видеть тот же speedtest2.env
 export LIVE_LOG_DIR   # живой журнал: stats_httpd.py должен смотреть в тот же каталог, что и say()
 LOG_TAG=service     # метка строк службы в живом журнале (не экспортируется - дочерним прогонам своя)
@@ -70,9 +70,9 @@ pid_from_file() {
 }
 
 prepare() {
-  # Готовит каталог данных (stats.json, progress.json). Скрипты и файлы
-  # интерфейса stats_httpd.py берёт прямо из $DIR. Копии в stats_www от
-  # старых версий удаляются (одна запись в /opt и только если они есть).
+  # Готовит каталог данных (stats.json). Скрипты и файлы
+  # интерфейса stats_httpd.py берёт прямо из $DIR, progress.json живёт в
+  # /tmp. Копии в stats_www от старых версий удаляются (одна запись в /opt и только если они есть).
   export DIR MIHOMO_DIR ENV
   cleanup_old_zash_stats
   if [ ! -d "$STATS_HTTP_DIR" ] && ! mkdir -p "$STATS_HTTP_DIR"; then
@@ -80,10 +80,24 @@ prepare() {
     return 1
   fi
   [ -d "$STATS_HTTP_DIR/cgi-bin" ] && rm -rf "$STATS_HTTP_DIR/cgi-bin"
-  for old in index.html style.css app.js chart.js codemirror.js codemirror.css; do
+  for old in index.html style.css app.js chart.js codemirror.js codemirror.css progress.json; do
     [ -f "$STATS_HTTP_DIR/$old" ] && rm -f "$STATS_HTTP_DIR/$old"
   done
   return 0
+}
+
+trim_service_log() {
+  # service.log лежит в /tmp (RAM) и дописывается при каждом перезапуске
+  # бэкенда - держим не больше STATS_SERVICE_LOG_LIMIT байт, оставляя
+  # последние 300 строк (как flush_log() в speedtest2.sh).
+  [ -f "$RUN_LOG" ] || return 0
+  log_size=$(wc -c < "$RUN_LOG" 2>/dev/null || echo 0)
+  [ "$log_size" -gt "${STATS_SERVICE_LOG_LIMIT:-65536}" ] || return 0
+  if tail -300 "$RUN_LOG" > "$RUN_LOG.tmp" 2>/dev/null; then
+    mv "$RUN_LOG.tmp" "$RUN_LOG" || rm -f "$RUN_LOG.tmp"
+  else
+    rm -f "$RUN_LOG.tmp"
+  fi
 }
 
 try_backend() {
@@ -185,6 +199,7 @@ supervise() {
 
   attempt=0
   while :; do
+    trim_service_log
     prepare || true   # ошибка подготовки docroot не должна останавливать supervisor -
                        # httpd, если уже был поднят раньше, продолжает раздавать
                        # прежнюю исправную копию (см. design, "Ошибки и журналирование")
