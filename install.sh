@@ -26,7 +26,7 @@ PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh u
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_system.sh stats_config.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_chart.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -461,8 +461,6 @@ install_files() {
   chmod +x "$DIR/stats_run.sh"
   atomic_install "$SELFDIR/stats_update.sh" "$DIR/stats_update.sh" || return 1
   chmod +x "$DIR/stats_update.sh"
-  atomic_install "$SELFDIR/stats_system.sh" "$DIR/stats_system.sh" || return 1
-  chmod +x "$DIR/stats_system.sh"
   atomic_install "$SELFDIR/stats_config.sh" "$DIR/stats_config.sh" || return 1
   chmod +x "$DIR/stats_config.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)

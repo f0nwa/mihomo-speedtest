@@ -42,7 +42,8 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
   - "/api/stats", "/api/progress" - stats.json/progress.json из docroot
     (их пишет speedtest2.sh). Файла нет - ответ "{}" с кодом 200:
     фронтенд трактует это как "данных ещё нет".
-  - "/api/run", "/api/settings", "/api/updates/*", "/api/system",
+  - "/api/system" - версия, аптайм, CPU, память, mihomo (system_status()).
+  - "/api/run", "/api/settings", "/api/updates/*",
     "/api/config/*" - запуск скрипта из $DIR по протоколу CGI (переменные
     REQUEST_METHOD/QUERY_STRING/..., тело на stdin, заголовки + тело на
     stdout). Действие передаётся переменной окружения из API_ROUTES.
@@ -58,6 +59,7 @@ import signal
 import socketserver
 import subprocess
 import sys
+import time
 import urllib.parse
 from http.cookies import SimpleCookie
 
@@ -67,6 +69,127 @@ import stats_auth
 AUTH_COOKIE = "mst_session"
 AUTH_BODY_LIMIT = 16 * 1024
 PUBLIC_ASSETS = {"index.html", "style.css", "app.js", "chart.js", "favicon.ico"}
+
+
+# ----- состояние системы для футера (GET /api/system) -----
+# Раньше это делал stats_system.sh (sh + несколько awk/cat/pidof на каждый
+# опрос футера раз в 30 с); здесь - чтение трёх файлов /proc в уже
+# запущенном процессе.
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _release_version(manifest_path):
+    text = _read_text(manifest_path)
+    if text is None:
+        return None
+    fields = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            fields[key.strip()] = value.strip()
+    tag = fields.get("RELEASE_TAG", "")
+    if tag.startswith("v"):
+        tag = tag[1:]
+    return tag or fields.get("RELEASE_VERSION") or None
+
+
+def _cpu_times(proc):
+    text = _read_text(os.path.join(proc, "stat"))
+    if not text:
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if parts and parts[0] == "cpu":
+            try:
+                values = [int(v) for v in parts[1:]]
+            except ValueError:
+                return None
+            idle = values[3] + (values[4] if len(values) > 4 else 0)
+            return sum(values), idle
+    return None
+
+
+def _cpu_percent(proc, delay, sleep):
+    first = _cpu_times(proc)
+    if first is None:
+        return None
+    sleep(delay)
+    second = _cpu_times(proc)
+    if second is None:
+        return None
+    total, idle = second[0] - first[0], second[1] - first[1]
+    if total <= 0:
+        return 0
+    return int(100 * (total - idle) / total)
+
+
+def _mem_percent(proc):
+    text = _read_text(os.path.join(proc, "meminfo"))
+    if not text:
+        return None
+    info = {}
+    for line in text.splitlines():
+        key, _, rest = line.partition(":")
+        try:
+            info[key] = int(rest.split()[0])
+        except (IndexError, ValueError):
+            pass
+    total = info.get("MemTotal", 0)
+    if total <= 0:
+        return None
+    avail = info.get("MemAvailable", info.get("MemFree", 0))
+    return int(100 * (total - avail) / total)
+
+
+def _uptime_seconds(proc):
+    text = _read_text(os.path.join(proc, "uptime"))
+    try:
+        return int(float(text.split()[0]))
+    except (AttributeError, IndexError, ValueError):
+        return None
+
+
+def _process_running(proc, name):
+    # Тот же смысл, что у "pidof mihomo": есть процесс с таким именем.
+    try:
+        entries = os.listdir(proc)
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        comm = _read_text(os.path.join(proc, entry, "comm"))
+        if comm is not None and comm.strip() == name:
+            return True
+    return False
+
+
+def system_status(proc=None, manifest=None, cpu_delay=None, sleep=time.sleep):
+    proc = proc or os.environ.get("STATS_PROC_DIR", "/proc")
+    if manifest is None:
+        manifest = os.environ.get("INSTALLED_MANIFEST_PATH") or os.path.join(
+            os.environ.get("UPDATE_STATE_DIR")
+            or os.path.join(os.environ.get("MIHOMO_DIR", "/opt/etc/mihomo"), ".update"),
+            "installed-manifest.txt",
+        )
+    if cpu_delay is None:
+        try:
+            cpu_delay = float(os.environ.get("CPU_SAMPLE_DELAY", "0.2"))
+        except ValueError:
+            cpu_delay = 0.2
+    return {
+        "release_version": _release_version(manifest),
+        "uptime_seconds": _uptime_seconds(proc),
+        "cpu_percent": _cpu_percent(proc, cpu_delay, sleep),
+        "mem_percent": _mem_percent(proc),
+        "mihomo_active": _process_running(proc, "mihomo"),
+    }
 
 
 # ----- живой журнал (вкладка «Журнал», GET /api/log) -----
@@ -95,7 +218,6 @@ PUBLIC_ASSETS = {"index.html", "style.css", "app.js", "chart.js", "favicon.ico"}
 
 import fcntl
 import glob
-import time
 
 LIVE_LOG_LIMIT = int(os.environ.get("LIVE_LOG_LIMIT", "65536"))
 LIVE_LOG_IDLE = int(os.environ.get("LIVE_LOG_IDLE", "30"))
@@ -354,7 +476,6 @@ API_ROUTES = {
     "api/updates/prepare": ("stats_update.sh", {"MST_UPDATE_ACTION": "prepare"}),
     "api/updates/apply": ("stats_update.sh", {"MST_UPDATE_ACTION": "apply"}),
     "api/updates/discard": ("stats_update.sh", {"MST_UPDATE_ACTION": "discard"}),
-    "api/system": ("stats_system.sh", {}),
     # Применение конфига ждёт mihomo -t, xkeen -restart, проверку ядра и
     # при провале - откат, поэтому таймауты больше.
     "api/config": ("stats_config.sh", {"MST_CONFIG_ACTION": "read"}),
@@ -810,6 +931,13 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
 
             if rel == "api/log":
                 self._handle_live_log()
+                return
+
+            if rel == "api/system":
+                if self.command not in ("GET", "HEAD"):
+                    self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
+                    return
+                self._send_json_with_headers(200, system_status())
                 return
 
             if rel in API_ROUTES:

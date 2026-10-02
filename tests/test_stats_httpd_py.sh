@@ -148,12 +148,6 @@ echo "Content-Type: text/plain; charset=utf-8"
 echo
 echo "config_action=${MST_CONFIG_ACTION:-}"
 CGI
-mk_script "$A2/stats_system.sh" <<'CGI'
-#!/bin/sh
-echo "Content-Type: application/json; charset=utf-8"
-echo
-echo '{"marker":"system-json-marker"}'
-CGI
 PORT2=$((BASE_PORT + 1))
 PID2=$(start_server "$W2" "$PORT2" "$A2")
 CLEANUP_PIDS="$CLEANUP_PIDS $PID2"
@@ -184,7 +178,6 @@ for a in check status prepare apply discard; do
 done
 OUT=$(curl -s -m 2 "http://127.0.0.1:$PORT2/api/config/backups")
 echo "$OUT" | grep -q "config_action=backups" || fail "/api/config/backups: MST_CONFIG_ACTION не проброшен ($OUT)"
-curl -s -m 2 "http://127.0.0.1:$PORT2/api/system" | grep -q "system-json-marker" || fail "/api/system не дошёл до stats_system.sh"
 
 # скрипта нет - понятная ошибка, а не SPA-страница
 code=$(curl -s -m 2 -o "$TEST_ROOT/body2" -w '%{http_code}' "http://127.0.0.1:$PORT2/api/run")
