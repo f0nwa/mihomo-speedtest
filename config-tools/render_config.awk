@@ -75,7 +75,7 @@ BEGIN {
   if (listeners_file != "") {
     while ((getline line < listeners_file) > 0) {
       if (line ~ /^(  - |    )port:[ \t]*["\047]?7896["\047]?[ \t]*$/) {
-        print "render_config.awk: свой вход в listeners занимает порт 7896 служебного входа mst-speedtest" > "/dev/stderr"
+        print "render_config.awk: Свой вход в listeners занимает порт 7896 служебного входа mst-speedtest" > "/dev/stderr"
         exit 3
       }
       listeners_content = listeners_content line "\n"

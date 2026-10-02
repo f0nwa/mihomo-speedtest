@@ -279,16 +279,16 @@ bounded() {
 }
 
 mihomo_healthy() {
-  alog "жду процесс mihomo (до $HEALTH_TIMEOUT с, затем $HEALTH_STABLE с на устойчивость)"
+  alog "Жду процесс mihomo (до $HEALTH_TIMEOUT с, затем $HEALTH_STABLE с на устойчивость)"
   waited=0
   while [ "$waited" -lt "$HEALTH_TIMEOUT" ]; do
     if "$PIDOF_CMD" mihomo > /dev/null 2>&1; then
       sleep "$HEALTH_STABLE"
       if mh_pid=$("$PIDOF_CMD" mihomo 2>/dev/null); then
-        alog "ядро работает (pid ${mh_pid:-?})"
+        alog "Ядро работает (pid ${mh_pid:-?})"
         return 0
       fi
-      alog "процесс mihomo появился и сразу завершился"
+      alog "Процесс mihomo появился и сразу завершился"
     fi
     sleep 1; waited=$((waited + 1))
   done
@@ -313,7 +313,7 @@ xkeen_logs_new() {
     xsize=$(wc -c < "$xl" | tr -d ' ')
     [ "$xsize" -gt "$xpos" ] 2>/dev/null || continue
     tail -c +"$((xpos + 1))" "$xl" > "$WORK/xkeen-new.log" 2>/dev/null || continue
-    alog "новое в $xl:"
+    alog "Новое в $xl:"
     alog_file "$WORK/xkeen-new.log" 30
   done < "$WORK/xkeen-logs.pos"
 }
@@ -346,12 +346,12 @@ apply_candidate() {
   cand=$1
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
-  apply_log_start "применение config.yaml"
+  apply_log_start "Применение config.yaml"
   want=$(query_param base)
   if [ -n "$want" ] && [ "$want" != "$(fingerprint "$target")" ]; then
     fail_json 409 conflict "config.yaml изменился с момента открытия редактора - перезагрузите его"
   fi
-  alog "проверка: $BIN -t"
+  alog "Проверка: $BIN -t"
   rc=0; check_file "$cand" || rc=$?
   alog_file "$WORK/check.log" 40
   if [ "$rc" != 0 ]; then
@@ -359,9 +359,9 @@ apply_candidate() {
     printf '{"ok":false,"error":"check_failed","check":%s}\n' "$(check_json "$rc")" > "$WORK/resp"
     reply 422 "$WORK/resp"
   fi
-  alog "проверка пройдена"
+  alog "Проверка пройдена"
   if [ -f "$target" ] && cmp -s "$cand" "$target"; then
-    alog "конфиг не изменился - запись и перезапуск не нужны"
+    alog "Конфиг не изменился - запись и перезапуск не нужны"
     printf '{"ok":true,"unchanged":true,"base":"%s"}\n' "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -369,10 +369,10 @@ apply_candidate() {
   if [ -f "$target" ]; then
     make_backup "$target" || fail_json 500 backup_failed "Не удалось сохранить бэкап, конфиг не тронут"
     backup=$BACKUP_NAME
-    alog "текущий конфиг сохранён в бэкап $CONFIG_BACKUP_DIR/$backup"
+    alog "Текущий конфиг сохранён в бэкап $CONFIG_BACKUP_DIR/$backup"
   fi
   publish_config "$cand" "$target" || fail_json 500 write_failed "Не удалось записать config.yaml, конфиг не тронут"
-  alog "записан $target"
+  alog "Записан $target"
   rrc=0; restart_mihomo || rrc=$?
   if [ "$rrc" = 0 ]; then
     alog "ГОТОВО: конфиг применён, ядро перезапущено"
@@ -389,8 +389,8 @@ apply_candidate() {
   alog "ОШИБКА: ядро не поднялось с новым конфигом - откатываю"
   if [ -n "$backup" ] && publish_config "$CONFIG_BACKUP_DIR/$backup" "$target"; then
     rolled=true
-    alog "возвращён прежний конфиг из бэкапа $backup, перезапуск"
-    if restart_mihomo; then alog "ядро работает на прежнем конфиге"; else alog "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH"; fi
+    alog "Возвращён прежний конфиг из бэкапа $backup, перезапуск"
+    if restart_mihomo; then alog "Ядро работает на прежнем конфиге"; else alog "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH"; fi
   else
     alog "ОШИБКА: откат не удался - проверьте конфиг по SSH"
   fi
@@ -493,7 +493,7 @@ cmd_repair() {
 cmd_restore_working() {
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
-  apply_log_start "откат к рабочему бэкапу"
+  apply_log_start "Откат к рабочему бэкапу"
   list_backups > "$WORK/list"
   tried=0
   while IFS="$(printf '\t')" read -r kind name path; do
@@ -502,11 +502,11 @@ cmd_restore_working() {
     tried=$((tried + 1))
     cp "$path" "$WORK/cand.yaml" || continue
     if check_file "$WORK/cand.yaml"; then
-      alog "бэкап $name проходит mihomo -t - применяю"
+      alog "Бэкап $name проходит mihomo -t - применяю"
       RESTORED_NAME=$name
       apply_candidate "$WORK/cand.yaml"
     fi
-    alog "бэкап $name не проходит mihomo -t - пропускаю"
+    alog "Бэкап $name не проходит mihomo -t - пропускаю"
   done < "$WORK/list"
   fail_json 404 no_working_backup "Среди последних бэкапов нет ни одного, проходящего mihomo -t"
 }

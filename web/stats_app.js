@@ -2301,7 +2301,7 @@
       function applyLineClass(line) {
         if (/===/.test(line)) { return 'log-line sep'; }
         if (/ОШИБКА|ERROR|FAIL|не удалось|не поднял/i.test(line)) { return 'log-line err'; }
-        if (/ГОТОВО|ядро работает/.test(line)) { return 'log-line ok'; }
+        if (/ГОТОВО|[Яя]дро работает/.test(line)) { return 'log-line ok'; }
         return 'log-line';
       }
       function renderApplyLog(text) {

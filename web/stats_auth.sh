@@ -9,7 +9,7 @@ STATS_AUTH_RUNTIME_DIR=${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}
 INITD_SCRIPT=${INITD_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}
 
 usage() {
-  echo "использование: sh $0 {initialize|reset}" >&2
+  echo "Использование: sh $0 {initialize|reset}" >&2
 }
 
 case ${1:-} in initialize|reset) [ "$#" -eq 1 ] ;; *) false ;; esac || {
@@ -46,6 +46,6 @@ fi
 }
 
 "$INITD_SCRIPT" restart || {
-  echo "не удалось перезапустить веб-службу" >&2
+  echo "Не удалось перезапустить веб-службу" >&2
   exit 1
 }

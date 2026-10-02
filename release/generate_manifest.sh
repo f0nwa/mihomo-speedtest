@@ -20,8 +20,8 @@ case $RELEASE_VERSION in (*[!0-9]*|'') echo "release_version должен быт
 case $MIN_UPDATER_VERSION in (*[!0-9]*|'') echo "min_updater_version должен быть целым числом" >&2; exit 2;; esac
 case $CONFIG_SCHEMA_VERSION in (*[!0-9]*|'') echo "config_schema_version должен быть целым числом" >&2; exit 2;; esac
 
-[ -f "$COMPONENTS" ] || { echo "не найден $COMPONENTS" >&2; exit 2; }
-[ -f "$PLAN_AWK" ] || { echo "не найден $PLAN_AWK (нужен для самопроверки манифеста)" >&2; exit 2; }
+[ -f "$COMPONENTS" ] || { echo "Не найден $COMPONENTS" >&2; exit 2; }
+[ -f "$PLAN_AWK" ] || { echo "Не найден $PLAN_AWK (нужен для самопроверки манифеста)" >&2; exit 2; }
 
 # Проверка структуры декларации до чтения её исходных файлов. Правила
 # полного манифеста остаются в update_plan.awk.
@@ -32,7 +32,7 @@ awk -F'|' '
     if ($3 ~ /^[A-Za-z0-9_.\/-]+$/ && $3 !~ /^\// && $3 !~ /\/\// &&
         $3 !~ /(^|\/)\.\.?(\/|$)/ && $3 !~ /\/$/) next
   }
-  { print "components.txt: неверная структура или исходный путь, строка " NR > "/dev/stderr"; bad=1 }
+  { print "components.txt: Неверная структура или исходный путь, строка " NR > "/dev/stderr"; bad=1 }
   END { exit bad }
 ' "$COMPONENTS" || exit 1
 
@@ -45,7 +45,7 @@ sha256_of() {
   elif command -v openssl >/dev/null 2>&1; then
     openssl dgst -sha256 "$f" | awk '{print $NF}'
   else
-    echo "не найден sha256sum/shasum/openssl - невозможно посчитать контрольную сумму" >&2
+    echo "Не найден sha256sum/shasum/openssl - невозможно посчитать контрольную сумму" >&2
     return 1
   fi
 }
@@ -73,14 +73,14 @@ trap 'rm -f "$OUT"' EXIT INT TERM
 
       FILE)
         src="$ROOT/$b"
-        [ -f "$src" ] || { echo "components.txt: файл не найден: $src" >&2; exit 1; }
+        [ -f "$src" ] || { echo "components.txt: Файл не найден: $src" >&2; exit 1; }
         sz=$(size_of "$src")
         sum=$(sha256_of "$src") || exit 1
         b_base=${b##*/}
         printf 'FILE|%s|%s|%s|%s|%s|%s|%s\n' "$a" "$b_base" "$c" "$sz" "$sum" "$d" "$e"
         ;;
       *)
-        echo "components.txt: нераспознанный тип строки: $rtype" >&2
+        echo "components.txt: Нераспознанный тип строки: $rtype" >&2
         exit 1
         ;;
     esac
@@ -93,7 +93,7 @@ trap 'rm -f "$OUT"' EXIT INT TERM
 # генератора нет (DRY: одна реализация разбора и для update.sh, и для
 # самопроверки при выпуске релиза).
 if ! awk -v MANIFEST="$OUT" -v VALIDATE_ONLY=1 -v FORMAT=text -f "$PLAN_AWK" >/dev/null; then
-  echo "сгенерированный манифест не прошёл самопроверку update_plan.awk" >&2
+  echo "Сгенерированный манифест не прошёл самопроверку update_plan.awk" >&2
   exit 1
 fi
 

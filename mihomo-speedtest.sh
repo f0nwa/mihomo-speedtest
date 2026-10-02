@@ -7,15 +7,15 @@ usage() {
 Использование: mihomo-speedtest <команда> [аргументы]
 
 Команды:
-  install       переустановить/восстановить проект (sh install.sh)
-  uninstall     удалить проект (sh uninstall.sh [аргументы])
-  update        проверить/применить обновление (sh update.sh <--check|--plan|--apply ...>)
-  setup         мастер настройки config.yaml (sh setup.sh)
-  recalibrate   пересчитать порог скорости (install.sh --recalibrate)
-  stop-web      остановить веб-интерфейс статистики навсегда (до start-web)
-  start-web     включить веб-интерфейс статистики обратно
-  show-url      показать адрес веб-интерфейса без перезапуска
-  version       показать установленную версию релиза (офлайн)
+  install       Переустановить/восстановить проект (sh install.sh)
+  uninstall     Удалить проект (sh uninstall.sh [аргументы])
+  update        Проверить/применить обновление (sh update.sh <--check|--plan|--apply ...>)
+  setup         Мастер настройки config.yaml (sh setup.sh)
+  recalibrate   Пересчитать порог скорости (install.sh --recalibrate)
+  stop-web      Остановить веб-интерфейс статистики навсегда (до start-web)
+  start-web     Включить веб-интерфейс статистики обратно
+  show-url      Показать адрес веб-интерфейса без перезапуска
+  version       Показать установленную версию релиза (офлайн)
 EOF
 }
 
@@ -33,5 +33,5 @@ case "$cmd" in
   show-url)    exec sh "$DIR/install.sh" --show-url ;;
   version)     exec sh "$DIR/install.sh" --version ;;
   ''|help|--help|-h) usage; exit 0 ;;
-  *) echo "неизвестная команда: $cmd" >&2; usage; exit 2 ;;
+  *) echo "Неизвестная команда: $cmd" >&2; usage; exit 2 ;;
 esac

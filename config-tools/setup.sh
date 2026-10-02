@@ -90,7 +90,7 @@ collect_subscriptions() {
         if [ "$n" -gt 0 ]; then break; fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 3 ]; then
-          echo "нужна хотя бы одна ссылка на подписку" >&2
+          echo "Нужна хотя бы одна ссылка на подписку" >&2
           rm -f "$urls_file"
           return 1
         fi
@@ -158,7 +158,7 @@ build_provider_specs() {
         ;;
     esac
     if [ -n "$ua" ]; then
-      echo "для $url используется сохранённый UA \"$ua\" (перенесён из старого конфига, заново не проверялся)" >&2
+      echo "Для $url используется сохранённый UA \"$ua\" (перенесён из старого конфига, заново не проверялся)" >&2
       printf '%s\t%s\t%s\n' "$url" "$ua" "$name"
       continue
     fi
@@ -166,13 +166,13 @@ build_provider_specs() {
     ua=$(printf '%s\n' "$result" | sed -n 1p)
     kind=$(printf '%s\n' "$result" | sed -n 2p)
     if [ -z "$ua" ]; then
-      echo "для $url не подобран рабочий User-Agent - подписка исключена (проверьте вручную: sh detect_ua.sh \"$url\")" >&2
+      echo "Для $url не подобран рабочий User-Agent - подписка исключена (проверьте вручную: sh detect_ua.sh \"$url\")" >&2
       continue
     fi
     if [ "$kind" = "short" ]; then
       echo "WARN для $url подошёл только укороченный clash YAML - сверьте набор нод после установки" >&2
     else
-      echo "для $url подобран рабочий User-Agent \"$ua\"" >&2
+      echo "Для $url подобран рабочий User-Agent \"$ua\"" >&2
     fi
     printf '%s\t%s\t%s\n' "$url" "$ua" "$name"
   done < "$1"
@@ -234,7 +234,7 @@ assign_provider_names() {
     final=""
     while :; do
       if grep -qxF "$candidate" "$names_file" 2>/dev/null; then
-        echo "имя \"$candidate\" для $url уже занято другой подпиской в этом запуске" >&2
+        echo "Имя \"$candidate\" для $url уже занято другой подпиской в этом запуске" >&2
         printf 'Введите другое имя провайдера для %s: ' "$url" >&2
         read -r final || final=""
       else
@@ -243,11 +243,11 @@ assign_provider_names() {
         [ -n "$final" ] || final=$candidate
       fi
       case "$final" in
-        '') echo "имя не может быть пустым" >&2; continue ;;
-        *[!A-Za-z0-9_-]*) echo "имя может содержать только латинские буквы, цифры, \"_\" и \"-\"" >&2; continue ;;
+        '') echo "Имя не может быть пустым" >&2; continue ;;
+        *[!A-Za-z0-9_-]*) echo "Имя может содержать только латинские буквы, цифры, \"_\" и \"-\"" >&2; continue ;;
       esac
       if grep -qxF "$final" "$names_file" 2>/dev/null; then
-        echo "имя \"$final\" уже занято другой подпиской в этом запуске" >&2
+        echo "Имя \"$final\" уже занято другой подпиской в этом запуске" >&2
         candidate=$final
         continue
       fi
@@ -284,7 +284,7 @@ atomic_install() {
 confirm_config_replace() {
   [ "${SKIP_CONFIRM:-0}" = 1 ] && return 0
   echo "config.yaml будет создан заново или полностью заменён (если уже существует - старый сохранится бэкапом рядом)." >&2
-  echo "в новый config.yaml войдут провайдеры выбранных подписок и вспомогательные группы автоматического выбора прокси (Авто по пингу, Fallback-Stable)." >&2
+  echo "В новый config.yaml войдут провайдеры выбранных подписок и вспомогательные группы автоматического выбора прокси (Авто по пингу, Fallback-Stable)." >&2
   # Существующий dns: и так переносится как есть (existing_config.awk,
   # dns_out) - здесь речь не про сам DNS, а про стороннюю панель Xkeen UI:
   # она хранит хэш ВСЕГО config.yaml на момент включения своей "Защищённой
@@ -293,11 +293,11 @@ confirm_config_replace() {
   # откатывает СВОЙ старый снимок и затирает то, что только что применил
   # setup.sh.
   if [ "${SKIP_DNS_GUARD_CHECK:-0}" != 1 ] && xkeen_ui_dns_protection_active; then
-    echo "похоже, на роутере сейчас активна \"Защищённая DNS Mihomo\" панели Xkeen UI (или её DNS-over-VLESS для Xray - оба используют один и тот же переключатель Keenetic opkg dns-override)." >&2
-    echo "блок dns: перенесётся как есть, но хэш ВСЕГО файла, который панель Xkeen UI сверяет сама с собой, после этого не совпадёт." >&2
-    echo "после установки НЕ нажимайте \"Восстановить\" в панели Xkeen UI - это откатит её собственный старый снимок и затрёт результат этой установки. Если статус защиты в панели собьётся - просто включите её заново тем же способом, каким включали в первый раз." >&2
+    echo "Похоже, на роутере сейчас активна \"Защищённая DNS Mihomo\" панели Xkeen UI (или её DNS-over-VLESS для Xray - оба используют один и тот же переключатель Keenetic opkg dns-override)." >&2
+    echo "Блок dns: перенесётся как есть, но хэш ВСЕГО файла, который панель Xkeen UI сверяет сама с собой, после этого не совпадёт." >&2
+    echo "После установки НЕ нажимайте \"Восстановить\" в панели Xkeen UI - это откатит её собственный старый снимок и затрёт результат этой установки. Если статус защиты в панели собьётся - просто включите её заново тем же способом, каким включали в первый раз." >&2
   fi
-  printf 'продолжить установку? [y/N] ' >&2
+  printf 'Продолжить установку? [y/N] ' >&2
   # Под "curl ... | sh" стандартный ввод занят телом самого install.sh/
   # setup.sh (см. тот же приём в uninstall.sh:confirm()) - без
   # переоткрытия от терминала read -r ниже сразу получит EOF и вопрос
@@ -312,7 +312,7 @@ confirm_config_replace() {
   fi
   case "$confirm_ans" in
     [Yy]*) return 0 ;;
-    *) echo "установка отменена" >&2; return 1 ;;
+    *) echo "Установка отменена" >&2; return 1 ;;
   esac
 }
 
@@ -321,7 +321,7 @@ main() {
 
   confirm_config_replace || return 1
 
-  [ -f "$TEMPLATE" ] || { echo "шаблон $TEMPLATE не найден" >&2; return 1; }
+  [ -f "$TEMPLATE" ] || { echo "Шаблон $TEMPLATE не найден" >&2; return 1; }
 
   subs_file=$(mktemp "${TMPDIR:-/tmp}/setup_urls.XXXXXX")
   if ! collect_subscriptions > "$subs_file"; then
@@ -334,7 +334,7 @@ main() {
   rm -f "$subs_file"
 
   if [ ! -s "$specs_file" ]; then
-    echo "ни одна подписка не прошла проверку - устанавливать нечего" >&2
+    echo "Ни одна подписка не прошла проверку - устанавливать нечего" >&2
     rm -f "$specs_file"
     return 1
   fi
@@ -365,14 +365,14 @@ main() {
     fi
     [ "$static_file" = "$candidate" ] || rm -f "$candidate"
     if [ -s "$dns_candidate" ]; then
-      echo "найден блок dns в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
+      echo "Найден блок dns в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
       dns_file=$dns_candidate
     fi
     [ "$dns_file" = "$dns_candidate" ] || rm -f "$dns_candidate"
     # Свои входы (listeners) переносятся как есть; служебный вход
     # mst-speedtest (замер WireGuard/AmneziaWG через основное ядро) даёт шаблон.
     if [ -s "$listeners_candidate" ]; then
-      echo "найдены свои входы (listeners) в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
+      echo "Найдены свои входы (listeners) в текущем $CONFIG, переношу как есть в новый config.yaml" >&2
       listeners_file=$listeners_candidate
     fi
     [ "$listeners_file" = "$listeners_candidate" ] || rm -f "$listeners_candidate"
@@ -381,14 +381,14 @@ main() {
   if [ -f "$CONFIG" ]; then
     backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
     cp "$CONFIG" "$backup" || {
-      echo "не удалось сохранить бэкап $backup" >&2
+      echo "Не удалось сохранить бэкап $backup" >&2
       rm -f "$specs_file"
       [ -z "$static_file" ] || rm -f "$static_file"
       [ -z "$dns_file" ] || rm -f "$dns_file"
       [ -z "$listeners_file" ] || rm -f "$listeners_file"
       return 1
     }
-    echo "старый конфиг сохранён в $backup" >&2
+    echo "Старый конфиг сохранён в $backup" >&2
   fi
 
   rendered=$(mktemp "${TMPDIR:-/tmp}/setup_config.XXXXXX")
@@ -403,26 +403,26 @@ main() {
   if [ "$render_rc" != 0 ]; then
     rm -f "$rendered"
     if [ "$render_rc" = 3 ]; then
-      echo "свой вход в listeners текущего $CONFIG занимает порт 7896 служебного входа mst-speedtest (замер WireGuard/AmneziaWG); смените порт своего входа и повторите, $CONFIG не тронут" >&2
+      echo "Свой вход в listeners текущего $CONFIG занимает порт 7896 служебного входа mst-speedtest (замер WireGuard/AmneziaWG); смените порт своего входа и повторите, $CONFIG не тронут" >&2
     else
-      echo "не удалось собрать новый config.yaml из шаблона, $CONFIG не тронут" >&2
+      echo "Не удалось собрать новый config.yaml из шаблона, $CONFIG не тронут" >&2
     fi
     return 1
   fi
 
   mtest_log=$(mktemp "${TMPDIR:-/tmp}/setup_mtest.XXXXXX")
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$rendered" >"$mtest_log" 2>&1; then
-    echo "новый конфиг не прошёл mihomo -t, $CONFIG не тронут. Вывод mihomo -t:" >&2
+    echo "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут. Вывод mihomo -t:" >&2
     cat "$mtest_log" >&2
     rm -f "$mtest_log"
-    echo "непринятый конфиг оставлен в $rendered для разбора (удалите вручную, когда закончите)" >&2
+    echo "Непринятый конфиг оставлен в $rendered для разбора (удалите вручную, когда закончите)" >&2
     return 1
   fi
   rm -f "$mtest_log"
 
   mkdir -p "$DIR/proxy-providers"
   atomic_install "$rendered" "$CONFIG" || {
-    echo "не удалось записать $CONFIG" >&2
+    echo "Не удалось записать $CONFIG" >&2
     rm -f "$rendered"
     return 1
   }
@@ -439,7 +439,7 @@ main() {
     return 1
   fi
 
-  echo "конфиг применён, запускаю install.sh" >&2
+  echo "Конфиг применён, запускаю install.sh" >&2
   exec sh "$SELFDIR/install.sh"
 }
 

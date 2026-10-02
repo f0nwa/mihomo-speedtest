@@ -114,7 +114,7 @@ function process_line(raw,    line, rest, hashpos, frag, qpos, qs, atpos, userin
   if (line == "" || line ~ /^#/) return
 
   if (line !~ /^vless:\/\//) {
-    warn("не vless-ссылка (или неизвестный протокол), строка пропущена")
+    warn("Не vless-ссылка (или неизвестный протокол), строка пропущена")
     return
   }
   rest = substr(line, 9)
@@ -128,20 +128,20 @@ function process_line(raw,    line, rest, hashpos, frag, qpos, qs, atpos, userin
   else qs = ""
 
   atpos = index(rest, "@")
-  if (atpos == 0) { warn("vless: нет userinfo (нет '@'), строка пропущена"); return }
+  if (atpos == 0) { warn("vless: Нет userinfo (нет '@'), строка пропущена"); return }
   userinfo = substr(rest, 1, atpos - 1)
   hostport = substr(rest, atpos + 1)
 
   cpos = index(hostport, ":")
-  if (cpos == 0) { warn("vless: нет порта у " hostport ", строка пропущена"); return }
+  if (cpos == 0) { warn("vless: Нет порта у " hostport ", строка пропущена"); return }
   host = substr(hostport, 1, cpos - 1)
   port = substr(hostport, cpos + 1)
-  if (host == "" || port !~ /^[0-9]+$/) { warn("vless: некорректный host/port (" hostport "), строка пропущена"); return }
+  if (host == "" || port !~ /^[0-9]+$/) { warn("vless: Некорректный host/port (" hostport "), строка пропущена"); return }
 
   split_query(qs, q)
   name = (frag != "") ? urldecode(frag) : ("vless-" host "-" port)
 
-  if (userinfo == "") { warn("vless: пустой uuid, строка пропущена (" name ")"); return }
+  if (userinfo == "") { warn("vless: Пустой uuid, строка пропущена (" name ")"); return }
   ok = emit_vless(name, userinfo, host, port, q)
   if (ok) converted++
 }

@@ -35,7 +35,7 @@ json_error() {
 }
 
 if [ -z "$DIR" ] || [ -z "$LOCK" ] || [ ! -f "$DIR/speedtest2.sh" ]; then
-  json_error "config: не удалось подключить speedtest2.sh (DIR=[$DIR])"
+  json_error "config: Не удалось подключить speedtest2.sh (DIR=[$DIR])"
 fi
 
 is_running() {

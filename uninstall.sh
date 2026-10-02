@@ -103,15 +103,15 @@ pid_alive() {
 
 confirm() {
   [ "$SKIP_CONFIRM" = 1 ] && return 0
-  echo "будут остановлена веб-служба статистики, сняты cron-записи," >&2
+  echo "Будут остановлена веб-служба статистики, сняты cron-записи," >&2
   echo "удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR." >&2
   if [ "$SKIP_CONFIG_REVERT" != 1 ] && [ -f "$CONFIG" ]; then
-    echo "если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
+    echo "Если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
   fi
   if [ "$PURGE_DATA" = 1 ]; then
     echo "PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
   fi
-  printf 'продолжить? [y/N] ' >&2
+  printf 'Продолжить? [y/N] ' >&2
   # Под "curl ... | sh" стандартный ввод занят телом самого uninstall.sh -
   # без переоткрытия от терминала read -r ниже сразу получит EOF, и
   # деинсталляция молча отменится (безопасный отказ, но не то, чего хочет
@@ -138,7 +138,7 @@ confirm() {
   fi
   case "$ans" in
     [Yy]*) return 0 ;;
-    *) echo "отменено, ничего не изменено" >&2; return 1 ;;
+    *) echo "Отменено, ничего не изменено" >&2; return 1 ;;
   esac
 }
 
@@ -224,12 +224,12 @@ revert_config() {
       latest=$b
     done
     if [ -z "$latest" ]; then
-      echo "рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
+      echo "Рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
       return 0
     fi
   fi
 
-  echo "найден бэкап $latest, проверяю mihomo -t" >&2
+  echo "Найден бэкап $latest, проверяю mihomo -t" >&2
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$latest" >/dev/null 2>&1; then
     echo "WARN - $latest не проходит mihomo -t, config.yaml не тронут" >&2
     return 0
@@ -240,7 +240,7 @@ revert_config() {
     echo "WARN - не удалось сохранить $own_backup, config.yaml не тронут" >&2
     return 0
   fi
-  echo "текущий config.yaml сохранён в $own_backup" >&2
+  echo "Текущий config.yaml сохранён в $own_backup" >&2
 
   if ! atomic_install "$latest" "$CONFIG"; then
     echo "WARN - не удалось записать $CONFIG из $latest" >&2
@@ -345,7 +345,7 @@ main() {
   revert_config
   remove_project_files
   purge_data
-  echo "деинсталляция завершена" >&2
+  echo "Деинсталляция завершена" >&2
 }
 
 if [ "${UNINSTALL_LIB_ONLY:-0}" != 1 ]; then

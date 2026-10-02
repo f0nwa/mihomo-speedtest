@@ -95,7 +95,7 @@ bootstrap_http_get() {
       *) return 1 ;;
     esac
   else
-    echo "для установки нужен curl с поддержкой HTTPS" >&2
+    echo "Для установки нужен curl с поддержкой HTTPS" >&2
     return 1
   fi
 }
@@ -104,25 +104,25 @@ bootstrap_download_to() {
   write_limit=$3
   [ "$write_limit" -ge 262144 ] || write_limit=262144
   if ! (ulimit -f "$(( (write_limit + 511) / 512 ))"; bootstrap_http_get "$1" "$3") > "$2"; then
-    echo "не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
+    echo "Не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
     return 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
   [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || {
-    echo "пустой файл или превышен лимит загрузки: $1" >&2
+    echo "Пустой файл или превышен лимит загрузки: $1" >&2
     return 1
   }
 }
 
 bootstrap_check_download() {
-  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "неверный размер файла релиза: $1" >&2; return 1; }
-  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
+  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "Неверный размер файла релиза: $1" >&2; return 1; }
+  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "Неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
 }
 
 bootstrap_awk_syntax() {
   printf 'BEGIN { exit 0 }\nEND { exit 0 }\n' > "$BOOTSTRAP_WORK/awk-guard"
   awk -f "$BOOTSTRAP_WORK/awk-guard" -f "$1" /dev/null >/dev/null 2>&1 || {
-    echo "файл не прошёл проверку синтаксиса AWK: $1" >&2
+    echo "Файл не прошёл проверку синтаксиса AWK: $1" >&2
     return 1
   }
 }
@@ -154,7 +154,7 @@ bootstrap_header() {
       for (i=1;i<=n;i++) print row[i]
     }
   ' "$BOOTSTRAP_MANIFEST" > "$BOOTSTRAP_WORK/files" || {
-    echo "манифест релиза не прошёл проверку - установка остановлена" >&2
+    echo "Манифест релиза не прошёл проверку - установка остановлена" >&2
     return 1
   }
 }
@@ -163,26 +163,26 @@ bootstrap_pinned_base() {
   case $UPDATE_RELEASE_BASE in
     */releases/latest/download)
       BOOTSTRAP_PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG) ;;
-    *) echo "для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
+    *) echo "Для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
   esac
 }
 
 bootstrap_selfinstall() {
   BOOTSTRAP_SHA_TOOL=$(bootstrap_sha256_tool) || {
-    echo "не найден инструмент SHA256 (sha256sum/openssl/busybox) - установка остановлена" >&2
+    echo "Не найден инструмент SHA256 (sha256sum/openssl/busybox) - установка остановлена" >&2
     return 1
   }
   bootstrap_tmproot=${TMPROOT:-/tmp}
   BOOTSTRAP_WORK=$(mktemp -d "$bootstrap_tmproot/mst-install-bootstrap.XXXXXX") || return 1
   BOOTSTRAP_MANIFEST=$BOOTSTRAP_WORK/manifest.txt
 
-  echo "рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
+  echo "Рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
 
   bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
-  mkdir -p "$DIR" || { echo "не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  mkdir -p "$DIR" || { echo "Не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
   # Проход 1: скачать и проверить всё во временном каталоге. Ничего не
   # пишем в DIR, пока не убедимся, что весь набор цел - иначе отказ на
@@ -195,19 +195,19 @@ bootstrap_selfinstall() {
   bootstrap_idx=0
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
     bootstrap_idx=$((bootstrap_idx + 1))
-    echo "скачиваю файл $bootstrap_idx/$bootstrap_total: $src" >&2
+    echo "Скачиваю файл $bootstrap_idx/$bootstrap_total: $src" >&2
     bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     case $check in
-      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
+      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "Неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
       awk) bootstrap_awk_syntax "$BOOTSTRAP_WORK/$src" || { rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
     esac
   done < "$BOOTSTRAP_WORK/files"
 
   # Проход 2: весь набор проверен - переносим в DIR.
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
-    mv "$BOOTSTRAP_WORK/$src" "$DIR/$src" || { echo "не удалось записать $DIR/$src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
-    chmod "$mode" "$DIR/$src" || { echo "не удалось задать режим $DIR/$src" >&2; return 1; }
+    mv "$BOOTSTRAP_WORK/$src" "$DIR/$src" || { echo "Не удалось записать $DIR/$src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    chmod "$mode" "$DIR/$src" || { echo "Не удалось задать режим $DIR/$src" >&2; return 1; }
   done < "$BOOTSTRAP_WORK/files"
 
   # Тег - хвост BOOTSTRAP_PINNED_BASE (.../download/<RELEASE_TAG>), берём
@@ -230,7 +230,7 @@ bootstrap_selfinstall() {
   fi
 
   rm -rf "$BOOTSTRAP_WORK"
-  echo "файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
+  echo "Файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
   SELFDIR=$DIR
 }
 
@@ -260,7 +260,7 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && 
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   bootstrap_selfinstall || {
-    echo "автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
+    echo "Автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
     exit 1
   }
 fi
@@ -300,7 +300,7 @@ resolve_block() {
   resolve_block_raw || return 1
   BLOCK=$(normalize_block "$BLOCK")
   if [ -z "$BLOCK" ]; then
-    echo "пустой фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+    echo "Пустой фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
     return 1
   fi
   warn_regex_block "$BLOCK"
@@ -341,13 +341,13 @@ resolve_block_raw() {
           eval "BLOCK=\$BLOCK_$choice"
           BLOCK_SOURCE="из конфига (вариант $choice)"
         else
-          echo "номер вне диапазона" >&2
+          echo "Номер вне диапазона" >&2
           BLOCK=""
         fi
         ;;
     esac
     if [ -z "$BLOCK" ]; then
-      echo "пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+      echo "Пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
       return 1
     fi
     return 0
@@ -363,10 +363,10 @@ resolve_block_raw() {
       BLOCK_SOURCE="введён вручную"
       return 0
     fi
-    echo "пустой фильтр не принимается (попытка $attempt из 3)" >&2
+    echo "Пустой фильтр не принимается (попытка $attempt из 3)" >&2
     attempt=$((attempt + 1))
   done
-  echo "фильтр обязателен - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
+  echo "Фильтр обязателен - без него подписка может подставить российскую ноду, которая выиграет замер по пингу. Установка остановлена." >&2
   return 1
 }
 
@@ -437,7 +437,7 @@ ensure_mihomo_speedtest_symlink() {
     current=$(readlink "$link" 2>/dev/null) || current=""
     [ "$current" = "$target" ] && return 0
     if ln -sf "$target" "$link" 2>/dev/null; then
-      echo "команда доступна как: mihomo-speedtest (симлинк в $bindir)" >&2
+      echo "Команда доступна как: mihomo-speedtest (симлинк в $bindir)" >&2
       return 0
     fi
   done
@@ -673,7 +673,7 @@ ensure_python3() {
     echo "python3 успешно установлен через opkg" >&2
     return 0
   else
-    echo "не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    echo "Не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
     return 1
   fi
 }
@@ -683,10 +683,10 @@ initialize_web_auth() {
     --state-dir "$DIR/.stats-auth" \
     --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}") || return 1
   if [ -n "$code" ]; then
-    echo "одноразовый код первичной настройки: $code" >&2
+    echo "Одноразовый код первичной настройки: $code" >&2
     host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
     [ -n "$host" ] || host="<адрес роутера>"
-    echo "откройте http://$host:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
+    echo "Откройте http://$host:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
   fi
 }
 
@@ -730,12 +730,12 @@ print_web_url() {
   fi
   . "$envfile"
   if [ "${STATS_HTTP_ENABLE:-1}" != 1 ]; then
-    echo "веб-сервис статистики отключён (mihomo-speedtest start-web - включить)" >&2
+    echo "Веб-сервис статистики отключён (mihomo-speedtest start-web - включить)" >&2
     return 0
   fi
   host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
   [ -n "$host" ] || host="<не удалось определить IP - смотрите ip addr на роутере>"
-  echo "веб-интерфейс статистики: http://$host:${STATS_HTTP_PORT:-8899}/stats" >&2
+  echo "Веб-интерфейс статистики: http://$host:${STATS_HTTP_PORT:-8899}/stats" >&2
 }
 
 show_url_main() {
@@ -766,13 +766,13 @@ set_env_flag() {
   [ -f "$envfile" ] || { echo "$envfile не найден, сначала обычная установка" >&2; return 1; }
   tmp="$envfile.$$"
   { grep -v "^$name=" "$envfile"; printf "%s=%s\n" "$name" "$val"; } > "$tmp" \
-    && mv "$tmp" "$envfile" || { rm -f "$tmp"; echo "не удалось записать $envfile" >&2; return 1; }
+    && mv "$tmp" "$envfile" || { rm -f "$tmp"; echo "Не удалось записать $envfile" >&2; return 1; }
 }
 
 stop_web_main() {
   set_env_flag STATS_HTTP_ENABLE 0 || return 1
   [ -x "$INITD_SCRIPT" ] && "$INITD_SCRIPT" stop >/dev/null 2>&1
-  echo "веб-сервис статистики остановлен и отключён - при переустановке/обновлении проекта он не будет запускаться автоматически (mihomo-speedtest start-web - включить обратно)" >&2
+  echo "Веб-сервис статистики остановлен и отключён - при переустановке/обновлении проекта он не будет запускаться автоматически (mihomo-speedtest start-web - включить обратно)" >&2
   return 0
 }
 
@@ -796,9 +796,9 @@ version_main() {
   fi
   if [ -n "$installed_version" ]; then
     installed_tag=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG)
-    echo "версия релиза: ${installed_tag:-v$installed_version} (номер $installed_version)" >&2
+    echo "Версия релиза: ${installed_tag:-v$installed_version} (номер $installed_version)" >&2
   else
-    echo "установленный релиз не отслеживается" >&2
+    echo "Установленный релиз не отслеживается" >&2
   fi
   return 0
 }
@@ -816,7 +816,7 @@ run_trial_with_heartbeat() {
   (
     while :; do
       sleep "$trial_heartbeat_interval"
-      echo "пробный прогон ещё выполняется, ждите..." >&2
+      echo "Пробный прогон ещё выполняется, ждите..." >&2
     done
   ) &
   trial_heartbeat_pid=$!
@@ -877,31 +877,31 @@ main() {
     curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/$name" >/dev/null 2>&1 || true
     sleep 3
     [ -f "$src" ] || {
-      echo "кэш $src не появился, сначала чините подписку $name" >&2
+      echo "Кэш $src не появился, сначала чините подписку $name" >&2
       return 1
     }
   done
 
   resolve_block || return 1
-  echo "фильтр ($BLOCK_SOURCE): $BLOCK" >&2
+  echo "Фильтр ($BLOCK_SOURCE): $BLOCK" >&2
 
   CHANNEL=$(measure_channel)
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
-    echo "канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
+    echo "Канал $((CHANNEL/1048576)) МБ/с, порог $((MIN_SPEED/1048576)) МБ/с" >&2
   else
     # MIN_SPEED в шапке speedtest2.sh - не в кавычках (число), в отличие
     # от BLOCK; читаем тем же read_speedtest_const, что и MIN_RATIO/MIN_FLOOR.
     MIN_SPEED=$(read_speedtest_const MIN_SPEED 1048576)
-    echo "прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
+    echo "Прямой замер канала не удался, порог из дефолта: $MIN_SPEED" >&2
   fi
 
   write_env "$DIR/speedtest2.env" || {
-    echo "не удалось записать speedtest2.env" >&2
+    echo "Не удалось записать speedtest2.env" >&2
     return 1
   }
   install_files || {
-    echo "не удалось установить файлы" >&2
+    echo "Не удалось установить файлы" >&2
     return 1
   }
   install_cron
@@ -924,7 +924,7 @@ main() {
   fi
   if [ "$web_ready" = 1 ] && [ -x "$INITD_SCRIPT" ]; then
     if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
-      echo "веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
+      echo "Веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
       print_web_url
     else
       echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
@@ -938,11 +938,11 @@ main() {
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
-    echo "пробный запуск завершён, хвост журнала:" >&2
+    echo "Пробный запуск завершён, хвост журнала:" >&2
     tail -5 "$DIR/speedtest.log" 2>/dev/null >&2 || true
   fi
 
-  echo "установка завершена" >&2
+  echo "Установка завершена" >&2
 }
 
 recalibrate_main() {
@@ -955,7 +955,7 @@ recalibrate_main() {
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     NEW_MIN=$(compute_min_speed "$CHANNEL")
   else
-    echo "прямой замер канала не удался, MIN_SPEED не изменён" >&2
+    echo "Прямой замер канала не удался, MIN_SPEED не изменён" >&2
     return 1
   fi
   recalibrate_env "$ENVFILE" "$NEW_MIN" || return 1

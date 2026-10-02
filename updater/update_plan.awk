@@ -24,7 +24,7 @@ function fail(msg) {
 function valid_id(s) { return s ~ /^[a-z][a-z0-9-]*$/ }
 
 function graph_visit(cid,   n, j, children) {
-  if (cid in graph_active) fail("цикл зависимостей на компоненте: " cid)
+  if (cid in graph_active) fail("Цикл зависимостей на компоненте: " cid)
   if (cid in graph_done) return
   graph_active[cid] = 1
   n = split(dep_list[cid], children, ",")
@@ -45,14 +45,14 @@ function json_escape(s,    r) {
 
 BEGIN {
   FS = "|"
-  if (MANIFEST == "") fail("не задан MANIFEST")
+  if (MANIFEST == "") fail("Не задан MANIFEST")
   if (FORMAT == "") FORMAT = "text"
-  if (FORMAT != "text" && FORMAT != "json" && FORMAT != "records") fail("неизвестный FORMAT: " FORMAT)
+  if (FORMAT != "text" && FORMAT != "json" && FORMAT != "records") fail("Неизвестный FORMAT: " FORMAT)
 
   n = split(SELECTED, sel_arr, ",")
   for (i = 1; i <= n; i++) {
     s = sel_arr[i]
-    if (!valid_id(s)) fail("неверный id выбранного компонента: " s)
+    if (!valid_id(s)) fail("Неверный id выбранного компонента: " s)
     selected[s] = 1
   }
 
@@ -78,8 +78,8 @@ BEGIN {
   while ((getline line < MANIFEST) > 0) {
     if (line == "") continue
     if (line ~ /^(FORMAT_VERSION|RELEASE_VERSION|MIN_UPDATER_VERSION|CONFIG_SCHEMA_VERSION|RELEASE_TAG)=/) {
-      if (split(line, a, "=") != 2) fail("неверное поле заголовка: " line)
-      if (a[1] in header_seen) fail("повторное поле заголовка: " a[1])
+      if (split(line, a, "=") != 2) fail("Неверное поле заголовка: " line)
+      if (a[1] in header_seen) fail("Повторное поле заголовка: " a[1])
       header_seen[a[1]] = 1
       if (a[1] == "FORMAT_VERSION") format_version = a[2]
       if (a[1] == "RELEASE_VERSION") release_version = a[2]
@@ -91,71 +91,71 @@ BEGIN {
 
     nf = split(line, f, "|")
     if (f[1] == "COMPONENT") {
-      if (nf != 3) fail("COMPONENT: ожидалось 3 поля: " line)
+      if (nf != 3) fail("COMPONENT: Ожидалось 3 поля: " line)
       cid = f[2]
-      if (!valid_id(cid)) fail("COMPONENT: неверный id: " cid)
-      if (f[3] == "") fail("COMPONENT: пустое описание: " cid)
-      if (cid in comp_title) fail("повторное объявление компонента: " cid)
+      if (!valid_id(cid)) fail("COMPONENT: Неверный id: " cid)
+      if (f[3] == "") fail("COMPONENT: Пустое описание: " cid)
+      if (cid in comp_title) fail("Повторное объявление компонента: " cid)
       comp_title[cid] = f[3]
       comp_order[++comp_count] = cid
       continue
     }
     if (f[1] == "DEPENDS") {
-      if (nf != 3) fail("DEPENDS: ожидалось 3 поля: " line)
+      if (nf != 3) fail("DEPENDS: Ожидалось 3 поля: " line)
       dep_from = f[2]; dep_to = f[3]
       depends_raw[++dep_count] = dep_from SUBSEP dep_to
       continue
     }
     if (f[1] == "NOTE") {
-      if (nf != 3 || f[3] == "") fail("NOTE: нужны компонент и непустая заметка")
-      if (f[2] in comp_note) fail("NOTE: повторная заметка: " f[2])
+      if (nf != 3 || f[3] == "") fail("NOTE: Нужны компонент и непустая заметка")
+      if (f[2] in comp_note) fail("NOTE: Повторная заметка: " f[2])
       comp_note[f[2]] = f[3]
       note_count++
       continue
     }
     if (f[1] == "CONFLICT") {
-      if (nf != 3) fail("CONFLICT: ожидалось 3 поля: " line)
+      if (nf != 3) fail("CONFLICT: Ожидалось 3 поля: " line)
       conflict_raw[++conflict_count] = f[2] SUBSEP f[3]
       continue
     }
     if (f[1] == "FILE") {
-      if (nf != 8) fail("FILE: ожидалось 8 полей: " line)
+      if (nf != 8) fail("FILE: Ожидалось 8 полей: " line)
       cid = f[2]; src = f[3]; dest = f[4]; size = f[5]; sha = f[6]; mode = f[7]; check = f[8]
       if (!(cid in comp_title)) fail("FILE ссылается на неизвестный компонент: " cid)
 
-      if (src == "") fail("FILE: пустой исходный путь для " dest)
-      if (src ~ /^\//) fail("FILE: исходный путь должен быть относительным: " src)
+      if (src == "") fail("FILE: Пустой исходный путь для " dest)
+      if (src ~ /^\//) fail("FILE: Исходный путь должен быть относительным: " src)
       if (src ~ /(^|\/)\.\.(\/|$)/) fail("FILE: '..' в исходном пути запрещён: " src)
 
       if (src !~ /^[A-Za-z0-9_.\/-]+$/ || src ~ /\/\// || src ~ /(^|\/)\.(\/|$)/ || src ~ /\/$/)
-        fail("FILE: ненормализованный исходный путь: " src)
+        fail("FILE: Ненормализованный исходный путь: " src)
 
-      if (dest !~ /^\//) fail("FILE: целевой путь должен быть абсолютным: " dest)
+      if (dest !~ /^\//) fail("FILE: Целевой путь должен быть абсолютным: " dest)
       if (dest ~ /(^|\/)\.\.(\/|$)/) fail("FILE: '..' в целевом пути запрещён: " dest)
-      if (dest ~ /\/\//) fail("FILE: пустой сегмент пути в назначении: " dest)
-      if (dest ~ /(^|\/)\.(\/|$)/) fail("FILE: сегмент '.' в назначении запрещён: " dest)
-      if (dest ~ /\/$/) fail("FILE: назначение не может быть каталогом: " dest)
+      if (dest ~ /\/\//) fail("FILE: Пустой сегмент пути в назначении: " dest)
+      if (dest ~ /(^|\/)\.(\/|$)/) fail("FILE: Сегмент '.' в назначении запрещён: " dest)
+      if (dest ~ /\/$/) fail("FILE: Назначение не может быть каталогом: " dest)
 
       okpref = 0
       for (p = 1; p <= 2; p++) {
         if (index(dest, allowed_prefix[p]) == 1 && length(dest) > length(allowed_prefix[p])) okpref = 1
       }
-      if (!okpref) fail("FILE: запрещённый целевой каталог: " dest)
+      if (!okpref) fail("FILE: Запрещённый целевой каталог: " dest)
 
       if (index(dest, "/opt/etc/init.d/") == 1 && !(dest in allowed_full)) {
-        fail("FILE: служебный путь не входит в явный список разрешённых: " dest)
+        fail("FILE: Служебный путь не входит в явный список разрешённых: " dest)
       }
       if (dest == "/opt/etc/mihomo-speedtest/.update" || index(dest, "/opt/etc/mihomo-speedtest/.update/") == 1) {
-        fail("FILE: запрещённый целевой каталог (служебное состояние обновлятора): " dest)
+        fail("FILE: Запрещённый целевой каталог (служебное состояние обновлятора): " dest)
       }
 
-      if (dest !~ /^[A-Za-z0-9_.\/-]+$/) fail("FILE: недопустимые символы назначения: " dest)
-      if (dest in dest_seen) fail("FILE: дублирующееся назначение: " dest)
+      if (dest !~ /^[A-Za-z0-9_.\/-]+$/) fail("FILE: Недопустимые символы назначения: " dest)
+      if (dest in dest_seen) fail("FILE: Дублирующееся назначение: " dest)
       dest_seen[dest] = 1
-      if (size !~ /^[0-9]+$/) fail("FILE: неверный размер для " dest)
-      if (sha !~ /^[0-9a-f]{64}$/) fail("FILE: неверный SHA-256 для " dest)
-      if (mode !~ /^0?(644|755)$/) fail("FILE: неверный режим для " dest)
-      if (!(check in known_check)) fail("FILE: неизвестный тип проверки '" check "' для " dest)
+      if (size !~ /^[0-9]+$/) fail("FILE: Неверный размер для " dest)
+      if (sha !~ /^[0-9a-f]{64}$/) fail("FILE: Неверный SHA-256 для " dest)
+      if (mode !~ /^0?(644|755)$/) fail("FILE: Неверный режим для " dest)
+      if (!(check in known_check)) fail("FILE: Неизвестный тип проверки '" check "' для " dest)
       file_count++
       file_comp[file_count] = cid
       file_src[file_count] = src
@@ -167,39 +167,39 @@ BEGIN {
       continue
     }
     if (f[1] == "ACTION") {
-      if (nf != 3) fail("ACTION: ожидалось 3 поля: " line)
+      if (nf != 3) fail("ACTION: Ожидалось 3 поля: " line)
       cid = f[2]; act = f[3]
       if (!(cid in comp_title)) fail("ACTION ссылается на неизвестный компонент: " cid)
-      if (!(act in known_action)) fail("ACTION: неизвестное действие: " act)
+      if (!(act in known_action)) fail("ACTION: Неизвестное действие: " act)
       action_raw[++action_count] = cid SUBSEP act
       continue
     }
-    fail("нераспознанная строка манифеста: " line)
+    fail("Нераспознанная строка манифеста: " line)
   }
   close(MANIFEST)
 
-  if (format_version == "") fail("отсутствует FORMAT_VERSION")
-  if (release_version == "") fail("отсутствует RELEASE_VERSION")
-  if (min_updater == "") fail("отсутствует MIN_UPDATER_VERSION")
-  if (config_schema == "") fail("отсутствует CONFIG_SCHEMA_VERSION")
+  if (format_version == "") fail("Отсутствует FORMAT_VERSION")
+  if (release_version == "") fail("Отсутствует RELEASE_VERSION")
+  if (min_updater == "") fail("Отсутствует MIN_UPDATER_VERSION")
+  if (config_schema == "") fail("Отсутствует CONFIG_SCHEMA_VERSION")
   if (format_version !~ /^[0-9]+$/) fail("FORMAT_VERSION должен быть целым числом: " format_version)
   if (release_version !~ /^[0-9]+$/) fail("RELEASE_VERSION должен быть целым числом: " release_version)
   if (min_updater !~ /^[0-9]+$/) fail("MIN_UPDATER_VERSION должен быть целым числом: " min_updater)
   if (config_schema !~ /^[0-9]+$/) fail("CONFIG_SCHEMA_VERSION должен быть целым числом: " config_schema)
 
-  if (format_version != "2") fail("неподдерживаемый FORMAT_VERSION: " format_version)
+  if (format_version != "2") fail("Неподдерживаемый FORMAT_VERSION: " format_version)
   if (release_tag !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ || release_tag ~ /\.\./)
-    fail("неверный или отсутствующий RELEASE_TAG")
-  for (cid in comp_title) if (!(cid in comp_note)) fail("отсутствует NOTE для компонента: " cid)
-  for (cid in comp_note) if (!(cid in comp_title)) fail("NOTE: неизвестный компонент: " cid)
+    fail("Неверный или отсутствующий RELEASE_TAG")
+  for (cid in comp_title) if (!(cid in comp_note)) fail("Отсутствует NOTE для компонента: " cid)
+  for (cid in comp_note) if (!(cid in comp_title)) fail("NOTE: Неизвестный компонент: " cid)
   if (UPDATER_VERSION != "" && min_updater + 0 > UPDATER_VERSION + 0)
-    fail("обновите update.sh: нужна версия " min_updater "; инструкция: release/manifest-format.md")
+    fail("Обновите update.sh: нужна версия " min_updater "; инструкция: release/manifest-format.md")
 
   for (i = 1; i <= dep_count; i++) {
     split(depends_raw[i], parts, SUBSEP)
     df = parts[1]; dt = parts[2]
-    if (!(df in comp_title)) fail("DEPENDS: неизвестный компонент: " df)
-    if (!(dt in comp_title)) fail("DEPENDS: неизвестный компонент: " dt)
+    if (!(df in comp_title)) fail("DEPENDS: Неизвестный компонент: " df)
+    if (!(dt in comp_title)) fail("DEPENDS: Неизвестный компонент: " dt)
     dep_list[df] = dep_list[df] (dep_list[df] == "" ? "" : ",") dt
   }
 
@@ -207,15 +207,15 @@ BEGIN {
   for (i = 1; i <= conflict_count; i++) {
     split(conflict_raw[i], parts, SUBSEP)
     cf = parts[1]; ct = parts[2]
-    if (!(cf in comp_title) || !(ct in comp_title)) fail("CONFLICT: неизвестный компонент")
-    if (cf == ct) fail("CONFLICT: компонент несовместим сам с собой: " cf)
+    if (!(cf in comp_title) || !(ct in comp_title)) fail("CONFLICT: Неизвестный компонент")
+    if (cf == ct) fail("CONFLICT: Компонент несовместим сам с собой: " cf)
   }
   # Каталог проверяется целиком, но конфликтующие независимые компоненты
   # не обязаны быть выбранными одновременно при генерации релиза.
   # Виртуальный компонент задаётся движком только при повышении схемы.
   if (MIGRATE_CONFIG==1 && VALIDATE_ONLY!=1) {
     if ("active-config" in comp_title) fail("active-config зарезервирован движком")
-    if (!("config-tools" in comp_title)) fail("миграция требует config-tools")
+    if (!("config-tools" in comp_title)) fail("Миграция требует config-tools")
     comp_title["active-config"]="Миграция рабочего конфига"
     comp_note["active-config"]="Проверенный кандидат; общий откат и один перезапуск XKeen"
     comp_order[++comp_count]="active-config"
@@ -228,7 +228,7 @@ BEGIN {
   for (i = 1; i <= conflict_count; i++) {
     split(conflict_raw[i], parts, SUBSEP)
     if (parts[1] in resolved && parts[2] in resolved)
-      fail("несовместимые компоненты: " parts[1] " и " parts[2])
+      fail("Несовместимые компоненты: " parts[1] " и " parts[2])
   }
 
   if (VALIDATE_ONLY == 1) exit 0
@@ -320,9 +320,9 @@ BEGIN {
 }
 
 function resolve(cid,   list, n, i, part, arr) {
-  if (cid in resolving) fail("цикл зависимостей на компоненте: " cid)
+  if (cid in resolving) fail("Цикл зависимостей на компоненте: " cid)
   if (cid in resolved) return
-  if (!(cid in comp_title)) fail("выбран неизвестный компонент: " cid)
+  if (!(cid in comp_title)) fail("Выбран неизвестный компонент: " cid)
   resolving[cid] = 1
   list = dep_list[cid]
   if (list != "") {

@@ -44,7 +44,7 @@ check_mihomo_process() {
       return 0
     fi
   fi
-  echo "version_check: процесс mihomo не найден - выполните 'xkeen -mihomo', затем 'xkeen -restart'" >&2
+  echo "version_check: Процесс mihomo не найден - выполните 'xkeen -mihomo', затем 'xkeen -restart'" >&2
   return 1
 }
 
@@ -90,19 +90,19 @@ check_versions() {
 
   found=$(xkeen_version)
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_XKEEN_VERSION"; then
-    echo "version_check: версия XKeen ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_XKEEN_VERSION" >&2
+    echo "version_check: Версия XKeen ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_XKEEN_VERSION" >&2
     ok=0
   fi
 
   found=$(mihomo_version)
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_MIHOMO_VERSION"; then
-    echo "version_check: версия ядра Mihomo ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_MIHOMO_VERSION" >&2
+    echo "version_check: Версия ядра Mihomo ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_MIHOMO_VERSION" >&2
     ok=0
   fi
 
   found=$(keeneticos_version)
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_KEENETICOS_VERSION"; then
-    echo "version_check: версия KeeneticOS ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_KEENETICOS_VERSION" >&2
+    echo "version_check: Версия KeeneticOS ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_KEENETICOS_VERSION" >&2
     ok=0
   fi
 

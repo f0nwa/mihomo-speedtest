@@ -180,7 +180,7 @@ acquire_lock() {
     while ! mkdir "$LOCK" 2>/dev/null; do
       old_pid=$(cat "$LOCK/pid" 2>/dev/null)
       if [ -n "$old_pid" ] && ! kill -0 "$old_pid" 2>/dev/null; then
-        say "force: забираю зависшую блокировку (pid $old_pid не отвечает)"
+        say "force: Забираю зависшую блокировку (pid $old_pid не отвечает)"
         rm -rf "$LOCK"
         continue
       fi
@@ -188,7 +188,7 @@ acquire_lock() {
         say "WARN: force -- блокировка занята${old_pid:+ (pid $old_pid)} дольше ${FORCE_WAIT}с, выхожу"
         return 1
       fi
-      [ "$waited" -eq 0 ] && say "force: блокировка занята${old_pid:+ (pid $old_pid)}, жду освобождения..."
+      [ "$waited" -eq 0 ] && say "force: Блокировка занята${old_pid:+ (pid $old_pid)}, жду освобождения..."
       sleep 2
       waited=$((waited + 2))
     done
@@ -198,7 +198,7 @@ acquire_lock() {
       # следующие прогоны по cron выходили бы до перезагрузки роутера.
       old_pid=$(cat "$LOCK/pid" 2>/dev/null)
       [ -n "$old_pid" ] && ! kill -0 "$old_pid" 2>/dev/null || return 1
-      say "забираю зависшую блокировку (pid $old_pid не отвечает)"
+      say "Забираю зависшую блокировку (pid $old_pid не отвечает)"
       rm -rf "$LOCK"
       mkdir "$LOCK" 2>/dev/null || return 1
     fi
@@ -270,7 +270,7 @@ write_progress() {
   fi
   progressdir=${STATS_PROGRESS%/*}
   if [ ! -d "$progressdir" ] && ! mkdir -p "$progressdir" 2>/dev/null; then
-    say "WARN: не удалось создать $progressdir, progress.json не обновлён"
+    say "WARN: Не удалось создать $progressdir, progress.json не обновлён"
     return 0
   fi
   if ! awk -v running="$progress_running" -v total="${PROGRESS_TOTAL:-0}" \
@@ -395,7 +395,7 @@ stop_stats_httpd() {
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null || true
-    say "веб-сервис статистики остановлен (pid $pid)"
+    say "Веб-сервис статистики остановлен (pid $pid)"
   fi
   rm -f "$STATS_HTTP_PIDFILE" "$STATS_HTTP_PIDFILE.addr"
 }
@@ -414,7 +414,7 @@ write_stats_cgi() {
     return 0
   fi
   if ! publish_file "$STATS_CGI_SOURCE" "$STATS_CGI_SCRIPT"; then
-    say "WARN: не удалось записать $STATS_CGI_SCRIPT, форма настройки не обновлена"
+    say "WARN: Не удалось записать $STATS_CGI_SCRIPT, форма настройки не обновлена"
     return 0
   fi
   chmod +x "$STATS_CGI_SCRIPT" 2>/dev/null || true
@@ -431,7 +431,7 @@ write_stats_run() {
     return 0
   fi
   if ! publish_file "$STATS_RUN_SOURCE" "$STATS_RUN_SCRIPT"; then
-    say "WARN: не удалось записать $STATS_RUN_SCRIPT, кнопка force-прогона не обновлена"
+    say "WARN: Не удалось записать $STATS_RUN_SCRIPT, кнопка force-прогона не обновлена"
     return 0
   fi
   chmod +x "$STATS_RUN_SCRIPT" 2>/dev/null || true
@@ -447,7 +447,7 @@ write_stats_update() {
     return 0
   fi
   if ! publish_file "$STATS_UPDATE_SOURCE" "$STATS_UPDATE_SCRIPT"; then
-    say "WARN: не удалось записать $STATS_UPDATE_SCRIPT, раздел обновлений не обновлён"
+    say "WARN: Не удалось записать $STATS_UPDATE_SCRIPT, раздел обновлений не обновлён"
     return 0
   fi
   chmod +x "$STATS_UPDATE_SCRIPT" 2>/dev/null || true
@@ -463,7 +463,7 @@ write_stats_system() {
     return 0
   fi
   if ! publish_file "$STATS_SYSTEM_SOURCE" "$STATS_SYSTEM_SCRIPT"; then
-    say "WARN: не удалось записать $STATS_SYSTEM_SCRIPT, футер веб-интерфейса не обновлён"
+    say "WARN: Не удалось записать $STATS_SYSTEM_SCRIPT, футер веб-интерфейса не обновлён"
     return 0
   fi
   chmod +x "$STATS_SYSTEM_SCRIPT" 2>/dev/null || true
@@ -478,7 +478,7 @@ write_stats_config() {
     return 0
   fi
   if ! publish_file "$STATS_CONFIG_SOURCE" "$STATS_CONFIG_SCRIPT"; then
-    say "WARN: не удалось записать $STATS_CONFIG_SCRIPT, редактор конфига не обновлён"
+    say "WARN: Не удалось записать $STATS_CONFIG_SCRIPT, редактор конфига не обновлён"
     return 0
   fi
   chmod +x "$STATS_CONFIG_SCRIPT" 2>/dev/null || true
@@ -507,7 +507,7 @@ write_stats_static() {
       continue
     fi
     if ! publish_file "$src" "$dst"; then
-      say "WARN: не удалось записать $dst, SPA-интерфейс не обновлён"
+      say "WARN: Не удалось записать $dst, SPA-интерфейс не обновлён"
     fi
   done
   return 0
@@ -559,9 +559,9 @@ cleanup_old_zash_stats() {
   [ -f "$target" ] || return 0
   grep -q '<title>speedtest2 - статистика</title>' "$target" 2>/dev/null || return 0
   if rm -f "$target"; then
-    say "OK: убран устаревший $target (дублировал новый веб-сервис статистики, см. TODO.md)"
+    say "OK: Убран устаревший $target (дублировал новый веб-сервис статистики, см. TODO.md)"
   else
-    say "WARN: не удалось убрать устаревший $target - уберите вручную"
+    say "WARN: Не удалось убрать устаревший $target - уберите вручную"
   fi
 }
 
@@ -588,7 +588,7 @@ ensure_stats_httpd() {
   fi
 
   if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
-    say "WARN: не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
+    say "WARN: Не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
     return 0
   fi
 
@@ -606,7 +606,7 @@ ensure_stats_httpd() {
     if [ "$have" = "$want" ]; then
       return 0
     fi
-    say "веб-сервис статистики: адрес изменился, перезапускаю"
+    say "Веб-сервис статистики: адрес изменился, перезапускаю"
     stop_stats_httpd
   fi
 
@@ -617,16 +617,16 @@ ensure_stats_httpd() {
     say "WARN: Python 3 или $STATS_HTTPD_PY не найден - веб-интерфейс не запущен"
   fi
   if [ -z "$backend" ]; then
-    say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
+    say "WARN: Веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
     return 0
   fi
   if echo "$newpid" > "$STATS_HTTP_PIDFILE"; then
     echo "$want" > "$STATS_HTTP_PIDFILE.addr" 2>/dev/null || true
     url_host=$(stats_httpd_advertise_host "$STATS_HTTP_BIND")
     [ -n "$url_host" ] || url_host=$STATS_HTTP_BIND
-    say "OK: веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats"
+    say "OK: Веб-сервис статистики ($backend) на $STATS_HTTP_BIND:$STATS_HTTP_PORT (pid $newpid), раздаёт $STATS_HTTP_DIR - http://$url_host:$STATS_HTTP_PORT/stats"
   else
-    say "WARN: не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
+    say "WARN: Не удалось записать $STATS_HTTP_PIDFILE, процесс $newpid оставлен запущенным"
   fi
 }
 
@@ -724,14 +724,14 @@ render_stats() {
   # а не потому что design запрещает их убрать.
   statsdir=${STATS_JSON%/*}
   if [ ! -d "$statsdir" ]; then
-    say "WARN: каталог $statsdir не найден, stats.json не записан"
+    say "WARN: Каталог $statsdir не найден, stats.json не записан"
     return 0
   fi
   # Старый HTML-интерфейс (stats.html) удалён 2026-09-28 - убираем файл,
   # оставшийся от прежних версий, чтобы по /stats.html не открывалась
   # навсегда застывшая статистика. Одна запись в /opt и только если файл есть.
   if [ -f "$STATS_HTML" ]; then
-    rm -f "$STATS_HTML" 2>/dev/null || say "WARN: не удалось удалить устаревший $STATS_HTML"
+    rm -f "$STATS_HTML" 2>/dev/null || say "WARN: Не удалось удалить устаревший $STATS_HTML"
   fi
   if [ ! -f "$RENDER_STATS" ]; then
     say "WARN: $RENDER_STATS не найден, stats.json не обновлён"
@@ -870,24 +870,24 @@ convert_source() {
   decoded="$WORK/subdec-$base.txt"
   if ! base64 -d "$src" > "$decoded" 2>/dev/null || [ ! -s "$decoded" ]; then
     if ! openssl base64 -d -A -in "$src" > "$decoded" 2>/dev/null || [ ! -s "$decoded" ]; then
-      say "WARN: источник $src не похож ни на clash-yaml, ни на base64-подписку, пропускаю"
+      say "WARN: Источник $src не похож ни на clash-yaml, ни на base64-подписку, пропускаю"
       return 1
     fi
   fi
   first=$(sed -n '1p' "$decoded")
   case "$first" in
     vless://*) ;;
-    *) say "WARN: источник $src раскодирован, но не похож на vless-подписку, пропускаю"; return 1 ;;
+    *) say "WARN: Источник $src раскодирован, но не похож на vless-подписку, пропускаю"; return 1 ;;
   esac
   conv="$WORK/subconv-$base.yaml"
   LC_ALL=C awk -f "$SUB_CONVERT" "$decoded" > "$conv" 2> "$WORK/subconv-$base.log"
   n_converted=$(sed -n 's/.*converted=\([0-9]*\).*/\1/p' "$WORK/subconv-$base.log")
   if [ -z "${n_converted:-}" ] || [ "$n_converted" -eq 0 ]; then
-    say "WARN: из $src не удалось получить ни одной ноды, пропускаю"
+    say "WARN: Из $src не удалось получить ни одной ноды, пропускаю"
     return 1
   fi
   if ! validate_provider "$conv"; then
-    say "WARN: конфиг из $src не прошёл проверку \$BIN -t, пропускаю весь провайдер"
+    say "WARN: Конфиг из $src не прошёл проверку \$BIN -t, пропускаю весь провайдер"
     tail -3 "$WORK/provcheck.log" >> "$RUN_LOG"
     return 1
   fi
@@ -902,7 +902,7 @@ prepare_nodes() {
     conv_sources="$conv_sources $csrc"
   done
   if [ -z "$conv_sources" ]; then
-    say "WARN: ни один источник не прошёл проверку/конвертацию, пул пуст"
+    say "WARN: Ни один источник не прошёл проверку/конвертацию, пул пуст"
     : > "$WORK/all.yaml"
     echo 0 > "$WORK/cnt.txt"
     return 0
@@ -1094,7 +1094,7 @@ wg_group_now() {
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
   if ! wg_now=$(wg_group_now "$WG_FAST_GROUP"); then
-    say "WARN: группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (нужна миграция конфига)"
+    say "WARN: Группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (нужна миграция конфига)"
     return 0
   fi
   wg_best=$(awk -v min="$1" -v okfile="$WORK/wg_ok.txt" '
@@ -1105,7 +1105,7 @@ wg_publish_fast() {
     if [ "$wg_now" = "$wg_best" ] || wg_select_in "$WG_FAST_GROUP" "$wg_best"; then
       say "WG: $wg_best -> '⚡ Быстрый пул' (группа $WG_FAST_GROUP)"
     else
-      say "WARN: не удалось выбрать $wg_best в группе $WG_FAST_GROUP"
+      say "WARN: Не удалось выбрать $wg_best в группе $WG_FAST_GROUP"
     fi
     return 0
   fi
@@ -1190,7 +1190,7 @@ fetch_delays() {
         | sed -n 's/.*"\(n[0-9]\{4\}\)":\([0-9]*\).*/\2 \1/p' \
         >> "$WORK/alive.raw"
     else
-      say "WARN: пакетная проверка задержки $delay_group не выполнена, продолжаю с остальными"
+      say "WARN: Пакетная проверка задержки $delay_group не выполнена, продолжаю с остальными"
     fi
   done < "$WORK/delay_groups.txt"
 
@@ -1270,13 +1270,13 @@ if [ -z "$BLOCK" ]; then
 fi
 if ! acquire_lock; then
   OLD=$(cat "$LOCK/pid" 2>/dev/null)
-  say "WARN: уже выполняется${OLD:+ (pid $OLD)}, выхожу"
+  say "WARN: Уже выполняется${OLD:+ (pid $OLD)}, выхожу"
   return 0
 fi
 install_traps
 
 if ! mkdir -p "$WORK/nodes"; then
-  say "WARN: не удалось создать временный каталог $WORK"
+  say "WARN: Не удалось создать временный каталог $WORK"
   return 0
 fi
 echo "=== $(date) start ===" >> "$RUN_LOG"
@@ -1290,7 +1290,7 @@ fi
 TOTAL=$(cat "$WORK/cnt.txt" 2>/dev/null)
 [ -z "$TOTAL" ] && TOTAL=0
 if [ "$TOTAL" -lt 1 ]; then
-  say "WARN: ни одной ноды не разобрано, fast.yaml не трогаю"; exit 0
+  say "WARN: Ни одной ноды не разобрано, fast.yaml не трогаю"; exit 0
 fi
 
 # WireGuard/AmneziaWG (wg.txt) во второе ядро не попадают вовсе: пул второго
@@ -1308,7 +1308,7 @@ if [ "$POOL2" -gt 0 ]; then
 write_test_config
 
 if ! "$BIN" -t -d "$WORK" -f "$WORK/config.yaml" > "$WORK/test.log" 2>&1; then
-  say "WARN: тестовый конфиг не прошёл валидацию, fast.yaml не трогаю"
+  say "WARN: Тестовый конфиг не прошёл валидацию, fast.yaml не трогаю"
   tail -3 "$WORK/test.log" >> "$RUN_LOG"; exit 0
 fi
 
@@ -1321,16 +1321,16 @@ while [ $i -lt 20 ]; do
   sleep 1; i=$((i+1))
 done
 if ! curl -s -m 2 "http://$API/version" > /dev/null 2>&1; then
-  say "WARN: тестовое ядро не поднялось, fast.yaml не трогаю"; exit 0
+  say "WARN: Тестовое ядро не поднялось, fast.yaml не трогаю"; exit 0
 fi
 
 # 4. отсев мёртвых последовательными пакетами (внутри пакета - параллельно)
 if ! fetch_delays; then
-  say "WARN: групповая проверка задержки не выполнена, fast.yaml не трогаю"
+  say "WARN: Групповая проверка задержки не выполнена, fast.yaml не трогаю"
   exit 0
 fi
 else
-  say "второе ядро не запускается: в пуле только WireGuard/AmneziaWG-ноды"
+  say "Второе ядро не запускается: в пуле только WireGuard/AmneziaWG-ноды"
 fi
 
 # 4a. WireGuard/AmneziaWG - через основное ядро (вход $WG_LISTENER, группа $WG_GROUP)
@@ -1343,29 +1343,29 @@ else
 fi
 sort -n "$WORK/alive.raw" > "$WORK/alive.txt"
 ALIVE=$(wc -l < "$WORK/alive.txt")
-say "нод в пуле: $TOTAL, живых: $ALIVE"
+say "Нод в пуле: $TOTAL, живых: $ALIVE"
 : > "$WORK/res.txt"
 if [ "$ALIVE" -lt 1 ]; then
   update_node_stability
-  say "WARN: живых нод нет, fast.yaml не трогаю"; exit 0
+  say "WARN: Живых нод нет, fast.yaml не трогаю"; exit 0
 fi
 
 # 5. отбор по задержке и количеству до последовательных загрузок
 select_candidates "$WORK/alive.txt" "$WORK/candidates.txt"
 CANDIDATES=$(wc -l < "$WORK/candidates.txt")
-say "кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_TESTED=$MAX_TESTED"
+say "Кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_TESTED=$MAX_TESTED"
 if [ "$CANDIDATES" -lt 1 ]; then
   update_node_stability
-  say "WARN: нет кандидатов в пределах лимитов, сохраняю прежний fast.yaml"
+  say "WARN: Нет кандидатов в пределах лимитов, сохраняю прежний fast.yaml"
   exit 0
 fi
 CHANNEL=$(measure_direct)
 if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
   EFFECTIVE_MIN=$(compute_threshold "$CHANNEL")
-  say "канал: $(format_mbit "$CHANNEL") Мбит/с, порог: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
+  say "Канал: $(format_mbit "$CHANNEL") Мбит/с, порог: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
 else
   EFFECTIVE_MIN=$MIN_SPEED
-  say "WARN: прямой замер канала не удался, порог из настроек: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
+  say "WARN: Прямой замер канала не удался, порог из настроек: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
 fi
 PROGRESS_TOTAL=$CANDIDATES
 PROGRESS_STARTED_ISO=$(date '+%Y-%m-%d %H:%M:%S')
@@ -1377,7 +1377,7 @@ GOOD=0
 while read -r D IDX; do
   WG_NAME=$(awk -F '\t' -v k="$IDX" '$1 == k { print $2 }' "$WORK/wg_ok.txt")
   if [ -n "$WG_NAME" ]; then
-    wg_select "$WG_NAME" || { say "WARN: не удалось выбрать $WG_NAME в группе $WG_GROUP основного ядра"; continue; }
+    wg_select "$WG_NAME" || { say "WARN: Не удалось выбрать $WG_NAME в группе $WG_GROUP основного ядра"; continue; }
     SPEED_PORT=$WG_PORT
   else
     select_proxy "$IDX" || continue
@@ -1423,12 +1423,12 @@ select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_
 WIN=$(wc -l < "$WORK/win.txt")
 BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
-  say "WARN: порог $(format_mbit "$EFFECTIVE_MIN") Мбит/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
+  say "WARN: Порог $(format_mbit "$EFFECTIVE_MIN") Мбит/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
   best_line=$(sort -rn "$WORK/res.txt" | head -1)
   best_sp=${best_line%% *}
   best_idx=${best_line#* }
   best_nm=$(awk -v k="$best_idx" -F'\t' '$1 == k {print $2}' "$WORK/map.txt")
-  say "лучший результат: $(format_mbit "$best_sp") Мбит/с  $best_nm"
+  say "Лучший результат: $(format_mbit "$best_sp") Мбит/с  $best_nm"
   exit 0
 fi
 
@@ -1447,7 +1447,7 @@ done < "$WORK/win.txt"
   echo "rules:"; echo "  - MATCH,C"
 } > "$WORK/check.yaml"
 if ! "$BIN" -t -d "$WORK" -f "$WORK/check.yaml" > "$WORK/check.log" 2>&1; then
-  say "WARN: собранный fast.yaml не проходит валидацию, оставляю прежний"
+  say "WARN: Собранный fast.yaml не проходит валидацию, оставляю прежний"
   tail -3 "$WORK/check.log" >> "$RUN_LOG"; exit 0
 fi
 

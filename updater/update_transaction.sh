@@ -415,13 +415,13 @@ transaction_recover() (
       tx_restore "$UPDATE_STATE_DIR/rollback" || exit 2
       tx_clear_journal || exit 2 ;;
     COMMIT) tx_finish_commit || exit 2 ;;
-    *) say 'ERROR: неверный журнал транзакции' >&2; exit 2 ;;
+    *) say 'ERROR: Неверный журнал транзакции' >&2; exit 2 ;;
   esac
 )
 transaction_rollback() (
   safe_path "$UPDATE_STATE_DIR/transaction.txt"
-  [ ! -e "$UPDATE_STATE_DIR/transaction.txt" ] || { say 'ERROR: сначала выполните recover' >&2; exit 2; }
-  transaction_validate_bundle "$UPDATE_STATE_DIR/rollback" || { say 'ERROR: комплект отката повреждён' >&2; exit 2; }
+  [ ! -e "$UPDATE_STATE_DIR/transaction.txt" ] || { say 'ERROR: Сначала выполните recover' >&2; exit 2; }
+  transaction_validate_bundle "$UPDATE_STATE_DIR/rollback" || { say 'ERROR: Комплект отката повреждён' >&2; exit 2; }
   tx_journal ROLLBACK_SAVED || exit 2
   transaction_recover
 )
@@ -472,12 +472,12 @@ transaction_apply() (
       if [ "$tx_exit_stage" = COMMIT ]; then tx_commit_started=1; fi
       if transaction_recover; then
         case ${tx_commit_started:-0} in
-          1) say 'ERROR: публикация комплекта была прервана; проверенное обновление сохранено' >&2 ;;
-          *) say 'ERROR: обновление отменено, прежнее состояние восстановлено' >&2 ;;
+          1) say 'ERROR: Публикация комплекта была прервана; проверенное обновление сохранено' >&2 ;;
+          *) say 'ERROR: Обновление отменено, прежнее состояние восстановлено' >&2 ;;
         esac
         exit 1
       else
-        say 'ERROR: ошибка отката; журнал сохранён, выполните recover' >&2
+        say 'ERROR: Ошибка отката; журнал сохранён, выполните recover' >&2
         exit 2
       fi
     fi
@@ -493,15 +493,15 @@ transaction_apply() (
   tx_apply_cfg=$(config_path) || exit 1
   [ "$INSTALLED_MANIFEST_PATH" != "$tx_apply_cfg" ] || die 'config.yaml не является файлом состояния обновлятора'
   safe_path "$INSTALLED_MANIFEST_PATH.mst-update-new"
-  [ ! -e "$INSTALLED_MANIFEST_PATH.mst-update-new" ] || die 'временный путь манифеста занят'
+  [ ! -e "$INSTALLED_MANIFEST_PATH.mst-update-new" ] || die 'Временный путь манифеста занят'
   for tx_name in transaction.txt rollback.pending rollback rollback.previous; do safe_path "$UPDATE_STATE_DIR/$tx_name"; done
-  [ ! -e "$UPDATE_STATE_DIR/transaction.txt" ] || die 'сначала восстановите незавершённую транзакцию'
-  [ ! -e "$UPDATE_STATE_DIR/rollback.pending" ] && [ ! -e "$UPDATE_STATE_DIR/rollback.previous" ] || die 'оставшийся комплект требует проверки до обновления'
+  [ ! -e "$UPDATE_STATE_DIR/transaction.txt" ] || die 'Сначала восстановите незавершённую транзакцию'
+  [ ! -e "$UPDATE_STATE_DIR/rollback.pending" ] && [ ! -e "$UPDATE_STATE_DIR/rollback.previous" ] || die 'Оставшийся комплект требует проверки до обновления'
   tx_expected=$plan_id
   build_snapshot
   if [ "${migration_required:-0}" = 1 ]; then check_config_source_snapshot; bind_config_identity; fi
-  [ "$plan_id" = "$tx_expected" ] || die 'локальное состояние изменилось; запустите обновление заново'
-  tx_build_installed || die 'несовместимая смесь компонентов'
+  [ "$plan_id" = "$tx_expected" ] || die 'Локальное состояние изменилось; запустите обновление заново'
+  tx_build_installed || die 'Несовместимая смесь компонентов'
   while IFS='|' read -r tx_collision_kind tx_collision_cid tx_collision_src tx_collision_dest tx_collision_rest; do
     case $tx_collision_kind in
       FILE) tx_collision_actual=$(target_file "$tx_collision_dest") ;;
@@ -509,107 +509,107 @@ transaction_apply() (
       *) continue ;;
     esac
     case $INSTALLED_MANIFEST_PATH in
-      "$tx_collision_actual"|"$tx_collision_actual.mst-update-new") die 'путь установленного манифеста совпадает с назначением плана' ;;
+      "$tx_collision_actual"|"$tx_collision_actual.mst-update-new") die 'Путь установленного манифеста совпадает с назначением плана' ;;
     esac
-    [ "$INSTALLED_MANIFEST_PATH.mst-update-new" != "$tx_collision_actual" ] || die 'временный путь манифеста совпадает с назначением плана'
+    [ "$INSTALLED_MANIFEST_PATH.mst-update-new" != "$tx_collision_actual" ] || die 'Временный путь манифеста совпадает с назначением плана'
   done < "$WORK/records"
-  mkdir "$WORK/tx-bundle" "$WORK/tx-bundle/backups" "$WORK/tx-bundle/engine" "$WORK/tx-files" || die 'не удалось подготовить транзакцию в RAM'
-  tx_context "${migration_required:-0}" > "$WORK/tx-bundle/context.txt" || die 'не удалось определить файл конфига'
+  mkdir "$WORK/tx-bundle" "$WORK/tx-bundle/backups" "$WORK/tx-bundle/engine" "$WORK/tx-files" || die 'Не удалось подготовить транзакцию в RAM'
+  tx_context "${migration_required:-0}" > "$WORK/tx-bundle/context.txt" || die 'Не удалось определить файл конфига'
   : > "$WORK/tx-bundle/list.txt"
   : > "$WORK/tx-bundle/actions.txt"
   tx_num=0 tx_file=0 tx_changed=0 tx_web=0 tx_space=32768
   while IFS='|' read -r tx_kind tx_cid tx_src tx_dest tx_bytes tx_sha tx_mode tx_check; do
     case $tx_kind in
       FILE)
-        tx_logical_path "$tx_dest" || die 'запрещённое назначение'
+        tx_logical_path "$tx_dest" || die 'Запрещённое назначение'
         tx_file=$((tx_file + 1))
         tx_actual=$(target_file "$tx_dest")
         safe_path "$tx_actual.mst-update-new"
-        [ ! -e "$tx_actual.mst-update-new" ] || die 'временный путь назначения занят'
-        cp "$saved/files/$tx_file" "$WORK/tx-files/$tx_file" || die 'не удалось подготовить новый файл'
-        chmod "$tx_mode" "$WORK/tx-files/$tx_file" || die 'не удалось подготовить режим'
-        tx_verify_file "$WORK/tx-files/$tx_file" "$tx_sha" "$tx_bytes" "$tx_mode" || die 'повреждён подготовленный файл'
+        [ ! -e "$tx_actual.mst-update-new" ] || die 'Временный путь назначения занят'
+        cp "$saved/files/$tx_file" "$WORK/tx-files/$tx_file" || die 'Не удалось подготовить новый файл'
+        chmod "$tx_mode" "$WORK/tx-files/$tx_file" || die 'Не удалось подготовить режим'
+        tx_verify_file "$WORK/tx-files/$tx_file" "$tx_sha" "$tx_bytes" "$tx_mode" || die 'Повреждён подготовленный файл'
         check_file_syntax "$WORK/tx-files/$tx_file" "$tx_check"
         if ! tx_verify_file "$tx_actual" "$tx_sha" "$tx_bytes" "$tx_mode"; then
           tx_changed=1
           case $tx_dest in */stats_*|*/render_stats.awk|/opt/etc/init.d/S80speedtest-stats) tx_web=1 ;; esac
         fi
-        tx_backup_record FILE "$tx_dest" "$tx_actual" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить старый файл'
+        tx_backup_record FILE "$tx_dest" "$tx_actual" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить старый файл'
         tx_space=$((tx_space + tx_bytes)) ;;
       REMOVE)
         tx_dest=$tx_src
-        [ -f "$INSTALLED_MANIFEST_PATH" ] && awk -F'|' -v p="$tx_dest" '$1=="FILE"&&$4==p{known=1}END{exit !known}' "$INSTALLED_MANIFEST_PATH" || die 'нельзя удалять неизвестный файл'
-        tx_logical_path "$tx_dest" || die 'запрещённое удаление'
+        [ -f "$INSTALLED_MANIFEST_PATH" ] && awk -F'|' -v p="$tx_dest" '$1=="FILE"&&$4==p{known=1}END{exit !known}' "$INSTALLED_MANIFEST_PATH" || die 'Нельзя удалять неизвестный файл'
+        tx_logical_path "$tx_dest" || die 'Запрещённое удаление'
         tx_actual=$(target_file "$tx_dest")
         safe_path "$tx_actual.mst-update-new"
-        [ ! -e "$tx_actual.mst-update-new" ] || die 'временный путь удаления занят'
+        [ ! -e "$tx_actual.mst-update-new" ] || die 'Временный путь удаления занят'
         if [ -e "$tx_actual" ]; then tx_changed=1; case $tx_dest in */stats_*|*/render_stats.awk|/opt/etc/init.d/S80speedtest-stats) tx_web=1 ;; esac; fi
-        tx_backup_record FILE "$tx_dest" "$tx_actual" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить удаляемый файл' ;;
-      ACTION) case $tx_cid in restart-web) ;; migrate-config|restart-mihomo) [ "${migration_required:-0}" = 1 ] || die 'действие требует миграции' ;; *) die 'неподдерживаемое действие' ;; esac ;;
+        tx_backup_record FILE "$tx_dest" "$tx_actual" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить удаляемый файл' ;;
+      ACTION) case $tx_cid in restart-web) ;; migrate-config|restart-mihomo) [ "${migration_required:-0}" = 1 ] || die 'Действие требует миграции' ;; *) die 'Неподдерживаемое действие' ;; esac ;;
     esac
   done < "$WORK/records"
   if [ "${migration_required:-0}" = 1 ]; then
     tx_config=$(config_path) || exit 1
-    [ -f "$tx_config" ] && [ ! -L "$tx_config" ] || die 'исходный конфиг отсутствует'
+    [ -f "$tx_config" ] && [ ! -L "$tx_config" ] || die 'Исходный конфиг отсутствует'
     tx_config_mode=$(mode_of "$tx_config")
-    tx_timeout_valid "${UPDATE_ACTION_TIMEOUT:-15}" && tx_timeout_valid "${UPDATE_HEALTH_TIMEOUT:-15}" || die 'неверный таймаут завершающих действий'
+    tx_timeout_valid "${UPDATE_ACTION_TIMEOUT:-15}" && tx_timeout_valid "${UPDATE_HEALTH_TIMEOUT:-15}" || die 'Неверный таймаут завершающих действий'
     tx_xkeen=${UPDATE_XKEEN_BIN:-$(target_file /opt/sbin/xkeen)}
     safe_path "$tx_xkeen"
     [ -f "$tx_xkeen" ] && [ -x "$tx_xkeen" ] || die 'XKeen недоступен для перезапуска'
     for tx_reserved in "$tx_config" "$UPDATE_STATE_DIR/config-schema-version" "$UPDATE_STATE_DIR/config-sha256"; do
       safe_path "$tx_reserved.mst-update-new"
-      [ ! -e "$tx_reserved.mst-update-new" ] || die 'временный путь конфига занят'
+      [ ! -e "$tx_reserved.mst-update-new" ] || die 'Временный путь конфига занят'
     done
     if [ -z "${UPDATE_HEALTH_CMD:-}" ]; then
-      tx_health_config "$WORK/config-source.yaml" && tx_health_config "$WORK/candidate.yaml" || die 'неподдерживаемые параметры проверки здоровья'
+      tx_health_config "$WORK/config-source.yaml" && tx_health_config "$WORK/candidate.yaml" || die 'Неподдерживаемые параметры проверки здоровья'
       rm -f "$WORK/tx-curl-config"
     fi
-    tx_backup_record CONFIG active-config "$tx_config" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить конфиг'
-    tx_backup_record SCHEMA config-schema-version "$UPDATE_STATE_DIR/config-schema-version" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить схему'
-    tx_backup_record HASH config-sha256 "$UPDATE_STATE_DIR/config-sha256" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить сумму'
+    tx_backup_record CONFIG active-config "$tx_config" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить конфиг'
+    tx_backup_record SCHEMA config-schema-version "$UPDATE_STATE_DIR/config-schema-version" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить схему'
+    tx_backup_record HASH config-sha256 "$UPDATE_STATE_DIR/config-sha256" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить сумму'
     printf '%s\n' "$new_schema" > "$WORK/tx-schema"
     sha256_of "$WORK/candidate.yaml" > "$WORK/tx-hash"
     tx_space=$((tx_space + $(wc -c < "$WORK/candidate.yaml") + 128))
     printf 'restart-mihomo\n' > "$WORK/tx-bundle/actions.txt"
   fi
-  tx_backup_record STATE installed-manifest "$INSTALLED_MANIFEST_PATH" >> "$WORK/tx-bundle/list.txt" || die 'не удалось сохранить установленный манифест'
+  tx_backup_record STATE installed-manifest "$INSTALLED_MANIFEST_PATH" >> "$WORK/tx-bundle/list.txt" || die 'Не удалось сохранить установленный манифест'
   if [ "$tx_web" = 1 ] && grep -q '^ACTION|restart-web$' "$WORK/records"; then
     # Первичная установка службы требует отдельного протокола stop при откате;
     # эта порция обновляет уже установленную службу и не запускает новую.
     tx_old_init=$(target_file /opt/etc/init.d/S80speedtest-stats)
     safe_path "$tx_old_init"
-    [ -f "$tx_old_init" ] || die 'первичная установка веб-службы не поддерживается управляемым обновлением'
+    [ -f "$tx_old_init" ] || die 'Первичная установка веб-службы не поддерживается управляемым обновлением'
     printf 'restart-web\n' >> "$WORK/tx-bundle/actions.txt"
   fi
-  cp "$MANIFEST_TMP" "$WORK/tx-bundle/engine-manifest.txt" || die 'не удалось сохранить манифест движка'
+  cp "$MANIFEST_TMP" "$WORK/tx-bundle/engine-manifest.txt" || die 'Не удалось сохранить манифест движка'
   for tx_engine in update.sh update_plan.awk update_prepare.sh update_transaction.sh; do
-    cp -p "$DIR/$tx_engine" "$WORK/tx-bundle/engine/$tx_engine" || die 'не удалось сохранить движок'
+    cp -p "$DIR/$tx_engine" "$WORK/tx-bundle/engine/$tx_engine" || die 'Не удалось сохранить движок'
   done
   { sha256_of "$WORK/tx-bundle/list.txt"; sha256_of "$WORK/tx-bundle/context.txt"; sha256_of "$WORK/tx-bundle/engine-manifest.txt"; sha256_of "$WORK/tx-bundle/actions.txt"; } > "$WORK/tx-integrity-input"
   sha256_of "$WORK/tx-integrity-input" > "$WORK/tx-bundle/integrity.txt"
-  transaction_validate_bundle "$WORK/tx-bundle" || die 'невалидный комплект восстановления'
+  transaction_validate_bundle "$WORK/tx-bundle" || die 'Невалидный комплект восстановления'
   tx_backup_bytes=$(awk -F'|' '$3=="present"{s+=$5}END{printf "%.0f",s}' "$WORK/tx-bundle/list.txt")
   check_space "$(target_file /opt)" "$((tx_space + tx_backup_bytes + 4194304))"
   build_snapshot
   if [ "${migration_required:-0}" = 1 ]; then check_config_source_snapshot; bind_config_identity; fi
-  [ "$plan_id" = "$tx_expected" ] || die 'локальное состояние изменилось при подготовке транзакции'
-  mkdir -p "$UPDATE_STATE_DIR" || die 'не удалось создать каталог состояния'
-  mkdir "$UPDATE_STATE_DIR/rollback.pending" || die 'не удалось создать комплект отката'
+  [ "$plan_id" = "$tx_expected" ] || die 'Локальное состояние изменилось при подготовке транзакции'
+  mkdir -p "$UPDATE_STATE_DIR" || die 'Не удалось создать каталог состояния'
+  mkdir "$UPDATE_STATE_DIR/rollback.pending" || die 'Не удалось создать комплект отката'
   tx_pending_owned=1
   # Метаданные компактны; backup сохраняется hardlink без chmod общего inode.
-  cp -pR "$WORK/tx-bundle/engine" "$UPDATE_STATE_DIR/rollback.pending/engine" || die 'не удалось сохранить движок'
+  cp -pR "$WORK/tx-bundle/engine" "$UPDATE_STATE_DIR/rollback.pending/engine" || die 'Не удалось сохранить движок'
   for tx_meta in list.txt context.txt actions.txt engine-manifest.txt integrity.txt; do
-    cp "$WORK/tx-bundle/$tx_meta" "$UPDATE_STATE_DIR/rollback.pending/$tx_meta" || die 'не удалось сохранить метаданные отката'
+    cp "$WORK/tx-bundle/$tx_meta" "$UPDATE_STATE_DIR/rollback.pending/$tx_meta" || die 'Не удалось сохранить метаданные отката'
   done
-  mkdir "$UPDATE_STATE_DIR/rollback.pending/backups" || die 'не удалось создать backups'
+  mkdir "$UPDATE_STATE_DIR/rollback.pending/backups" || die 'Не удалось создать backups'
   while IFS='|' read -r tx_kind tx_path tx_presence tx_sha tx_bytes tx_mode tx_num; do
     [ "$tx_presence" = present ] || continue
-    tx_actual=$(tx_record_destination "$tx_kind" "$tx_path") || die 'неверное назначение backup'
+    tx_actual=$(tx_record_destination "$tx_kind" "$tx_path") || die 'Неверное назначение backup'
     ln "$tx_actual" "$UPDATE_STATE_DIR/rollback.pending/backups/$tx_num" 2>/dev/null ||
-      cp -p "$WORK/tx-bundle/backups/$tx_num" "$UPDATE_STATE_DIR/rollback.pending/backups/$tx_num" || die 'не удалось сохранить backup'
+      cp -p "$WORK/tx-bundle/backups/$tx_num" "$UPDATE_STATE_DIR/rollback.pending/backups/$tx_num" || die 'Не удалось сохранить backup'
   done < "$WORK/tx-bundle/list.txt"
-  transaction_validate_bundle "$UPDATE_STATE_DIR/rollback.pending" || die 'не удалось проверить постоянный комплект'
-  tx_journal APPLY_PENDING || die 'не удалось записать журнал'
+  transaction_validate_bundle "$UPDATE_STATE_DIR/rollback.pending" || die 'Не удалось проверить постоянный комплект'
+  tx_journal APPLY_PENDING || die 'Не удалось записать журнал'
   tx_active=1 tx_pending_owned=0
   tx_file=0
   while IFS='|' read -r tx_kind tx_cid tx_src tx_dest tx_bytes tx_sha tx_mode tx_check; do
@@ -622,24 +622,24 @@ transaction_apply() (
         # файлы, которые реально записываются (уже совпадающие пропущены
         # continue'ом выше), а не общий чекпоинт на всю транзакцию.
         echo "Запись файла: $tx_dest" >&2
-        tx_publish "$WORK/tx-files/$tx_file" "$tx_actual" "$tx_sha" "$tx_bytes" "$tx_mode" || die 'ошибка публикации файла' ;;
+        tx_publish "$WORK/tx-files/$tx_file" "$tx_actual" "$tx_sha" "$tx_bytes" "$tx_mode" || die 'Ошибка публикации файла' ;;
       REMOVE)
         tx_actual=$(target_file "$tx_src"); safe_path "$tx_actual"
         echo "Удаление файла: $tx_src" >&2
-        rm -f "$tx_actual" || die 'ошибка удаления файла' ;;
+        rm -f "$tx_actual" || die 'Ошибка удаления файла' ;;
     esac
   done < "$WORK/records"
-  tx_publish "$WORK/tx-installed.txt" "$INSTALLED_MANIFEST_PATH" "$(sha256_of "$WORK/tx-installed.txt")" "$(wc -c < "$WORK/tx-installed.txt" | tr -d ' ')" 0600 || die 'ошибка публикации установленного манифеста'
+  tx_publish "$WORK/tx-installed.txt" "$INSTALLED_MANIFEST_PATH" "$(sha256_of "$WORK/tx-installed.txt")" "$(wc -c < "$WORK/tx-installed.txt" | tr -d ' ')" 0600 || die 'Ошибка публикации установленного манифеста'
   if [ "${migration_required:-0}" = 1 ]; then
-    tx_publish "$WORK/candidate.yaml" "$tx_config" "$(sha256_of "$WORK/candidate.yaml")" "$(wc -c < "$WORK/candidate.yaml" | tr -d ' ')" "$tx_config_mode" || die 'ошибка публикации конфига'
+    tx_publish "$WORK/candidate.yaml" "$tx_config" "$(sha256_of "$WORK/candidate.yaml")" "$(wc -c < "$WORK/candidate.yaml" | tr -d ' ')" "$tx_config_mode" || die 'Ошибка публикации конфига'
     for tx_meta in schema hash; do
       case $tx_meta in schema) tx_dest=$UPDATE_STATE_DIR/config-schema-version ;; hash) tx_dest=$UPDATE_STATE_DIR/config-sha256 ;; esac
-      tx_publish "$WORK/tx-$tx_meta" "$tx_dest" "$(sha256_of "$WORK/tx-$tx_meta")" "$(wc -c < "$WORK/tx-$tx_meta" | tr -d ' ')" 0600 || die 'ошибка публикации метаданных конфига'
+      tx_publish "$WORK/tx-$tx_meta" "$tx_dest" "$(sha256_of "$WORK/tx-$tx_meta")" "$(wc -c < "$WORK/tx-$tx_meta" | tr -d ' ')" 0600 || die 'Ошибка публикации метаданных конфига'
     done
   fi
-  tx_actions "$UPDATE_STATE_DIR/rollback.pending" || die 'ошибка перезапуска или проверки служб'
-  tx_journal COMMIT || die 'ошибка фиксации транзакции'
+  tx_actions "$UPDATE_STATE_DIR/rollback.pending" || die 'Ошибка перезапуска или проверки служб'
+  tx_journal COMMIT || die 'Ошибка фиксации транзакции'
   tx_commit_started=1
-  tx_finish_commit || die 'ошибка публикации комплекта отката'
+  tx_finish_commit || die 'Ошибка публикации комплекта отката'
   tx_active=0
 )

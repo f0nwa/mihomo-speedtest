@@ -121,7 +121,7 @@ in_pp && cur_name != "" {
 END {
   flush_provider()
   if (nsrc == 0) {
-    print "providers.awk: не найдено ни одного проверенного proxy-provider с url" > "/dev/stderr"
+    print "providers.awk: Не найдено ни одного проверенного proxy-provider с url" > "/dev/stderr"
     exit 2
   }
   out = ""
@@ -129,7 +129,7 @@ END {
   for (i = 0; i < nsrc; i++) out = (out == "") ? sources[i] : out " " sources[i]
   printf "SOURCES='%s'\n", out
   if (ntype > 1) {
-    printf "providers.awk: у провайдеров найдено %d разных значений exclude-type, используется первое ('%s'), остальные проигнорированы: ", ntype, type_list[0] > "/dev/stderr"
+    printf "providers.awk: У провайдеров найдено %d разных значений exclude-type, используется первое ('%s'), остальные проигнорированы: ", ntype, type_list[0] > "/dev/stderr"
     for (i = 0; i < ntype; i++) {
       if (i > 0) printf ", " > "/dev/stderr"
       printf "'%s'", type_list[i] > "/dev/stderr"
@@ -145,7 +145,7 @@ function flush_provider() {
   if (cur_name == "") return
   if (!is_file && has_url) {
     if (path == "") {
-      printf "providers.awk: провайдер %s без path, пропущен\n", cur_name > "/dev/stderr"
+      printf "providers.awk: Провайдер %s без path, пропущен\n", cur_name > "/dev/stderr"
     } else {
       resolved = path
       if (path ~ /^\.\//) resolved = CONFDIR "/" substr(path, 3)

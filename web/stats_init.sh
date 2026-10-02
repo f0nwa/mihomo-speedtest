@@ -64,7 +64,7 @@ do_start() {
     return 0
   fi
   if pid_alive "$SUPERVISOR_PIDFILE"; then
-    echo "служба уже запущена (supervisor pid $(cat "$SUPERVISOR_PIDFILE"))"
+    echo "Служба уже запущена (supervisor pid $(cat "$SUPERVISOR_PIDFILE"))"
     return 0
   fi
   mkdir -p "$STATS_SERVICE_RUNTIME_DIR" 2>/dev/null
@@ -72,10 +72,10 @@ do_start() {
   child=$!
   sleep 1
   if kill -0 "$child" 2>/dev/null; then
-    echo "OK: служба статистики запущена (pid $child)"
+    echo "OK: Служба статистики запущена (pid $child)"
     return 0
   fi
-  echo "служба статистики завершилась сразу после запуска - подробности в $STATS_SERVICE_RUNTIME_DIR/service.log"
+  echo "Служба статистики завершилась сразу после запуска - подробности в $STATS_SERVICE_RUNTIME_DIR/service.log"
   return 1
 }
 

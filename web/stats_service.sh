@@ -83,7 +83,7 @@ prepare() {
   export DIR MIHOMO_DIR ENV
   cleanup_old_zash_stats
   if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
-    say "WARN: не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
+    say "WARN: Не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
     return 1
   fi
   write_stats_cgi
@@ -141,7 +141,7 @@ start_backend() {
     return 1
   fi
   try_backend "$STATS_HTTPD_PY_CMD $STATS_HTTPD_PY" && return 0
-  say "WARN: веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
+  say "WARN: Веб-сервис статистики не запустился на $STATS_HTTP_BIND:$STATS_HTTP_PORT - подробности в $STATS_HTTP_LOG"
   return 1
 }
 
@@ -169,7 +169,7 @@ on_term() {
     wait "$BACKEND_PID" 2>/dev/null
   fi
   rm -f "$SUPERVISOR_PIDFILE" "$STATS_HTTP_PIDFILE" "$STATS_HTTP_PIDFILE.addr"
-  say "служба статистики остановлена (supervisor pid $$)"
+  say "Служба статистики остановлена (supervisor pid $$)"
   exit 0
 }
 
@@ -180,7 +180,7 @@ supervise() {
   fi
 
   mkdir -p "$STATS_SERVICE_RUNTIME_DIR" 2>/dev/null || {
-    echo "не удалось создать $STATS_SERVICE_RUNTIME_DIR" >&2
+    echo "Не удалось создать $STATS_SERVICE_RUNTIME_DIR" >&2
     return 1
   }
 
@@ -191,12 +191,12 @@ supervise() {
 
   existing=$(pid_from_file "$SUPERVISOR_PIDFILE")
   if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then
-    say "служба статистики уже запущена (supervisor pid $existing), повторный запуск не выполняется"
+    say "Служба статистики уже запущена (supervisor pid $existing), повторный запуск не выполняется"
     return 0
   fi
 
   if ! echo "$$" > "$SUPERVISOR_PIDFILE"; then
-    echo "не удалось записать $SUPERVISOR_PIDFILE" >&2
+    echo "Не удалось записать $SUPERVISOR_PIDFILE" >&2
     return 1
   fi
 
@@ -212,7 +212,7 @@ supervise() {
     if [ -z "$BACKEND_PID" ]; then
       attempt=$((attempt + 1))
       delay=$(backoff_delay "$attempt")
-      say "не удалось поднять веб-сервис статистики, повтор через ${delay}s (попытка $attempt)"
+      say "Не удалось поднять веб-сервис статистики, повтор через ${delay}s (попытка $attempt)"
       sleep "$delay"
       [ "$STOPPING" = 1 ] && break
       continue
@@ -231,7 +231,7 @@ supervise() {
     fi
     attempt=$((attempt + 1))
     delay=$(backoff_delay "$attempt")
-    say "веб-сервис статистики неожиданно завершился (код $rc, прожил ${ran_for}s), повтор через ${delay}s (попытка $attempt)"
+    say "Веб-сервис статистики неожиданно завершился (код $rc, прожил ${ran_for}s), повтор через ${delay}s (попытка $attempt)"
     sleep "$delay"
     [ "$STOPPING" = 1 ] && break
   done
@@ -244,13 +244,13 @@ status() {
 
   if [ -n "$sup_pid" ] && kill -0 "$sup_pid" 2>/dev/null; then
     if [ -n "$http_pid" ] && kill -0 "$http_pid" 2>/dev/null; then
-      echo "supervisor: работает (pid $sup_pid); httpd: работает (pid $http_pid)"
+      echo "supervisor: Работает (pid $sup_pid); httpd: работает (pid $http_pid)"
     else
-      echo "supervisor: работает (pid $sup_pid); httpd: не поднят (backoff или STATS_HTTP_ENABLE=0)"
+      echo "supervisor: Работает (pid $sup_pid); httpd: не поднят (backoff или STATS_HTTP_ENABLE=0)"
     fi
     return 0
   fi
-  echo "supervisor: не работает"
+  echo "supervisor: Не работает"
   return 1
 }
 
