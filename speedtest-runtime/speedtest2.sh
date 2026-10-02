@@ -91,34 +91,12 @@ RENDER_PROGRESS=${RENDER_PROGRESS:-$DIR/render_progress.awk}
 STATS_HTTP_ENABLE=${STATS_HTTP_ENABLE:-1}          # 1 = поднимать отдельный веб-сервис со статистикой, 0 = только писать файл
 STATS_HTTP_BIND=${STATS_HTTP_BIND:-0.0.0.0}        # адрес привязки (0.0.0.0 = вся локальная сеть, как и 9090)
 STATS_HTTP_PORT=${STATS_HTTP_PORT:-8899}           # порт веб-сервиса статистики; должен быть свободен (не 5000/5001/9090)
-STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # каталог, который раздаётся; создаётся сам, с zashboard не связан
+STATS_HTTP_DIR=${STATS_HTTP_DIR:-$DIR/stats_www}   # данные веб-интерфейса (stats.json, progress.json); создаётся сам
 STATS_HTTP_PIDFILE=${STATS_HTTP_PIDFILE:-$DIR/stats_httpd.pid}
 STATS_HTTP_LOG=${STATS_HTTP_LOG:-$DIR/stats_httpd.log}
 STATS_HTTPD_PY=${STATS_HTTPD_PY:-$DIR/stats_httpd.py}   # обязательный сервер на Python 3: чистые URL, API и общая авторизация
 STATS_HTTPD_PY_CMD=${STATS_HTTPD_PY_CMD:-python3}       # интерпретатор для основного сервера
 STATS_NODE_CAP=${STATS_NODE_CAP:-8}                 # сколько нод графика по нодам показывать сразу, 1..50 (см. render_stats.awk)
-STATS_CGI_SOURCE=${STATS_CGI_SOURCE:-$DIR/stats_cgi.sh}            # исходник CGI-скрипта формы настройки, ставится install.sh
-STATS_CGI_SCRIPT=${STATS_CGI_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/config} # его же копия внутри раздаваемого каталога, пишется сама
-STATS_RUN_SOURCE=${STATS_RUN_SOURCE:-$DIR/stats_run.sh}              # исходник CGI-скрипта кнопки force-прогона, ставится install.sh
-STATS_RUN_SCRIPT=${STATS_RUN_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/run}    # его же копия внутри раздаваемого каталога, пишется сама
-STATS_UPDATE_SOURCE=${STATS_UPDATE_SOURCE:-$DIR/stats_update.sh}              # исходник CGI-обёртки над update.sh (раздел "Обновления"), ставится install.sh
-STATS_UPDATE_SCRIPT=${STATS_UPDATE_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/update}    # его же копия внутри раздаваемого каталога, пишется сама
-STATS_SYSTEM_SOURCE=${STATS_SYSTEM_SOURCE:-$DIR/stats_system.sh}             # исходник CGI-обёртки для футера (версия/аптайм/CPU/MEM/mihomo), ставится install.sh
-STATS_SYSTEM_SCRIPT=${STATS_SYSTEM_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/system}   # его же копия внутри раздаваемого каталога, пишется сама
-STATS_CONFIG_SOURCE=${STATS_CONFIG_SOURCE:-$DIR/stats_config.sh}             # исходник CGI-обёртки вкладки "Конфиг" (редактор config.yaml), ставится install.sh
-STATS_CONFIG_SCRIPT=${STATS_CONFIG_SCRIPT:-$STATS_HTTP_DIR/cgi-bin/configedit} # его же копия внутри раздаваемого каталога, пишется сама
-STATS_INDEX_SOURCE=${STATS_INDEX_SOURCE:-$DIR/stats_index.html}     # исходник SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md), ставится install.sh
-STATS_INDEX_HTML=${STATS_INDEX_HTML:-$STATS_HTTP_DIR/index.html}    # его же копия внутри раздаваемого каталога, пишется сама
-STATS_STYLE_SOURCE=${STATS_STYLE_SOURCE:-$DIR/stats_style.css}      # исходник общего CSS для SPA-shell, ставится install.sh
-STATS_STYLE_CSS=${STATS_STYLE_CSS:-$STATS_HTTP_DIR/style.css}       # его же копия внутри раздаваемого каталога, пишется сама
-STATS_APP_SOURCE=${STATS_APP_SOURCE:-$DIR/stats_app.js}             # исходник клиентского роутера/логики SPA-shell, ставится install.sh
-STATS_APP_JS=${STATS_APP_JS:-$STATS_HTTP_DIR/app.js}                # его же копия внутри раздаваемого каталога, пишется сама
-STATS_CHARTJS_SOURCE=${STATS_CHARTJS_SOURCE:-$DIR/stats_chart.js}   # вендоренная UMD-сборка Chart.js для графика по нодам, ставится install.sh
-STATS_CHARTJS_JS=${STATS_CHARTJS_JS:-$STATS_HTTP_DIR/chart.js}      # его же копия внутри раздаваемого каталога, пишется сама
-STATS_CM_JS_SOURCE=${STATS_CM_JS_SOURCE:-$DIR/stats_codemirror.js}     # вендоренная сборка CodeMirror 5 для вкладки "Конфиг", ставится install.sh
-STATS_CM_JS=${STATS_CM_JS:-$STATS_HTTP_DIR/codemirror.js}              # его же копия внутри раздаваемого каталога, пишется сама
-STATS_CM_CSS_SOURCE=${STATS_CM_CSS_SOURCE:-$DIR/stats_codemirror.css}  # стили CodeMirror 5, ставится install.sh
-STATS_CM_CSS=${STATS_CM_CSS:-$STATS_HTTP_DIR/codemirror.css}           # его же копия внутри раздаваемого каталога, пишется сама
 STATS_SERVICE=${STATS_SERVICE:-$DIR/stats_service.sh}               # порция 3: независимый supervisor (см. design), ставится install.sh
 STATS_INIT_SCRIPT=${STATS_INIT_SCRIPT:-/opt/etc/init.d/S80speedtest-stats}  # порция 3: Entware init-скрипт независимой службы, ставится install.sh
 
@@ -386,119 +364,6 @@ trim_nodes_since() {
   awk -F'\t' -v c="$cutoff" '$1 + 0 >= c + 0' "$src" > "$dst"
 }
 
-write_stats_cgi() {
-  # Копирует CGI-скрипт формы настройки статистики ($STATS_CGI_SOURCE,
-  # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
-  # ($STATS_CGI_SCRIPT), откуда его запускает busybox httpd. Сам скрипт
-  # подключает speedtest2.sh через экспортированные DIR/ENV (см.
-  # prepare() в stats_service.sh ниже и комментарий в начале stats_cgi.sh) - здесь
-  # только физическое размещение файла внутри cgi-bin, логика не меняется.
-  # Каталог $STATS_CGI_SCRIPT уже создан вызывающим prepare() в stats_service.sh
-  # (mkdir -p "$STATS_HTTP_DIR/cgi-bin"), отдельная проверка не нужна.
-  if [ ! -f "$STATS_CGI_SOURCE" ]; then
-    say "WARN: $STATS_CGI_SOURCE не найден, форма настройки статистики недоступна (переустановите install.sh)"
-    return 0
-  fi
-  if ! publish_file "$STATS_CGI_SOURCE" "$STATS_CGI_SCRIPT"; then
-    say "WARN: Не удалось записать $STATS_CGI_SCRIPT, форма настройки не обновлена"
-    return 0
-  fi
-  chmod +x "$STATS_CGI_SCRIPT" 2>/dev/null || true
-}
-
-write_stats_run() {
-  # Копирует CGI-скрипт кнопки "Запустить прогон сейчас" ($STATS_RUN_SOURCE,
-  # ставится install.sh рядом со speedtest2.sh) в раздаваемый каталог
-  # ($STATS_RUN_SCRIPT) - см. комментарий в начале stats_run.sh. Как и
-  # write_stats_cgi(), каталог $STATS_HTTP_DIR/cgi-bin уже создан
-  # вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
-  if [ ! -f "$STATS_RUN_SOURCE" ]; then
-    say "WARN: $STATS_RUN_SOURCE не найден, кнопка force-прогона недоступна (переустановите install.sh)"
-    return 0
-  fi
-  if ! publish_file "$STATS_RUN_SOURCE" "$STATS_RUN_SCRIPT"; then
-    say "WARN: Не удалось записать $STATS_RUN_SCRIPT, кнопка force-прогона не обновлена"
-    return 0
-  fi
-  chmod +x "$STATS_RUN_SCRIPT" 2>/dev/null || true
-}
-
-write_stats_update() {
-  # Копирует CGI-обёртку раздела "Обновления" ($STATS_UPDATE_SOURCE, ставится
-  # install.sh рядом со speedtest2.sh) в раздаваемый каталог ($STATS_UPDATE_SCRIPT) -
-  # тот же приём, что write_stats_run(). Каталог $STATS_HTTP_DIR/cgi-bin уже
-  # создан вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
-  if [ ! -f "$STATS_UPDATE_SOURCE" ]; then
-    say "WARN: $STATS_UPDATE_SOURCE не найден, раздел обновлений недоступен (переустановите install.sh)"
-    return 0
-  fi
-  if ! publish_file "$STATS_UPDATE_SOURCE" "$STATS_UPDATE_SCRIPT"; then
-    say "WARN: Не удалось записать $STATS_UPDATE_SCRIPT, раздел обновлений не обновлён"
-    return 0
-  fi
-  chmod +x "$STATS_UPDATE_SCRIPT" 2>/dev/null || true
-}
-
-write_stats_system() {
-  # Копирует CGI-обёртку футера ($STATS_SYSTEM_SOURCE, ставится install.sh
-  # рядом со speedtest2.sh) в раздаваемый каталог ($STATS_SYSTEM_SCRIPT) -
-  # тот же приём, что write_stats_update(). Каталог $STATS_HTTP_DIR/cgi-bin
-  # уже создан вызывающим prepare() в stats_service.sh, отдельная проверка не нужна.
-  if [ ! -f "$STATS_SYSTEM_SOURCE" ]; then
-    say "WARN: $STATS_SYSTEM_SOURCE не найден, футер веб-интерфейса недоступен (переустановите install.sh)"
-    return 0
-  fi
-  if ! publish_file "$STATS_SYSTEM_SOURCE" "$STATS_SYSTEM_SCRIPT"; then
-    say "WARN: Не удалось записать $STATS_SYSTEM_SCRIPT, футер веб-интерфейса не обновлён"
-    return 0
-  fi
-  chmod +x "$STATS_SYSTEM_SCRIPT" 2>/dev/null || true
-}
-
-write_stats_config() {
-  # Копирует CGI-обёртку вкладки "Конфиг" ($STATS_CONFIG_SOURCE, ставится
-  # install.sh рядом со speedtest2.sh) в раздаваемый каталог
-  # ($STATS_CONFIG_SCRIPT) - тот же приём, что write_stats_system().
-  if [ ! -f "$STATS_CONFIG_SOURCE" ]; then
-    say "WARN: $STATS_CONFIG_SOURCE не найден, редактор конфига недоступен (переустановите install.sh)"
-    return 0
-  fi
-  if ! publish_file "$STATS_CONFIG_SOURCE" "$STATS_CONFIG_SCRIPT"; then
-    say "WARN: Не удалось записать $STATS_CONFIG_SCRIPT, редактор конфига не обновлён"
-    return 0
-  fi
-  chmod +x "$STATS_CONFIG_SCRIPT" 2>/dev/null || true
-}
-
-write_stats_static() {
-  # Копирует статические файлы SPA-shell ($STATS_INDEX_SOURCE/$STATS_STYLE_SOURCE/
-  # $STATS_APP_SOURCE/$STATS_CHARTJS_SOURCE, ставятся install.sh рядом со
-  # speedtest2.sh) в раздаваемый каталог - см.
-  # docs/plans/2026-09-12-web-spa-migration-design.md. Файлы статические
-  # (без подстановки значений из $ENV) - copy как есть, исполняемый бит
-  # не нужен.
-  # $STATS_CHARTJS_SOURCE - вендоренная UMD-сборка Chart.js для графика по
-  # нодам (buildNodeChart() в stats_app.js), не наш код - тоже просто
-  # копируется как есть, отдельной логики не требует. Как и
-  # write_stats_cgi()/write_stats_run() - отсутствие источника или
-  # неудачная запись только логируют WARN и НЕ прерывают prepare() в stats_service.sh
-  # (return 0 в любом случае): без index.html stats_httpd.py отдаёт 404
-  # - см. _full_path_for()/_spa_fallback() в нём (для chart.js - график
-  # покажет "chart.js не загрузился", см. buildNodeChart() в stats_app.js).
-  for pair in "$STATS_INDEX_SOURCE:$STATS_INDEX_HTML" "$STATS_STYLE_SOURCE:$STATS_STYLE_CSS" "$STATS_APP_SOURCE:$STATS_APP_JS" "$STATS_CHARTJS_SOURCE:$STATS_CHARTJS_JS" "$STATS_CM_JS_SOURCE:$STATS_CM_JS" "$STATS_CM_CSS_SOURCE:$STATS_CM_CSS"; do
-    src=${pair%%:*}
-    dst=${pair#*:}
-    if [ ! -f "$src" ]; then
-      say "WARN: $src не найден, SPA-интерфейс (/stats, /settings) недоступен (переустановите install.sh)"
-      continue
-    fi
-    if ! publish_file "$src" "$dst"; then
-      say "WARN: Не удалось записать $dst, SPA-интерфейс не обновлён"
-    fi
-  done
-  return 0
-}
-
 zash_ui_dir() {
   # Каталог external-ui из config.yaml (обычно "./zash", относительно
   # $DIR - именно так mihomo распаковывает туда zashboard при первом
@@ -527,7 +392,7 @@ cleanup_old_zash_stats() {
   # stats.html лежал прямо в каталоге external-ui и раздавался вместе с
   # zashboard на порту API_MAIN (обычно 9090, например
   # http://<роутер>:9090/ui/stats.html). Текущий код туда больше ничего
-  # не пишет (write_stats_static()/render_stats() работают только с
+  # не пишет (render_stats() работает только с
   # $STATS_HTTP_DIR, не связанным с zashboard) - оставшийся там файл
   # только дублирует новый сервис и путает читателя двумя разными
   # адресами с похожим содержимым.

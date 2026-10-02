@@ -1,9 +1,8 @@
 #!/bin/sh
 # CGI-обёртка "информация о системе" для футера веб-интерфейса (артборд
 # "Панель управления" - FIRMWARE/UPTIME/CPU/MEM/mihomo core, см. CHANGELOG).
-# Ставится install.sh в $DIR/stats_system.sh; копия внутри раздаваемого
-# каталога (cgi-bin/system) пишется сама write_stats_system() из
-# speedtest2.sh - править нужно этот файл, копия перезаписывается сама.
+# Ставится install.sh в $DIR/stats_system.sh, stats_httpd.py запускает его
+# оттуда.
 #
 # Ни один из этих показателей раньше не собирался нигде в проекте:
 # release_version - из уже существующего installed-manifest.txt (то же

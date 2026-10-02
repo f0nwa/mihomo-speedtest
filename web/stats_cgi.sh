@@ -1,14 +1,9 @@
 #!/bin/sh
 # CGI-скрипт настроек веб-интерфейса (JSON для /api/settings, см.
-# API_ALIASES в stats_httpd.py и renderSettings() в stats_app.js). Ставится install.sh в $DIR/stats_cgi.sh;
-# в раздаваемый каталог (STATS_CGI_SCRIPT, обычно $DIR/stats_www/cgi-bin/config)
-# его копирует write_stats_cgi() из speedtest2.sh при каждом запуске/
-# перезапуске независимой службы (prepare() в stats_service.sh, порция 3 -
-# см. docs/superpowers/specs/2026-09-15-independent-stats-service-design.md) -
-# править нужно этот файл, копия перезаписывается автоматически и правки в
-# ней не сохранятся.
+# API_ROUTES в stats_httpd.py и renderSettings() в stats_app.js). Ставится
+# install.sh в $DIR/stats_cgi.sh, stats_httpd.py запускает его оттуда.
 #
-# Полагается на то, что busybox httpd передаёт CGI-процессу окружение
+# Полагается на то, что stats_httpd.py передаёт скрипту окружение
 # родителя: stats_service.sh экспортирует DIR и ENV перед запуском веб-
 # сервиса, поэтому сорс "$DIR/speedtest2.sh" ниже подхватывает те же
 # настройки (включая текущий speedtest2.env), что и обычный прогон по cron -
@@ -25,7 +20,7 @@ if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
   echo "Content-Type: text/plain; charset=utf-8"
   echo
   echo "Ошибка конфигурации: не удалось подключить speedtest2.sh (DIR=[$DIR])."
-  echo "Обычно это значит, что CGI запущен не через busybox httpd, поднятый stats_service.sh."
+  echo "Обычно это значит, что скрипт запущен не через stats_httpd.py, поднятый stats_service.sh."
   exit 0
 fi
 
@@ -285,7 +280,7 @@ print_settings_json() {
   # JSON-ответ для /api/settings (шаг 4, см.
   # docs/plans/2026-09-12-web-spa-migration-design.md) - включается
   # переменной окружения API_JSON=1, которую stats_httpd.py добавляет
-  # только для алиаса "/api/settings" (см. API_ALIASES в stats_httpd.py).
+  # только для алиаса "/api/settings" (см. API_ROUTES в stats_httpd.py).
   # С 2026-09-28 HTML-формы нет, и JSON отдаётся всегда, независимо от
   # API_JSON. GET - текущие значения полей ($STATS_NODE_CAP/$BLOCK/...).
   # POST - результат validate_settings_fields()/сохранения выше:
@@ -461,6 +456,4 @@ done
 
 # Ответ всегда JSON (GET - текущие значения, POST - итог сохранения).
 # HTML-форма настроек удалена 2026-09-28 вместе с остальным старым
-# HTML-интерфейсом: stats_httpd.py и так перенаправлял GET /cgi-bin/config
-# на /settings и отвечал 410 на POST туда, так что форма была недостижима.
 print_settings_json

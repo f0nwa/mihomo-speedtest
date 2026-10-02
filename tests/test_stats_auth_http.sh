@@ -4,6 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 TMP=${TMPDIR:-/tmp}/mihomo-auth-http.$$
 WWW=$TMP/www
+APP=$TMP/app
 STATE=$TMP/state
 RUNTIME=$TMP/runtime
 PORT=$((38000 + ($$ % 2000)))
@@ -17,25 +18,25 @@ cleanup() {
 trap cleanup EXIT INT TERM
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-mkdir -p "$WWW/cgi-bin"
-printf '<!doctype html><div>auth-spa-shell</div>\n' > "$WWW/index.html"
-printf 'body{}\n' > "$WWW/style.css"
-printf 'console.log("app")\n' > "$WWW/app.js"
-cat > "$WWW/cgi-bin/config" <<'CGI'
+mkdir -p "$WWW" "$APP"
+printf '<!doctype html><div>auth-spa-shell</div>\n' > "$APP/stats_index.html"
+printf 'body{}\n' > "$APP/stats_style.css"
+printf 'console.log("app")\n' > "$APP/stats_app.js"
+cat > "$APP/stats_cgi.sh" <<'CGI'
 #!/bin/sh
 printf 'Content-Type: application/json; charset=utf-8\n\n'
 printf '{"method":"%s"}\n' "$REQUEST_METHOD"
 CGI
-cat > "$WWW/cgi-bin/run" <<'CGI'
+cat > "$APP/stats_run.sh" <<'CGI'
 #!/bin/sh
 printf 'Content-Type: application/json; charset=utf-8\n\n'
 printf '{"started":true}\n'
 CGI
-chmod +x "$WWW/cgi-bin/config" "$WWW/cgi-bin/run"
+chmod +x "$APP/stats_cgi.sh" "$APP/stats_run.sh"
 printf '{"ok":true}\n' > "$WWW/stats.json"
 
 start_server() {
-    STATS_AUTH_STATE_DIR=$STATE STATS_AUTH_RUNTIME_DIR=$RUNTIME \
+    STATS_APP_DIR=$APP STATS_AUTH_STATE_DIR=$STATE STATS_AUTH_RUNTIME_DIR=$RUNTIME \
         python3 "$ROOT/web/stats_httpd.py" -p "127.0.0.1:$PORT" -h "$WWW" -f \
         >"$TMP/server.log" 2>&1 &
     PID=$!

@@ -1,11 +1,9 @@
 #!/bin/sh
 # CGI-обёртка вкладки "Конфиг" веб-интерфейса: редактор config.yaml Mihomo
 # с проверкой, починкой и откатом к бэкапам. Ставится install.sh в
-# $DIR/stats_config.sh; копия внутри раздаваемого каталога (cgi-bin/configedit)
-# пишется сама write_stats_config() из speedtest2.sh - править нужно этот
-# файл, копия перезаписывается сама.
+# $DIR/stats_config.sh, stats_httpd.py запускает его оттуда.
 #
-# Действие приходит в MST_CONFIG_ACTION (из API_ALIASES stats_httpd.py):
+# Действие приходит в MST_CONFIG_ACTION (из API_ROUTES stats_httpd.py):
 #   read            GET  - текущий config.yaml (текст + отпечаток base)
 #   backups         GET  - список бэкапов (свои kind=edit и setup.sh kind=setup)
 #   backup          GET  - текст бэкапа (?kind=edit|setup&name=...)

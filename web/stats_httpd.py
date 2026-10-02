@@ -36,68 +36,20 @@ http.server.CGIHTTPRequestHandler и модуль cgi уже удалены (PEP
 обработчик были бы одним процессом, и kill оборвал бы поток, дописывающий
 ответ, вместе со всем остальным.
 
-Маршрутизация "чистых" URL (добавлено 2026-09-12, см. design-док выше -
-шаг 1 из плана миграции, дальше в шагах 2-6):
-  - "/api/run" - внутренний алиас на "cgi-bin/run": дальше запрос идёт по
-    тому же пути, что и раньше "/cgi-bin/run" (сам stats_run.sh не менялся)
-    и под общей сессионной защитой.
-  - "/api/settings" - внутренний алиас на "cgi-bin/config" с добавленной
-    переменной окружения API_JSON=1 - по ней stats_cgi.sh печатает JSON
-    вместо HTML-формы (см. шаг 3 design-дока и его же "Статус выполнения
-    шага 4"): GET отдаёт текущие значения полей, POST - результат
-    валидации/сохранения.
-  - "/api/stats" - внутренний алиас на статический "stats.json" в
-    docroot, который пишет render_stats() в speedtest2.sh (render_stats.awk).
-    Не CGI -
-    обычная раздача файла, данные всегда посчитаны заранее, а не по
-    запросу.
-  - "/api/progress" - внутренний алиас на статический "progress.json" в
-    docroot: прогресс скоростного теста по нодам ТЕКУЩЕГО прогона (шаг 1
-    задачи "видно по нодам при прогоне" - см. CHANGELOG.md), который
-    write_progress() в speedtest2.sh пишет после каждой протестированной
-    ноды. Тоже не CGI, обычная раздача файла - как и "/api/stats", без
-    отдельного CGI-процесса. Файла может не быть вовсе, если ещё
-    ни разу не было прогона с этой версией speedtest2.sh - тогда ТА ЖЕ
-    особенность, что и у "/api/stats": SPA-фоллбек (_spa_fallback) не
-    отличает "путь из API_ALIASES без файла-цели" от обычной навигации и
-    отдаёт index.html с кодом 200 вместо 404 (см. _handle() ниже - алиас
-    подставляется ДО проверки на "api/", различить их там уже нельзя).
-    Существующее поведение, не новое - фронтенд должен сам отличать JSON
-    от HTML в ответе (Content-Type или неудачный JSON.parse), а не
-    полагаться на код ответа.
-  - "/api/updates/check", "/api/updates/status", "/api/updates/prepare",
-    "/api/updates/apply", "/api/updates/discard" - внутренние алиасы на
-    один и тот же CGI-скрипт "cgi-bin/update" (копия stats_update.sh,
-    кладётся write_stats_update() в speedtest2.sh - раздел "Обновления"),
-    различаются только переменной окружения MST_UPDATE_ACTION
-    ("check"/"status"/"prepare"/"apply"/"discard" соответственно) - тем же
-    приёмом, что уже используется у "/api/settings" с API_JSON=1. Сам
-    stats_update.sh решает по MST_UPDATE_ACTION и REQUEST_METHOD, какую
-    команду update.sh вызвать (см. stats_update.sh и спеку раздела
-    "Веб-флоу") - здесь, в stats_httpd.py, только маршрутизация под общей
-    сессией/CSRF, без отдельной логики авторизации.
-  - "/api/system" - внутренний алиас на "cgi-bin/system" (копия
-    stats_system.sh, кладётся write_stats_system() в speedtest2.sh) -
-    футер веб-интерфейса (версия релиза/аптайм/CPU/MEM/статус mihomo).
-    GET/HEAD, без побочных эффектов - под той же общей сессией/CSRF, что
-    и остальные "/api/...".
-  - "/api/config", "/api/config/{backups,backup,check,repair,save,restore,
-    restore-working,log}" - вкладка "Конфиг": внутренние алиасы на один
-    CGI-скрипт "cgi-bin/configedit" (копия stats_config.sh, кладётся
-    write_stats_config() в speedtest2.sh), действие - в MST_CONFIG_ACTION.
-    Тяжёлым действиям алиас задаёт MST_CGI_TIMEOUT больше обычных 30 с.
-  - "/api/log" - живой журнал для вкладки «Журнал» (GET, параметры gen и
-    offset), обрабатывается прямо здесь, см. live_log_poll(). Пока его
-    опрашивают, say() в speedtest2.sh пишет копию строк в /tmp; без
-    опроса дольше LIVE_LOG_IDLE секунд сбор прекращается.
-  - "/api/..." (всё остальное) - алиасов нет, отвечает JSON с кодом 501,
-    а не 404, чтобы фронтенд мог отличить "эндпоинт ещё не существует" от
-    обрыва сети или опечатки в пути.
-  - "/", "/stats", "/settings" и вообще любой GET/HEAD, не попавший ни в
-    файл в docroot, ни в один из путей выше, - отдаёт "index.html"
-    (SPA-shell) с кодом 200, если он есть в docroot (SPA-фоллбек: клиентский
-    роутер сам решает, что показать, по location.pathname). Если
-    index.html нет в docroot - обычный 404.
+Маршрутизация (таблицы STATIC_FILES, DATA_FILES, API_ROUTES ниже):
+  - "/", "/style.css", "/app.js", ... - файлы интерфейса прямо из каталога
+    приложения ($DIR, рядом с этим файлом; в тестах - STATS_APP_DIR).
+  - "/api/stats", "/api/progress" - stats.json/progress.json из docroot
+    (их пишет speedtest2.sh). Файла нет - ответ "{}" с кодом 200:
+    фронтенд трактует это как "данных ещё нет".
+  - "/api/run", "/api/settings", "/api/updates/*", "/api/system",
+    "/api/config/*" - запуск скрипта из $DIR по протоколу CGI (переменные
+    REQUEST_METHOD/QUERY_STRING/..., тело на stdin, заголовки + тело на
+    stdout). Действие передаётся переменной окружения из API_ROUTES.
+  - "/api/log" - живой журнал, обрабатывается здесь (live_log_poll()).
+  - "/api/auth/*" - вход и сессии (stats_auth.py).
+  - прочие "/api/..." - 501; "/cgi-bin/..." - 404;
+  - любой другой GET/HEAD - index.html (клиентский роутер SPA).
 """
 import http.server
 import json
@@ -374,47 +326,54 @@ def guess_content_type(path):
     return "application/octet-stream"
 
 
-# Внутренние алиасы "чистых" API-путей на существующие файлы/cgi-bin-скрипты
-# (см. шапку файла). Ключ - относительный путь без ведущего "/", в том
-# виде, в котором его возвращает Handler._normalize_rel(). Значение -
-# пара (target_rel, extra_env): target_rel - на что заменить путь дальше
-# по коду (тот же формат, без ведущего "/"), extra_env - дополнительные
-# переменные окружения, которые нужно добавить, если target_rel окажется
-# CGI (для обычного файла extra_env просто не используется). Раскрывать
-# такие алиасы нужно раскрывать до решения "это /api/*, без
-# алиаса" - только тогда, например, запрос к "/api/run" пройдёт по тем же
-# правилам защиты и исполнения, что и "/cgi-bin/run" сегодня.
-API_ALIASES = {
-    "api/run": ("cgi-bin/run", {}),
-    "api/settings": ("cgi-bin/config", {"API_JSON": "1"}),
-    "api/stats": ("stats.json", {}),
-    "api/progress": ("progress.json", {}),
+# Файлы интерфейса: URL без "/" -> имя файла в каталоге приложения.
+STATIC_FILES = {
+    "index.html": "stats_index.html",
+    "style.css": "stats_style.css",
+    "app.js": "stats_app.js",
+    "chart.js": "stats_chart.js",
+    "codemirror.js": "stats_codemirror.js",
+    "codemirror.css": "stats_codemirror.css",
+}
+
+# Данные, которые пишет speedtest2.sh в docroot.
+DATA_FILES = {
+    "api/stats": "stats.json",
+    "api/progress": "progress.json",
+}
+
+# API на скриптах: URL -> (скрипт в каталоге приложения, доп. переменные).
+# MST_CGI_TIMEOUT - таймаут скрипта в секундах (по умолчанию 30).
+API_ROUTES = {
+    "api/run": ("stats_run.sh", {}),
+    "api/settings": ("stats_cgi.sh", {"API_JSON": "1"}),
     # check синхронно качает манифест, хеши и заметки релиза с GitHub -
-    # на медленном канале роутера 30 с по умолчанию не хватало: CGI
-    # обрывался с 500, а новая версия появлялась только после F5.
-    "api/updates/check": ("cgi-bin/update", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),
-    "api/updates/status": ("cgi-bin/update", {"MST_UPDATE_ACTION": "status"}),
-    "api/updates/prepare": ("cgi-bin/update", {"MST_UPDATE_ACTION": "prepare"}),
-    "api/updates/apply": ("cgi-bin/update", {"MST_UPDATE_ACTION": "apply"}),
-    "api/updates/discard": ("cgi-bin/update", {"MST_UPDATE_ACTION": "discard"}),
-    "api/system": ("cgi-bin/system", {}),
-    # Вкладка "Конфиг" (stats_config.sh). Применение ждёт mihomo -t,
-    # xkeen -restart, проверку ядра и при провале - откат с повторным
-    # перезапуском, поэтому этим действиям дан больший таймаут CGI.
-    "api/config": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "read"}),
-    "api/config/backups": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "backups"}),
-    "api/config/backup": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "backup"}),
-    "api/config/check": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "check"}),
-    "api/config/repair": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "repair", "MST_CGI_TIMEOUT": "60"}),
-    "api/config/save": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
-    "api/config/restore": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
-    "api/config/restore-working": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
-    "api/config/log": ("cgi-bin/configedit", {"MST_CONFIG_ACTION": "log"}),
+    # на медленном канале роутера 30 с не хватало.
+    "api/updates/check": ("stats_update.sh", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),
+    "api/updates/status": ("stats_update.sh", {"MST_UPDATE_ACTION": "status"}),
+    "api/updates/prepare": ("stats_update.sh", {"MST_UPDATE_ACTION": "prepare"}),
+    "api/updates/apply": ("stats_update.sh", {"MST_UPDATE_ACTION": "apply"}),
+    "api/updates/discard": ("stats_update.sh", {"MST_UPDATE_ACTION": "discard"}),
+    "api/system": ("stats_system.sh", {}),
+    # Применение конфига ждёт mihomo -t, xkeen -restart, проверку ядра и
+    # при провале - откат, поэтому таймауты больше.
+    "api/config": ("stats_config.sh", {"MST_CONFIG_ACTION": "read"}),
+    "api/config/backups": ("stats_config.sh", {"MST_CONFIG_ACTION": "backups"}),
+    "api/config/backup": ("stats_config.sh", {"MST_CONFIG_ACTION": "backup"}),
+    "api/config/check": ("stats_config.sh", {"MST_CONFIG_ACTION": "check"}),
+    "api/config/repair": ("stats_config.sh", {"MST_CONFIG_ACTION": "repair", "MST_CGI_TIMEOUT": "60"}),
+    "api/config/save": ("stats_config.sh", {"MST_CONFIG_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
+    "api/config/restore": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
+    "api/config/restore-working": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
+    "api/config/log": ("stats_config.sh", {"MST_CONFIG_ACTION": "log"}),
 }
 
 
-def make_handler(docroot, state_dir=None, runtime_dir=None):
+def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
     docroot = os.path.normpath(docroot)
+    app_dir = os.path.normpath(
+        app_dir or os.environ.get("STATS_APP_DIR") or os.path.dirname(os.path.abspath(__file__))
+    )
     state_dir = state_dir or os.environ.get(
         "STATS_AUTH_STATE_DIR", os.path.join(os.environ.get("DIR", os.path.dirname(__file__)), ".stats-auth")
     )
@@ -466,14 +425,10 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             pass  # тихо - лог уже ведёт speedtest2.sh поверх stdout/stderr процесса
 
         def _normalize_rel(self, url_path):
-            # Возвращает (rel, ok). rel - путь относительно docroot без
-            # ведущего "/", None означает запрос корня ("" или ".").
-            # ok=False - попытка выйти за пределы docroot через ".." -
-            # проверяется по самой строке пути, а не после join+normpath,
-            # чтобы решение "отклонить" не зависело от того, существует ли
-            # там что-нибудь физически (защита от race и от особенностей
-            # symlink), и чтобы этот же rel можно было безопасно сверять с
-            # API_ALIASES/префиксом "api/" ещё до похода в файловую систему.
+            # Возвращает (rel, ok). rel - путь без ведущего "/", None -
+            # корень. ok=False - попытка выйти наверх через "..". Файлы
+            # по rel напрямую не открываются: только через таблицы
+            # STATIC_FILES/DATA_FILES/API_ROUTES.
             raw = urllib.parse.unquote(url_path.split("?", 1)[0])
             rel = os.path.normpath(raw).lstrip("/\\")
             if rel in ("", "."):
@@ -481,18 +436,6 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             if rel == ".." or rel.startswith(".." + os.sep):
                 return None, False
             return rel, True
-
-        def _full_path_for(self, rel):
-            # rel уже нормализован _normalize_rel() (или является одним из
-            # API_ALIASES) - None здесь означает корень.
-            if rel is None:
-                # Корень - всегда SPA-shell. Если index.html нет, дальше
-                # по общему порядку решится 404.
-                return os.path.join(docroot, "index.html")
-            full = os.path.normpath(os.path.join(docroot, rel))
-            if full != docroot and not full.startswith(docroot + os.sep):
-                return None
-            return full
 
         def _send_simple(self, status, content_type, body_bytes):
             self.send_response(status)
@@ -513,9 +456,6 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                 self.wfile.write(body_bytes)
 
         def _send_json(self, status, obj):
-            # /api/stats и /api/settings реализованы через алиасы на файл/CGI
-            # (см. API_ALIASES) - здесь остаётся единственный вызывающий:
-            # заглушка "не реализовано" в _handle() для /api/* без алиаса.
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self._send_simple(status, "application/json; charset=utf-8", body)
 
@@ -741,11 +681,7 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                 return None
             return session
 
-        def _is_cgi(self, full_path):
-            rel_parts = os.path.relpath(full_path, docroot).split(os.sep)
-            return len(rel_parts) >= 2 and "cgi-bin" in rel_parts[:-1] and os.access(full_path, os.X_OK)
-
-        def _run_cgi(self, full_path, extra_env=None):
+        def _run_script(self, full_path, extra_env=None):
             parsed = urllib.parse.urlsplit(self.path)
             length = int(self.headers.get("Content-Length", "0") or "0")
             # Content-Length может быть враньём клиента (случайным или нет)
@@ -769,12 +705,10 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             env["SERVER_SOFTWARE"] = self.server_version
             env["REMOTE_ADDR"] = self.client_address[0]
             if extra_env:
-                # Доп. переменные из API_ALIASES (например API_JSON=1 для
-                # "/api/settings") - только для алиасов, у обычных
-                # "/cgi-bin/..." extra_env пустой/None, поведение не меняется.
+                # Доп. переменные из API_ROUTES (например API_JSON=1).
                 env.update(extra_env)
-            # Обычный CGI - 30 с; долгим действиям алиас задаёт свой
-            # MST_CGI_TIMEOUT (см. "api/config/*" в API_ALIASES).
+            # По умолчанию 30 с; долгим действиям API_ROUTES задаёт свой
+            # MST_CGI_TIMEOUT.
             try:
                 cgi_timeout = int((extra_env or {}).get("MST_CGI_TIMEOUT", "30"))
             except ValueError:
@@ -786,7 +720,7 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                     input=body,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=os.path.dirname(full_path) or docroot,
+                    cwd=app_dir,
                     timeout=cgi_timeout,
                 )
             except Exception as exc:
@@ -833,23 +767,15 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
                 return
             self._send_simple(200, guess_content_type(full_path), data)
 
-        def _spa_fallback(self, rel):
-            # Только для GET/HEAD - POST на несуществующий путь так и должен
-            # оставаться 404, SPA-фоллбек нужен исключительно для того,
-            # чтобы переход/обновление страницы браузером на "чистый" путь
-            # клиентского роутера (например "/settings") не давал 404. Под
-            # "cgi-bin" не подставляем - отсутствующий CGI-скрипт честнее
-            # показать как 404, чем как SPA-shell.
+        def _serve_index(self):
             if self.command not in ("GET", "HEAD"):
-                return False
-            rel_parts = rel.split("/") if rel else []
-            if rel_parts and "cgi-bin" in rel_parts[:-1]:
-                return False
-            index_path = os.path.join(docroot, "index.html")
+                self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
+                return
+            index_path = os.path.join(app_dir, STATIC_FILES["index.html"])
             if not os.path.isfile(index_path):
-                return False
+                self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
+                return
             self._serve_file(index_path)
-            return True
 
         def _handle_live_log(self):
             # Живой журнал, см. live_log_poll(). Доступ - только после
@@ -882,46 +808,45 @@ def make_handler(docroot, state_dir=None, runtime_dir=None):
             if self._authorize(rel) is None:
                 return
 
-            if rel == "cgi-bin/config":
-                if self.command in ("GET", "HEAD"):
-                    self._redirect("/settings")
-                else:
-                    self._send_json(410, {"error": "legacy_settings_removed"})
-                return
-
-            alias_env = None
-            if rel is not None and rel in API_ALIASES:
-                rel, alias_env = API_ALIASES[rel]
-
             if rel == "api/log":
                 self._handle_live_log()
                 return
 
+            if rel in API_ROUTES:
+                script, env = API_ROUTES[rel]
+                path = os.path.join(app_dir, script)
+                if not os.path.isfile(path):
+                    self._send_json(503, {"error": "script_missing", "script": script})
+                    return
+                self._run_script(path, env)
+                return
+
+            if rel in DATA_FILES:
+                if self.command not in ("GET", "HEAD"):
+                    self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
+                    return
+                path = os.path.join(docroot, DATA_FILES[rel])
+                if os.path.isfile(path):
+                    self._serve_file(path)
+                else:
+                    self._send_json(200, {})
+                return
+
             if rel is not None and rel.split("/", 1)[0] == "api":
-                # Сюда попадает только "/api/*" без записи в API_ALIASES -
-                # "run"/"settings"/"stats" выше уже заменены на реальный
-                # путь. Отвечаем 501, а не 404 - фронтенд должен уметь
-                # отличить "эндпоинт ещё не существует" от опечатки в пути.
                 self._send_json(501, {"error": "not_implemented", "path": "/" + rel})
                 return
 
-            full_path = self._full_path_for(rel)
-            if full_path is None:
-                self._send_simple(403, "text/plain; charset=utf-8", b"403 forbidden\n")
+            if rel is not None and rel.split("/", 1)[0] == "cgi-bin":
+                self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
                 return
 
-            if self._is_cgi(full_path):
-                self._run_cgi(full_path, alias_env)
-                return
+            if rel in STATIC_FILES and self.command in ("GET", "HEAD"):
+                path = os.path.join(app_dir, STATIC_FILES[rel])
+                if os.path.isfile(path):
+                    self._serve_file(path)
+                    return
 
-            if os.path.isfile(full_path):
-                self._serve_file(full_path)
-                return
-
-            if self._spa_fallback(rel or ""):
-                return
-
-            self._send_simple(404, "text/plain; charset=utf-8", b"404 not found\n")
+            self._serve_index()
 
         def do_GET(self):
             self._handle()
@@ -997,7 +922,7 @@ class ForkingHTTPServer(socketserver.ForkingMixIn, http.server.HTTPServer):
         # На практике это давало на роутере полностью недоступный веб-сервис
         # после setup.sh: клиент держал соединение открытым без завершения
         # тела запроса (см. STATS_HTTPD_READ_TIMEOUT выше - без него чтение
-        # тела в _run_cgi() могло ждать вечно), speedtest2.sh перезапускал
+        # тела в _run_script() могло ждать вечно), speedtest2.sh перезапускал
         # сервис и убивал СТАРЫЙ родительский pid из pidfile - но зависший
         # ребёнок пережил родителя и продолжал слушать порт, так что НОВЫЙ
         # процесс (что python3, что резервный busybox httpd) не мог

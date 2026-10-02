@@ -1,8 +1,7 @@
 // Клиентский роутер и логика SPA-shell веб-сервиса статистики speedtest2
 // (index.html + style.css) - см. docs/plans/2026-09-12-web-spa-migration-design.md.
-// Ставится install.sh как $DIR/stats_app.js; копия внутри раздаваемого
-// каталога (app.js) пишется сама write_stats_static() из speedtest2.sh -
-// править нужно этот файл, не копию.
+// Ставится install.sh как $DIR/stats_app.js, stats_httpd.py раздаёт его
+// оттуда как /app.js.
 //
 // Шаг 4 плана: "/api/stats" и "/api/settings" теперь отдают реальные
 // данные (см. render_stats.awk -v format=json и print_settings_json() в
@@ -2204,7 +2203,7 @@
           var snippet = String(body || '').replace(/\s+/g, ' ').slice(0, 160);
           throw new Error('неожиданный ответ сервера ' + url + ' (HTTP ' + r.status + ', ' +
             (r.headers.get('Content-Type') || 'без типа') + '): ' + (snippet || 'пустое тело') +
-            '. Похоже, CGI cgi-bin/configedit не установлен или завершился с ошибкой - ' +
+            '. Похоже, stats_config.sh не установлен или завершился с ошибкой - ' +
             'перезапустите веб-службу (/opt/etc/init.d/S80speedtest-stats restart).');
         }
         return data;

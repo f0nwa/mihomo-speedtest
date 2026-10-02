@@ -1,11 +1,7 @@
 #!/bin/sh
 # CGI-скрипт кнопки "Запустить прогон сейчас" на странице статистики (см.
-# README.md, раздел про stats_www/cgi-bin/run). Ставится install.sh в
-# $DIR/stats_run.sh; в раздаваемый каталог (STATS_RUN_SCRIPT, обычно
-# $DIR/stats_www/cgi-bin/run) его копирует write_stats_run() из
-# speedtest2.sh при каждом запуске/перезапуске независимой службы
-# (prepare() в stats_service.sh, порция 3) - править нужно этот файл,
-# копия перезаписывается автоматически и правки в ней не сохранятся.
+# /api/run). Ставится install.sh в $DIR/stats_run.sh, stats_httpd.py
+# запускает его оттуда.
 #
 # GET  -> {"running":true|false} - идёт ли сейчас прогон (проверяется тот
 #         же файл-блокировка $LOCK, что и у cron/--force, см. acquire_lock()

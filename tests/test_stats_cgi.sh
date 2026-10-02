@@ -26,7 +26,7 @@ assert_not_contains() {
 # --- фикстура: DIR со своей копией speedtest2.sh/render_stats.awk/stats_cgi.sh
 #     и пустой историей - как после свежего install.sh, но в tmp ---
 W=$TEST_ROOT/w
-mkdir -p "$W/stats_www/cgi-bin"
+mkdir -p "$W/stats_www"
 cp "$ROOT/speedtest-runtime/speedtest2.sh" "$W/speedtest2.sh"
 cp "$ROOT/web/render_stats.awk" "$W/render_stats.awk"
 cp "$ROOT/web/stats_cgi.sh" "$W/stats_cgi.sh"

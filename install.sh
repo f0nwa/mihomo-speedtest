@@ -466,8 +466,8 @@ install_files() {
   atomic_install "$SELFDIR/stats_config.sh" "$DIR/stats_config.sh" || return 1
   chmod +x "$DIR/stats_config.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
-  # веб-сервиса статистики - копируются в раздаваемый каталог сами,
-  # write_stats_static() из speedtest2.sh; исполняемый бит не нужен.
+  # веб-сервиса статистики - stats_httpd.py раздаёт их прямо из $DIR;
+  # исполняемый бит не нужен.
   # stats_chart.js - вендоренная UMD-сборка Chart.js для графика по нодам
   # (buildNodeChart() в stats_app.js), не наш код, ставится так же.
   atomic_install "$SELFDIR/stats_index.html" "$DIR/stats_index.html" || return 1

@@ -184,38 +184,20 @@ sh "$SERVICE" supervise
 [ ! -f "$SUPERVISOR_PIDFILE" ] || fail "10: supervisor.pid создан при STATS_HTTP_ENABLE=0"
 [ ! -f "$STATS_HTTP_PIDFILE" ] || fail "10: httpd.pid создан при STATS_HTTP_ENABLE=0"
 
-# --- 11: prepare() публикует cgi-bin/update (write_stats_update()) - фикс
-#     находки C1 финального ревью порции 5: раньше вызов write_stats_update()
-#     был вписан только в мёртвую ensure_stats_httpd() в speedtest2.sh (не
-#     вызывается ни из одного места в проекте, см. комментарий в
-#     render_stats()), а prepare() - реальный путь, которым supervisor
-#     наполняет cgi-bin/ на работающем роутере, - её не вызывал. Из-за этого
-#     cgi-bin/update никогда не появлялся, а /api/updates/* всегда отвечали
-#     404. Тот же порядок проверки, что для write_stats_update() внутри
-#     ensure_stats_httpd() в test_stats_update_service.sh, но здесь через
-#     реальный prepare() из stats_service.sh ---
+# --- 11: prepare() не копирует скрипты и статику в stats_www и убирает
+#     копии, оставшиеся от старых версий (их теперь берёт stats_httpd.py
+#     прямо из $DIR) ---
 new_case c11
-cp "$ROOT/web/stats_update.sh" "$W/stats_update.sh"
-chmod +x "$W/stats_update.sh"
+mkdir -p "$STATS_HTTP_DIR/cgi-bin"
+: > "$STATS_HTTP_DIR/cgi-bin/update"
+: > "$STATS_HTTP_DIR/app.js"
+: > "$STATS_HTTP_DIR/index.html"
+: > "$STATS_HTTP_DIR/stats.json"
 sh "$SERVICE" prepare
-[ -f "$STATS_HTTP_DIR/cgi-bin/update" ] || fail "11: prepare() не создал cgi-bin/update (write_stats_update не вызывается из prepare())"
-[ -x "$STATS_HTTP_DIR/cgi-bin/update" ] || fail "11: cgi-bin/update создан prepare(), но не исполняем"
-
-# --- 12: prepare() публикует cgi-bin/system (write_stats_system()) - та же
-#     находка, что и у case 11 выше, только для футера
-#     (FIRMWARE/UPTIME/CPU/MEM/mihomo core, см. CHANGELOG за 2026-09-27):
-#     write_stats_system() была вписана в ensure_stats_httpd() в
-#     speedtest2.sh, но не в prepare() из stats_service.sh - именно
-#     prepare() наполняет cgi-bin/ на работающем роутере (независимая
-#     служба S80speedtest-stats), ensure_stats_httpd() этим путём не
-#     вызывается вовсе. Из-за этого cgi-bin/system никогда не появлялся, а
-#     /api/system всегда отвечал 404 - футер молча не показывался.
-new_case c12
-cp "$ROOT/web/stats_system.sh" "$W/stats_system.sh"
-chmod +x "$W/stats_system.sh"
-sh "$SERVICE" prepare
-[ -f "$STATS_HTTP_DIR/cgi-bin/system" ] || fail "12: prepare() не создал cgi-bin/system (write_stats_system не вызывается из prepare())"
-[ -x "$STATS_HTTP_DIR/cgi-bin/system" ] || fail "12: cgi-bin/system создан prepare(), но не исполняем"
+[ ! -e "$STATS_HTTP_DIR/cgi-bin" ] || fail "11: prepare() не удалил старый cgi-bin/"
+[ ! -e "$STATS_HTTP_DIR/app.js" ] || fail "11: prepare() не удалил старую копию app.js"
+[ ! -e "$STATS_HTTP_DIR/index.html" ] || fail "11: prepare() не удалил старую копию index.html"
+[ -f "$STATS_HTTP_DIR/stats.json" ] || fail "11: prepare() удалил данные stats.json"
 
 # --- исполняемый бит новых файлов ---
 [ -x "$SERVICE" ] || fail "stats_service.sh не исполняемый"

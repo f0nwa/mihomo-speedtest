@@ -211,14 +211,13 @@ done
 unset CONFIG_BACKUP_KEEP
 [ "$(ls "$M/config-backups" | wc -l | tr -d ' ')" = 2 ] || fail "15: keep"
 
-# --- 16: проводка - файлы в релизе, установке и раздаваемом каталоге
+# --- 16: проводка - файлы в релизе, установке и маршрутах сервера
 for f in web/stats_config.sh web/stats_codemirror.js web/stats_codemirror.css; do
   grep -q "^FILE|web|$f|" "$ROOT/release/components.txt" || fail "16: $f нет в components.txt"
   grep -q "${f#web/}" "$ROOT/install.sh" || fail "16: ${f#web/} не ставится install.sh"
 done
-grep -q 'write_stats_config' "$ROOT/web/stats_service.sh" || fail "16: prepare() не пишет cgi-bin/configedit"
-grep -q '"api/config/save": ("cgi-bin/configedit"' "$ROOT/web/stats_httpd.py" || fail "16: нет алиаса api/config/save"
-grep -q '"api/config/log": ("cgi-bin/configedit"' "$ROOT/web/stats_httpd.py" || fail "16: нет алиаса api/config/log"
+grep -q '"api/config/save": ("stats_config.sh"' "$ROOT/web/stats_httpd.py" || fail "16: нет маршрута api/config/save"
+grep -q '"api/config/log": ("stats_config.sh"' "$ROOT/web/stats_httpd.py" || fail "16: нет маршрута api/config/log"
 grep -q 'href="/config"' "$ROOT/web/stats_index.html" || fail "16: нет вкладки в меню"
 
 echo "test_stats_config.sh: OK"

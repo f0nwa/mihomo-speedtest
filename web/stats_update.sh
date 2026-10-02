@@ -1,12 +1,11 @@
 #!/bin/sh
 # CGI/CLI-обёртка над update.sh для веб-раздела "Обновления" (см. README.md
 # и docs/superpowers/sdd/2026-09-24-managed-updates-portion-5/task-*-brief.md,
-# "Веб-флоу"). Ставится install.sh в $DIR/stats_update.sh; копия внутри
-# раздаваемого каталога (cgi-bin/update) пишется сама write_stats_update()
-# из speedtest2.sh - править нужно этот файл, копия перезаписывается сама.
+# "Веб-флоу"). Ставится install.sh в $DIR/stats_update.sh, stats_httpd.py
+# запускает его оттуда.
 #
 # Действия: MST_UPDATE_ACTION=check|status|prepare|apply|discard (из
-# API_ALIASES stats_httpd.py) или первый позиционный аргумент при прямом
+# API_ROUTES stats_httpd.py) или первый позиционный аргумент при прямом
 # запуске (cron раз в UPDATE_CHECK_HOURS зовёт "check", "cron-sync" - только
 # переписать cron-строку, служебные воркеры - "prepare-worker"/
 # "apply-worker", наружу через CGI не проброшены).

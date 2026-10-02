@@ -7,8 +7,8 @@
 # (backoff). Не запускает speedtest, не меняет историю замеров и не
 # генерирует stats.json - этим занимается speedtest2.sh (render_stats()).
 #
-# Переиспользует функции speedtest2.sh (say(), publish_file(),
-# write_stats_*(), cleanup_old_zash_stats()) тем же приёмом, что и stats_cgi.sh/stats_run.sh:
+# Переиспользует функции speedtest2.sh (say(), cleanup_old_zash_stats())
+# тем же приёмом, что и stats_cgi.sh/stats_run.sh:
 # подключение с MST_LIB_ONLY=1, без запуска main(). Поэтому DIR должен
 # указывать на каталог, где рядом лежит сам speedtest2.sh (обычная
 # установка - /opt/etc/mihomo, ставится install.sh).
@@ -70,19 +70,19 @@ pid_from_file() {
 }
 
 prepare() {
-  # Готовит раздаваемый каталог: копии CGI-скриптов и статические файлы SPA.
+  # Готовит каталог данных (stats.json, progress.json). Скрипты и файлы
+  # интерфейса stats_httpd.py берёт прямо из $DIR. Копии в stats_www от
+  # старых версий удаляются (одна запись в /opt и только если они есть).
   export DIR MIHOMO_DIR ENV
   cleanup_old_zash_stats
-  if [ ! -d "$STATS_HTTP_DIR/cgi-bin" ] && ! mkdir -p "$STATS_HTTP_DIR/cgi-bin"; then
-    say "WARN: Не удалось создать $STATS_HTTP_DIR/cgi-bin, веб-сервис статистики не поднят"
+  if [ ! -d "$STATS_HTTP_DIR" ] && ! mkdir -p "$STATS_HTTP_DIR"; then
+    say "WARN: Не удалось создать $STATS_HTTP_DIR, веб-сервис статистики не поднят"
     return 1
   fi
-  write_stats_cgi
-  write_stats_run
-  write_stats_update
-  write_stats_system
-  write_stats_config
-  write_stats_static
+  [ -d "$STATS_HTTP_DIR/cgi-bin" ] && rm -rf "$STATS_HTTP_DIR/cgi-bin"
+  for old in index.html style.css app.js chart.js codemirror.js codemirror.css; do
+    [ -f "$STATS_HTTP_DIR/$old" ] && rm -f "$STATS_HTTP_DIR/$old"
+  done
   return 0
 }
 

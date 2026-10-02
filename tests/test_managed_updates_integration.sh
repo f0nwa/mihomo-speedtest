@@ -93,17 +93,15 @@ while [ $i -lt 30 ]; do
 done
 
 # --- "установленная" копия движка обновлений (DIR для stats_update.sh,
-#     она же источник cgi-bin/update) ---
+#     stats_httpd.py берёт stats_update.sh оттуда через STATS_APP_DIR) ---
 W=$TEST_ROOT/install
 mkdir -p "$W"
 cp "$ROOT"/install.sh "$ROOT"/uninstall.sh "$ROOT"/*/*.sh "$ROOT"/*/*.awk "$W/" 2>/dev/null || true
 chmod +x "$W"/*.sh
 
 WWW=$TEST_ROOT/www
-mkdir -p "$WWW/cgi-bin"
-printf '<html>spa-shell</html>' > "$WWW/index.html"
-cp "$W/stats_update.sh" "$WWW/cgi-bin/update"
-chmod +x "$WWW/cgi-bin/update"
+mkdir -p "$WWW"
+export STATS_APP_DIR=$W
 
 STATE=$TEST_ROOT/state
 TARGET=$TEST_ROOT/target
