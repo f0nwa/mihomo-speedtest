@@ -551,7 +551,7 @@ write_env() {
     # явный, чтобы удалённые из проекта настройки (например MAX_PING_MS)
     # по-прежнему вычищались переустановкой.
     for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR STABILITY_WINDOW STABILITY_DROP_AFTER \
-        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS; do
+        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS UPDATE_CHANNEL; do
       sed -n "/^$keep_key=/p" "$dst" 2>/dev/null | tail -1
     done
     # STATS_HTTP_ENABLE - персистентный флаг stop-web/start-web (см.

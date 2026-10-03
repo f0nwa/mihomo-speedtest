@@ -91,7 +91,7 @@ class Updates(unittest.TestCase):
             with self.subTest(mode=mode):
                 r = self.cli(manifest() + 'UNKNOWN|a|x\n', mode)
                 self.assertNotEqual(r.returncode, 0, r.stdout)
-                r = self.cli(manifest(minimum=7), mode)
+                r = self.cli(manifest(minimum=8), mode)
                 self.assertNotEqual(r.returncode, 0, r.stdout)
                 self.assertIn('Обновите update.sh', r.stderr)
                 self.assertIn('release/manifest-format.md', r.stderr)

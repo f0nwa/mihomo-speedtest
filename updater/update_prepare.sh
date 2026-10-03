@@ -111,15 +111,21 @@ build_snapshot() {
   } > "$WORK/identity.txt"
   plan_id=$(sha256_of "$WORK/identity.txt") || exit 1
 }
+check_release_not_older() {
+  # Отказ, если RELEASE_VERSION манифеста меньше установленного (например,
+  # после переключения dev -> stable при установленной сборке dev). Общая
+  # проверка для --plan (update.sh) и подготовки (check_schema_release);
+  # без отслеживаемого установленного манифеста ничего не проверяет.
+  [ -n "$installed_arg" ] || return 0
+  awk -v n="$(manifest_field "$MANIFEST_TMP" RELEASE_VERSION)" -v o="$(manifest_field "$installed_arg" RELEASE_VERSION)" 'BEGIN{sub(/^0+/,"",n);sub(/^0+/,"",o);if(length(n)!=length(o)) exit !(length(n)>=length(o));exit !(n "x">=o "x")}' || die 'Установлена версия новее, чем последняя в выбранном канале обновлений; обновление появится со следующим релизом'
+}
 check_schema_release() {
   [ "$(manifest_field "$MANIFEST_TMP" FORMAT_VERSION)" = 2 ] || die 'Подготовка требует формат 2'
-  new_version=$(manifest_field "$MANIFEST_TMP" RELEASE_VERSION)
   new_schema=$(manifest_field "$MANIFEST_TMP" CONFIG_SCHEMA_VERSION)
   old_schema=1
   if [ -n "$installed_arg" ]; then
-    old_version=$(manifest_field "$installed_arg" RELEASE_VERSION)
     old_schema=$(manifest_field "$installed_arg" CONFIG_SCHEMA_VERSION)
-    awk -v n="$new_version" -v o="$old_version" 'BEGIN{sub(/^0+/,"",n);sub(/^0+/,"",o);if(length(n)!=length(o)) exit !(length(n)>=length(o));exit !(n "x">=o "x")}' || die 'Переход на более старый релиз запрещён'
+    check_release_not_older
   fi
   if [ -f "$UPDATE_STATE_DIR/config-schema-version" ]; then
     old_schema=$(cat "$UPDATE_STATE_DIR/config-schema-version")

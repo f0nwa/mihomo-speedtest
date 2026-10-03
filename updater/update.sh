@@ -6,9 +6,14 @@ export LC_ALL
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
-UPDATER_VERSION=6
+UPDATER_VERSION=7
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
+# Канал обновлений: stable (releases/latest) или dev (наибольший тег x.y.z
+# среди последних релизов любого вида, включая pre-release). См.
+# read_update_channel и resolve_channel_base.
+UPDATE_ENV_FILE=${UPDATE_ENV_FILE:-/opt/etc/mihomo-speedtest/speedtest2.env}
+UPDATE_RELEASES_API=${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
 UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-/opt/etc/mihomo-speedtest/.update}
 MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
@@ -203,8 +208,58 @@ bootstrap_header() {
 pinned_base() {
   case $UPDATE_RELEASE_BASE in
     */releases/latest/download) PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(manifest_field "$MANIFEST_TMP" RELEASE_TAG) ;;
+    */releases/download/*) check_pinned_tag; PINNED_BASE=$UPDATE_RELEASE_BASE ;;
     *) die 'Подготовка требует источник .../releases/latest/download' ;;
   esac
+}
+check_pinned_tag() {
+  # Закреплённая база .../releases/download/<T> обязана отдавать манифест
+  # именно релиза T (канал dev и дочерний bootstrap-процесс).
+  case $UPDATE_RELEASE_BASE in
+    */releases/download/*)
+      pinned_tag=${UPDATE_RELEASE_BASE##*/releases/download/}
+      [ "$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)" = "$pinned_tag" ] || die 'Манифест не соответствует выбранному релизу' ;;
+  esac
+}
+read_update_channel() {
+  # Окружение важнее файла настроек; в файле действует последняя строка.
+  channel=${UPDATE_CHANNEL:-}
+  if [ -z "$channel" ] && [ -f "$UPDATE_ENV_FILE" ] && [ -r "$UPDATE_ENV_FILE" ]; then
+    channel=$(sed -n 's/^[[:space:]]*UPDATE_CHANNEL=//p' "$UPDATE_ENV_FILE" | tail -n 1 | tr -d "\"'[:space:]")
+  fi
+  case $channel in dev) echo dev ;; *) echo stable ;; esac
+}
+resolve_channel_base() {
+  # Только для dev и только пока база не закреплена: дочерние движки
+  # получают уже закреплённую (экспортированную) базу и API не запрашивают.
+  # Маркеры дочернего движка проверяются отдельно: родитель v6 базу не
+  # экспортирует и запускает child с манифестом stable-релиза.
+  [ -z "${UPDATE_BOOTSTRAP_DIR:-}${UPDATE_VERIFIED_ENGINE_DIR:-}${UPDATE_RECOVERY_ENGINE_DIR:-}" ] || return 0
+  [ "$(read_update_channel)" = dev ] || return 0
+  case $UPDATE_RELEASE_BASE in */releases/latest/download) ;; *) return 0 ;; esac
+  download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 1048576
+  # Не первый релиз по дате, а наибольший тег x.y.z среди последних
+  # релизов: стабильный hotfix (1.2.1), вышедший после dev 1.3.0, не должен
+  # откатывать канал dev. Теги не вида x.y.z (старые v1..v26.x) пропускаются.
+  dev_tag=$(awk '
+    function newer(a, b,   x, y, i) {
+      split(a, x, "."); split(b, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 > y[i] + 0
+      return 0
+    }
+    {
+      s = $0
+      while (match(s, /"tag_name"[ \t]*:[ \t]*"[^"]*"/)) {
+        t = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        sub(/^"tag_name"[ \t]*:[ \t]*"/, "", t); sub(/"$/, "", t)
+        if (t ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ && (best == "" || newer(t, best))) best = t
+      }
+    }
+    END { if (best != "") print best }' "$WORK/releases.json")
+  printf '%s\n' "$dev_tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*$' || die 'Не удалось определить последний релиз канала разработки'
+  UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$dev_tag
+  export UPDATE_RELEASE_BASE
+  validate_release_base
 }
 bootstrap_prepare() {
   bootstrap_header
@@ -400,18 +455,23 @@ if [ "$full_config_diff" = 1 ] && [ "$format" = json ]; then die 'Полный d
 if [ "$full_config_diff" = 1 ] && [ "$cmd" != show-config-diff ]; then die '--full-config-diff применяется только при --show-config-diff'; fi
 case $UPDATE_HTTP_TIMEOUT in *[!0-9]*|'') die 'Неверный таймаут загрузки' ;; esac
 [ "$UPDATE_HTTP_TIMEOUT" -gt 0 ] || die 'Неверный таймаут загрузки'
-case $UPDATE_RELEASE_BASE in *'@'*|*'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'Неверный URL источника' ;; esac
-url_authority=${UPDATE_RELEASE_BASE#*://}; url_authority=${url_authority%%/*}
-[ -n "$url_authority" ] || die 'Неверный URL источника'
-case $UPDATE_RELEASE_BASE in
-  https://*) : ;;
-  http://*)
-    case $url_authority in localhost:*|127.0.0.1:*) ;; *) die 'HTTP допускается только для локального сервера' ;; esac
-    url_port=${url_authority##*:}
-    case $url_port in *[!0-9]*|'') die 'Неверный порт локального сервера' ;; esac
-    [ "${#url_port}" -le 5 ] && [ "$url_port" -ge 1 ] && [ "$url_port" -le 65535 ] || die 'Неверный порт локального сервера' ;;
-  *) die 'Источник требует HTTPS' ;;
-esac
+validate_release_base() {
+  case $UPDATE_RELEASE_BASE in *'@'*|*'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'Неверный URL источника' ;; esac
+  url_authority=${UPDATE_RELEASE_BASE#*://}; url_authority=${url_authority%%/*}
+  [ -n "$url_authority" ] || die 'Неверный URL источника'
+  case $UPDATE_RELEASE_BASE in
+    https://*) : ;;
+    http://*)
+      case $url_authority in localhost:*|127.0.0.1:*) ;; *) die 'HTTP допускается только для локального сервера' ;; esac
+      url_port=${url_authority##*:}
+      case $url_port in *[!0-9]*|'') die 'Неверный порт локального сервера' ;; esac
+      [ "${#url_port}" -le 5 ] && [ "$url_port" -ge 1 ] && [ "$url_port" -le 65535 ] || die 'Неверный порт локального сервера' ;;
+    *) die 'Источник требует HTTPS' ;;
+  esac
+}
+# Исходная база проверяется до любых сетевых запросов (включая API канала
+# dev); итоговая база канала dev проверяется повторно в resolve_channel_base.
+validate_release_base
 TMPROOT=$(CDPATH= cd -- "$TMPROOT" && pwd -P) || die 'TMPROOT недоступен'
 case $TMPROOT in /opt|/opt/*|/) die 'Рабочий каталог должен находиться во временном разделе' ;; esac
 WORK=$(mktemp -d "$TMPROOT/mst-update-work.XXXXXX")
@@ -429,6 +489,10 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 MANIFEST_TMP=$WORK/manifest.txt
+# Канал dev закрепляет базу на наибольшем теге x.y.z среди последних
+# релизов GitHub (включая pre-release).
+# Команды без загрузки релиза (discard-plan, rollback-last, recover) не трогаем.
+case $cmd in check|plan|prepare|verify-plan|show-config-diff|apply) resolve_channel_base ;; esac
 case $cmd in
   discard-plan)
     . "$DIR/update_prepare.sh"
@@ -479,6 +543,7 @@ case $cmd in
       cp "$UPDATE_PINNED_MANIFEST" "$MANIFEST_TMP"
     else
       download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144
+      check_pinned_tag
     fi ;;
 esac
 if [ "$cmd" = prepare ]; then
@@ -523,5 +588,10 @@ SHA_TOOL=$(sha256_tool) || die 'Не найден инструмент SHA256'
 prepare_init
 assert_no_transaction
 build_snapshot
+# --plan: установленная версия новее манифеста (переключение dev -> stable)
+# - то же дружелюбное сообщение, что и при подготовке; веб-проверка
+# показывает ошибку --plan вместо кнопки "Обновить". --check остаётся
+# информационным.
+if [ "$cmd" = plan ]; then check_release_not_older; fi
 if [ "$cmd" = prepare ]; then prepare_files; fi
 print_plan

@@ -14,6 +14,7 @@ export MST_LIB_ONLY=1
 [ -n "$DIR" ] && [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
 LOG_TAG=settings   # метка строк формы настроек в живом журнале (см. say() в speedtest2.sh)
 MAX_TESTED=${MAX_TESTED:-40}
+UPDATE_CHANNEL=${UPDATE_CHANNEL:-stable}   # канал обновлений: stable или dev (читает stats_update.sh; всё кроме dev = stable)
 UPDATE_CHECK_HOURS=${UPDATE_CHECK_HOURS:-12}   # раз во сколько часов cron проверяет обновления (см. cmd_cron_sync() в stats_update.sh)
 
 if [ -z "$DIR" ] || ! command -v render_stats >/dev/null 2>&1; then
@@ -215,6 +216,11 @@ validate_settings_fields() {
     *) _add_err update_check_hours "Частота проверки обновлений: 1, 2, 3, 4, 6, 8, 12 или 24 часа." ;;
   esac
 
+  case $update_channel in
+    stable|dev) ;;
+    *) _add_err update_channel "Канал обновлений: stable или dev." ;;
+  esac
+
   if ! is_uint "$node_cap" || [ "$node_cap" -lt 1 ] || [ "$node_cap" -gt 50 ]; then
     _add_err node_cap "«Сколько нод показывать в ленте доступности сразу» должно быть от 1 до 50."
   fi
@@ -315,7 +321,7 @@ print_settings_json() {
   # гео-фильтра мог бы незаметно потеряться. Числовые поля ниже такому
   # риску не подвержены (уже провалидированы как целые/десятичные) -
   # для них "-v" как и везде в проекте.
-  MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" \
+  MST_API_GEO="$BLOCK" MST_API_EXTYPE="$EXTYPE" MST_API_CHANNEL="$UPDATE_CHANNEL" \
   awk -v node_cap="$STATS_NODE_CAP" -v keep_runs="$HISTORY_KEEP_RUNS" \
       -v keep_days="$HISTORY_KEEP_DAYS" \
       -v max_tested="$MAX_TESTED" -v update_check_hours="$UPDATE_CHECK_HOURS" \
@@ -328,8 +334,10 @@ print_settings_json() {
     BEGIN {
       geo_filter = ENVIRON["MST_API_GEO"]
       extype = ENVIRON["MST_API_EXTYPE"]
+      update_channel = ENVIRON["MST_API_CHANNEL"]
       printf "{\"ok\":true,\"values\":{"
       printf "\"max_tested\":%d,\"update_check_hours\":%d,", max_tested + 0, update_check_hours + 0
+      printf "\"update_channel\":\"%s\",", esc(update_channel)
       printf "\"node_cap\":%d,\"keep_runs\":%d,\"keep_days\":%d,", node_cap + 0, keep_runs + 0, keep_days + 0
       printf "\"geo_filter\":\"%s\",\"extype\":\"%s\",", esc(geo_filter), esc(extype)
       printf "\"size_mb\":%s,\"dl_timeout\":%d,", size_mb + 0, dl_timeout + 0
@@ -363,6 +371,7 @@ if [ "$method" = "POST" ]; then
   RAW_stability_window=""; RAW_stability_drop_after=""
   RAW_max_tested="$MAX_TESTED"
   RAW_update_check_hours="$UPDATE_CHECK_HOURS"
+  RAW_update_channel="$UPDATE_CHANNEL"
   RAW_action=""
   eval "$(parse_body_fields)"
   if [ "$RAW_action" = reset_node_stats ]; then
@@ -373,6 +382,7 @@ if [ "$method" = "POST" ]; then
   node_cap=$(urldecode "$RAW_node_cap")
   max_tested=$(urldecode "$RAW_max_tested")
   update_check_hours=$(urldecode "$RAW_update_check_hours")
+  update_channel=$(urldecode "$RAW_update_channel")
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
   geo_filter=$(normalize_block "$(urldecode "$RAW_geo_filter")")
@@ -409,6 +419,7 @@ if [ "$method" = "POST" ]; then
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
     set_env_var UPDATE_CHECK_HOURS "$update_check_hours"
+    set_env_var UPDATE_CHANNEL "$update_channel"
     if [ "$env_write_failed" = 1 ]; then
       _add_err save "Не удалось записать $ENV (нет места или файловая система только для чтения) - часть настроек не сохранена."
     fi

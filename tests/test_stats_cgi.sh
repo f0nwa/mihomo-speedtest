@@ -115,6 +115,7 @@ assert_contains '"max_tested":40' "$OUT_GET" "GET default candidate limit"
 assert_contains '"min_winners":3' "$OUT_GET" "GET default min_winners"
 assert_contains '"stability_window":200' "$OUT_GET" "GET default stability_window"
 assert_contains '"stability_drop_after":200' "$OUT_GET" "GET default stability_drop_after (= HISTORY_KEEP_RUNS)"
+assert_contains '"update_channel":"stable"' "$OUT_GET" "GET default update_channel (stable)"
 
 # --- POST валидный: сохраняет, перегенерирует stats.json, отвечает {"ok":true} ---
 OUT_POST=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=ru-block&$OK_TUNING&max_tested=12")
@@ -296,6 +297,20 @@ grep -qF "BLOCK='ru-block2'" "$W/speedtest2.env" || fail "JSON valid POST did no
 OUT_JSON_GET2=$(run_cgi_json GET)
 assert_contains '"node_cap":4' "$OUT_JSON_GET2" "JSON GET reflects saved node_cap"
 assert_contains '"geo_filter":"ru-block2"' "$OUT_JSON_GET2" "JSON GET reflects saved geo_filter"
+
+# --- канал обновлений: stable/dev, строка UPDATE_CHANNEL в env ---
+OUT_CH=$(run_cgi_json POST "node_cap=4&keep_runs=50&keep_days=10&geo_filter=ru-block2&$OK_TUNING&update_channel=dev")
+assert_contains '{"ok":true}' "$OUT_CH" "POST update_channel=dev ok"
+grep -qF "UPDATE_CHANNEL='dev'" "$W/speedtest2.env" || fail "UPDATE_CHANNEL='dev' not saved"
+assert_contains '"update_channel":"dev"' "$(run_cgi_json GET)" "JSON GET reflects update_channel=dev"
+OUT_CH_BAD=$(run_cgi_json POST "node_cap=4&keep_runs=50&keep_days=10&geo_filter=ru-block2&$OK_TUNING&update_channel=beta")
+assert_contains '"ok":false' "$OUT_CH_BAD" "POST update_channel=beta rejected"
+assert_contains '"update_channel":"' "$OUT_CH_BAD" "error keyed by update_channel"
+assert_contains 'Канал обновлений: stable или dev.' "$OUT_CH_BAD" "update_channel error text"
+grep -qF "UPDATE_CHANNEL='dev'" "$W/speedtest2.env" || fail "invalid update_channel changed env"
+# без поля в теле канал остаётся прежним
+run_cgi_json POST "node_cap=4&keep_runs=50&keep_days=10&geo_filter=ru-block2&$OK_TUNING" >/dev/null
+grep -qF "UPDATE_CHANNEL='dev'" "$W/speedtest2.env" || fail "omitted update_channel must keep current value"
 
 if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$OUT_JSON_GET2" | tail -n +3 > "$TEST_ROOT/api_settings_get.json"

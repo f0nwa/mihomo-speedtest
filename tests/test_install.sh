@@ -740,6 +740,17 @@ grep -qF "STATS_HTTP_ENABLE=0" "$WORK_ENV/speedtest2.env" \
   || { echo "FAIL: write_env потерял STATS_HTTP_ENABLE=0 при переустановке" >&2; exit 1; }
 rm -rf "$WORK_ENV"
 
+# UPDATE_CHANNEL (канал обновлений из веб-настроек) переживает переустановку
+WORK_ENV_CH=$(mktemp -d)
+printf "SOURCES='old'\nBLOCK='old'\nMIN_SPEED='1'\nUPDATE_CHANNEL='dev'\n" > "$WORK_ENV_CH/speedtest2.env"
+(
+  INSTALL_LIB_ONLY=1 SELFDIR="$ROOT/installer" . "$SCRIPT"
+  SOURCES=new BLOCK=new MIN_SPEED=1 BLOCK_SOURCE=test write_env "$WORK_ENV_CH/speedtest2.env"
+)
+grep -qxF "UPDATE_CHANNEL='dev'" "$WORK_ENV_CH/speedtest2.env" \
+  || { echo "FAIL: write_env потерял UPDATE_CHANNEL='dev' при переустановке" >&2; exit 1; }
+rm -rf "$WORK_ENV_CH"
+
 WORK_ENV2=$(mktemp -d)
 (
   INSTALL_LIB_ONLY=1 SELFDIR="$ROOT/installer" . "$SCRIPT"

@@ -1,23 +1,39 @@
 #!/bin/sh
-# Собирает и публикует очередной релиз проекта на GitHub (releases/latest/
-# download/...) - канал, из которого install.sh (curl | sh) и update.sh
-# реально качают файлы; git push его не трогает и не пересобирает (см.
-# AGENTS.md, "После коммита и пуша - сразу инструкции по публикации
-# релиза"). Запускается владельцем на своей машине с настоящим доступом к
-# github.com - публикацию (gh release create) агент не выполняет.
+# Собирает и публикует очередной релиз проекта на GitHub - канал, из
+# которого install.sh (curl | sh) и update.sh реально качают файлы; git
+# push его не трогает и не пересобирает (см. AGENTS.md, "После коммита и
+# пуша - сразу инструкции по публикации релиза"). Запускается владельцем
+# на своей машине с настоящим доступом к github.com - публикацию (gh
+# release create) агент не выполняет.
 #
-# Без --release-version/--min-updater/--config-schema сам определяет
-# текущий опубликованный релиз (releases/latest/download/manifest.txt) и
-# берёт следующий RELEASE_VERSION (+1), оставляя MIN_UPDATER_VERSION/
-# CONFIG_SCHEMA_VERSION как есть - их поднимают вручную флагом только
-# если реально менялся протокол обновлятора или схема config.yaml.
+# Каналы: ветка main -> stable, ветка dev -> dev (иначе ошибка); --channel
+# stable|dev перекрывает ветку. dev публикуется как pre-release
+# (gh release create --prerelease), поэтому releases/latest всегда
+# стабильный.
 #
-# Имена релизов: до v26 включительно тег = v<RELEASE_VERSION>. С
-# RELEASE_VERSION 27 тег - дата публикации vГГ.М.Д (v26.9.29), второй и
-# следующие релизы того же дня - v26.9.29.2, v26.9.29.3 и т.д.
-# RELEASE_VERSION при этом остаётся внутренним счётчиком +1: по нему
-# update.sh сравнивает версии, и уже установленные роутеры принимают
-# только целое число. Тег можно задать явно флагом --tag.
+# Теги x.y.z: main - чётный minor (1.0.0, 1.0.1, 1.2.0), dev - нечётный
+# (1.1.0, 1.1.1, 1.3.0). Следующий тег считает release/next_tag.sh по
+# списку тегов из gh release list; --promote (stable: продвинуть текущий
+# dev) и --major (новый major) передаются ему как есть. Тег можно задать
+# явно флагом --tag. Старые теги v1..v26.x не трогаются и игнорируются.
+#
+# RELEASE_VERSION - внутренний целый счётчик, общий для обоих каналов: по
+# нему update.sh сравнивает версии. Без --release-version/--min-updater/
+# --config-schema читаются два манифеста: releases/latest/download/
+# manifest.txt (самый новый стабильный) и, если есть dev-тег x.y.z
+# (нечётный minor), releases/download/<наибольший dev-тег>/manifest.txt.
+# RELEASE_VERSION = максимум из двух + 1, MIN_UPDATER_VERSION/
+# CONFIG_SCHEMA_VERSION - как есть из манифеста с большим RELEASE_VERSION;
+# их поднимают флагом только если реально менялся протокол обновлятора или
+# схема config.yaml. Явные флаги важнее.
+#
+# Публикация (без --dry-run) требует, чтобы HEAD был запушен (совпадал с
+# upstream ветки), и создаёт тег именно на нём (gh release create --target).
+#
+# --dry-run печатает CHANNEL/TAG/RELEASE_VERSION/MIN_UPDATER_VERSION/
+# CONFIG_SCHEMA_VERSION/PRERELEASE и выходит, ничего не собирая. Ему всё
+# равно нужны gh и сеть до github.com (список тегов, манифесты), если тег
+# и версии не заданы флагами.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -26,7 +42,7 @@ cd "$ROOT"
 REPO=${RELEASE_REPO:-f0nwa/mihomo-speedtest}
 
 usage() {
-  echo "Использование: $0 \"<текст --notes>\" [--release-version N] [--min-updater N] [--config-schema N] [--tag TAG]" >&2
+  echo "Использование: $0 \"<текст --notes>\" [--channel stable|dev] [--promote] [--major] [--tag TAG] [--release-version N] [--min-updater N] [--config-schema N] [--dry-run]" >&2
   exit 2
 }
 
@@ -38,30 +54,91 @@ NEW_VERSION=""
 MIN_UPDATER=""
 CONFIG_SCHEMA=""
 TAG=""
-DATE_TAGS_FROM=27   # с этого RELEASE_VERSION тег - дата (см. шапку)
+CHANNEL=""
+PROMOTE=""
+MAJOR=""
+DRY_RUN=0
 while [ $# -gt 0 ]; do
+  case "$1" in
+    --release-version|--min-updater|--config-schema|--tag|--channel)
+      [ $# -ge 2 ] || { echo "Для $1 нужно значение" >&2; usage; } ;;
+  esac
   case "$1" in
     --release-version) NEW_VERSION=$2; shift 2 ;;
     --min-updater) MIN_UPDATER=$2; shift 2 ;;
     --config-schema) CONFIG_SCHEMA=$2; shift 2 ;;
     --tag) TAG=$2; shift 2 ;;
+    --channel) CHANNEL=$2; shift 2 ;;
+    --promote) PROMOTE=--promote; shift ;;
+    --major) MAJOR=--major; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) echo "Неизвестный аргумент: $1" >&2; usage ;;
   esac
 done
 
-if [ -z "$NEW_VERSION" ] || [ -z "$MIN_UPDATER" ] || [ -z "$CONFIG_SCHEMA" ]; then
-  echo "cut_release.sh: Читаю опубликованный manifest.txt (releases/latest/download) для определения текущих версий..." >&2
-  PUBLISHED=$(curl -fsSL "https://github.com/$REPO/releases/latest/download/manifest.txt") || {
-    echo "cut_release.sh: Не удалось скачать опубликованный manifest.txt - если это первый релиз или сети сейчас нет, передайте --release-version/--min-updater/--config-schema явно" >&2
+if [ -z "$CHANNEL" ]; then
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=""
+  case $branch in
+    main) CHANNEL=stable ;;
+    dev) CHANNEL=dev ;;
+    *) echo "cut_release.sh: Релиз выпускается только из веток main или dev (сейчас: ${branch:-неизвестно}); канал можно задать флагом --channel" >&2; exit 1 ;;
+  esac
+fi
+case $CHANNEL in
+  stable) PRERELEASE=0 ;;
+  dev) PRERELEASE=1 ;;
+  *) echo "cut_release.sh: Неизвестный канал: $CHANNEL (нужен stable или dev)" >&2; exit 2 ;;
+esac
+
+command -v gh >/dev/null 2>&1 || { echo "cut_release.sh: Не найден gh (GitHub CLI) - установите его перед публикацией" >&2; exit 1; }
+
+# Список тегов нужен и для подбора тега, и для поиска наибольшего dev-тега.
+ALL_TAGS=
+if [ -z "$TAG" ] || [ -z "$NEW_VERSION" ] || [ -z "$MIN_UPDATER" ] || [ -z "$CONFIG_SCHEMA" ]; then
+  # pipefail нет в POSIX sh: теги сначала в переменную, чтобы ошибку gh не потерять.
+  ALL_TAGS=$(gh release list --repo "$REPO" --limit 1000 --exclude-drafts --json tagName --jq '.[].tagName') || {
+    echo "cut_release.sh: Не удалось получить список тегов (gh release list) - передайте --tag/--release-version/--min-updater/--config-schema явно" >&2
     exit 1
   }
-  CUR_VERSION=$(printf '%s\n' "$PUBLISHED" | sed -n 's/^RELEASE_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
-  CUR_MIN_UPDATER=$(printf '%s\n' "$PUBLISHED" | sed -n 's/^MIN_UPDATER_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
-  CUR_CONFIG_SCHEMA=$(printf '%s\n' "$PUBLISHED" | sed -n 's/^CONFIG_SCHEMA_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
-  [ -n "$CUR_VERSION" ] || { echo "cut_release.sh: Не удалось разобрать RELEASE_VERSION из опубликованного manifest.txt" >&2; exit 1; }
-  [ -n "$CUR_MIN_UPDATER" ] || { echo "cut_release.sh: Не удалось разобрать MIN_UPDATER_VERSION из опубликованного manifest.txt" >&2; exit 1; }
-  [ -n "$CUR_CONFIG_SCHEMA" ] || { echo "cut_release.sh: Не удалось разобрать CONFIG_SCHEMA_VERSION из опубликованного manifest.txt" >&2; exit 1; }
-  echo "cut_release.sh: Текущий опубликованный релиз v$CUR_VERSION (MIN_UPDATER_VERSION=$CUR_MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CUR_CONFIG_SCHEMA)" >&2
+fi
+
+# read_manifest URL LABEL: скачивает manifest.txt и выставляет M_VERSION,
+# M_MIN_UPDATER, M_CONFIG_SCHEMA.
+read_manifest() {
+  echo "cut_release.sh: Читаю manifest.txt ($2)..." >&2
+  m_text=$(curl -fsSL "$1") || {
+    echo "cut_release.sh: Не удалось скачать manifest.txt ($2) - если сети сейчас нет, передайте --release-version/--min-updater/--config-schema явно" >&2
+    exit 1
+  }
+  M_VERSION=$(printf '%s\n' "$m_text" | sed -n 's/^RELEASE_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
+  M_MIN_UPDATER=$(printf '%s\n' "$m_text" | sed -n 's/^MIN_UPDATER_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
+  M_CONFIG_SCHEMA=$(printf '%s\n' "$m_text" | sed -n 's/^CONFIG_SCHEMA_VERSION=\([0-9][0-9]*\)$/\1/p' | head -n1)
+  [ -n "$M_VERSION" ] || { echo "cut_release.sh: Не удалось разобрать RELEASE_VERSION из manifest.txt ($2)" >&2; exit 1; }
+  [ -n "$M_MIN_UPDATER" ] || { echo "cut_release.sh: Не удалось разобрать MIN_UPDATER_VERSION из manifest.txt ($2)" >&2; exit 1; }
+  [ -n "$M_CONFIG_SCHEMA" ] || { echo "cut_release.sh: Не удалось разобрать CONFIG_SCHEMA_VERSION из manifest.txt ($2)" >&2; exit 1; }
+}
+
+if [ -z "$NEW_VERSION" ] || [ -z "$MIN_UPDATER" ] || [ -z "$CONFIG_SCHEMA" ]; then
+  # Самый новый стабильный (releases/latest; до каналов это v26.x) и
+  # наибольший dev-тег x.y.z (нечётный minor), если он есть: побеждает
+  # манифест с большим RELEASE_VERSION. Порядок gh release list по дате
+  # не используется - два релиза на одном коммите упорядочены неоднозначно.
+  read_manifest "https://github.com/$REPO/releases/latest/download/manifest.txt" "последний стабильный релиз"
+  CUR_VERSION=$M_VERSION CUR_MIN_UPDATER=$M_MIN_UPDATER CUR_CONFIG_SCHEMA=$M_CONFIG_SCHEMA CUR_FROM=latest
+  DEV_TAG=$(printf '%s\n' "$ALL_TAGS" | awk -F. '
+    /^[0-9]+\.[0-9]+\.[0-9]+$/ && $2 % 2 == 1 {
+      if (best == "" || $1 + 0 > b1 || ($1 + 0 == b1 && ($2 + 0 > b2 || ($2 + 0 == b2 && $3 + 0 > b3)))) {
+        best = $0; b1 = $1 + 0; b2 = $2 + 0; b3 = $3 + 0
+      }
+    }
+    END { if (best != "") print best }')
+  if [ -n "$DEV_TAG" ]; then
+    read_manifest "https://github.com/$REPO/releases/download/$DEV_TAG/manifest.txt" "dev-релиз $DEV_TAG"
+    if [ "$M_VERSION" -gt "$CUR_VERSION" ]; then
+      CUR_VERSION=$M_VERSION CUR_MIN_UPDATER=$M_MIN_UPDATER CUR_CONFIG_SCHEMA=$M_CONFIG_SCHEMA CUR_FROM=$DEV_TAG
+    fi
+  fi
+  echo "cut_release.sh: Текущие версии взяты из релиза $CUR_FROM (RELEASE_VERSION=$CUR_VERSION, MIN_UPDATER_VERSION=$CUR_MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CUR_CONFIG_SCHEMA)" >&2
   [ -n "$NEW_VERSION" ] || NEW_VERSION=$((CUR_VERSION + 1))
   [ -n "$MIN_UPDATER" ] || MIN_UPDATER=$CUR_MIN_UPDATER
   [ -n "$CONFIG_SCHEMA" ] || CONFIG_SCHEMA=$CUR_CONFIG_SCHEMA
@@ -71,25 +148,25 @@ case $NEW_VERSION in (*[!0-9]*|'') echo "release-version должен быть �
 case $MIN_UPDATER in (*[!0-9]*|'') echo "min-updater должен быть целым числом" >&2; exit 2;; esac
 case $CONFIG_SCHEMA in (*[!0-9]*|'') echo "config-schema должен быть целым числом" >&2; exit 2;; esac
 
-
-command -v gh >/dev/null 2>&1 || { echo "cut_release.sh: Не найден gh (GitHub CLI) - установите его перед публикацией" >&2; exit 1; }
-
 if [ -z "$TAG" ]; then
-  if [ "$NEW_VERSION" -lt "$DATE_TAGS_FROM" ]; then
-    TAG="v$NEW_VERSION"
-  else
-    # vГГ.М.Д без ведущих нулей; занятый тег -> .2, .3, ...
-    day_tag=v$(date '+%y %m %d' | awk '{ printf "%d.%d.%d", $1, $2, $3 }')
-    TAG=$day_tag
-    day_n=1
-    while gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; do
-      day_n=$((day_n + 1))
-      TAG=$day_tag.$day_n
-    done
-  fi
+  # shellcheck disable=SC2086
+  TAG=$(printf '%s\n' "$ALL_TAGS" | sh release/next_tag.sh "$CHANNEL" $PROMOTE $MAJOR) || exit 1
 fi
 case $TAG in (''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*|*..*) echo "cut_release.sh: Недопустимый тег: $TAG" >&2; exit 2;; esac
-echo "cut_release.sh: Готовлю $TAG (RELEASE_VERSION=$NEW_VERSION, MIN_UPDATER_VERSION=$MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CONFIG_SCHEMA)" >&2
+echo "cut_release.sh: Готовлю $TAG, канал $CHANNEL (RELEASE_VERSION=$NEW_VERSION, MIN_UPDATER_VERSION=$MIN_UPDATER, CONFIG_SCHEMA_VERSION=$CONFIG_SCHEMA)" >&2
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf 'CHANNEL=%s\nTAG=%s\nRELEASE_VERSION=%s\nMIN_UPDATER_VERSION=%s\nCONFIG_SCHEMA_VERSION=%s\nPRERELEASE=%s\n' \
+    "$CHANNEL" "$TAG" "$NEW_VERSION" "$MIN_UPDATER" "$CONFIG_SCHEMA" "$PRERELEASE"
+  exit 0
+fi
+
+# Тег создаётся на текущем коммите (--target), а не на ветке по умолчанию
+# GitHub: иначе dev-релиз пометил бы код main. Поэтому HEAD обязан быть
+# уже запушен - тот же коммит, что и upstream текущей ветки.
+HEAD_SHA=$(git rev-parse HEAD) || { echo "cut_release.sh: Не удалось определить текущий коммит (git rev-parse HEAD)" >&2; exit 1; }
+UPSTREAM_SHA=$(git rev-parse '@{u}' 2>/dev/null) || { echo "cut_release.sh: У текущей ветки нет upstream - сначала выполните git push -u, затем повторите публикацию" >&2; exit 1; }
+[ "$HEAD_SHA" = "$UPSTREAM_SHA" ] || { echo "cut_release.sh: Текущий коммит не запушен (HEAD $HEAD_SHA, upstream $UPSTREAM_SHA) - сначала выполните git push, затем повторите публикацию" >&2; exit 1; }
 
 sha_tool() {
   if command -v sha256sum >/dev/null 2>&1; then echo sha256sum
@@ -156,7 +233,11 @@ mv "$WORK/SHA256SUMS.tmp" "$ASSETS/SHA256SUMS"
 echo "cut_release.sh: Публикую $TAG в $REPO..." >&2
 (
   cd "$ASSETS"
-  gh release create "$TAG" ./* --repo "$REPO" --title "$TAG" --notes "$NOTES"
+  if [ "$PRERELEASE" = 1 ]; then
+    gh release create "$TAG" ./* --repo "$REPO" --target "$HEAD_SHA" --title "$TAG" --notes "$NOTES" --prerelease
+  else
+    gh release create "$TAG" ./* --repo "$REPO" --target "$HEAD_SHA" --title "$TAG" --notes "$NOTES"
+  fi
 )
 
-echo "cut_release.sh: Готово. Проверка: curl -s https://github.com/$REPO/releases/latest/download/manifest.txt | head -6" >&2
+echo "cut_release.sh: Готово. Проверка: curl -s https://github.com/$REPO/releases/download/$TAG/manifest.txt | head -6" >&2

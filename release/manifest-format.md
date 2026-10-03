@@ -12,7 +12,7 @@
 ```text
 FORMAT_VERSION=2
 RELEASE_VERSION=9
-RELEASE_TAG=v9
+RELEASE_TAG=1.2.0
 MIN_UPDATER_VERSION=4
 CONFIG_SCHEMA_VERSION=1
 ```
@@ -21,10 +21,29 @@ CONFIG_SCHEMA_VERSION=1
 обязателен для формата 2, начинается с буквы ASCII или цифры, далее допускает
 буквы ASCII, цифры, точку, дефис и подчёркивание; последовательность `..`
 запрещена. Это точное имя неизменяемого GitHub-тега, а не ветка main.
-С RELEASE_VERSION 27 тег - дата публикации `vГГ.М.Д` (например `v26.9.29`,
-второй релиз того же дня - `v26.9.29.2`); его подбирает
+Начиная с каналов релизов тег - `x.y.z` без префикса `v`: стабильные
+релизы (ветка `main`) имеют чётный minor (1.0.0, 1.0.1, 1.2.0), dev-релизы
+(ветка `dev`) - нечётный (1.1.0, 1.1.1, 1.3.0). Старые теги (`v1`...
+`v26.10.3.4`) не меняются. Тег подбирает `release/next_tag.sh` из
 `release/cut_release.sh`. Пользователю версия показывается по тегу, а
-RELEASE_VERSION остаётся целым счётчиком для сравнения версий.
+RELEASE_VERSION остаётся целым счётчиком для сравнения версий, общим для
+обоих каналов: новое значение = максимум RELEASE_VERSION из манифеста
+`releases/latest/download/manifest.txt` (самый новый стабильный) и
+манифеста наибольшего dev-тега x.y.z (нечётный minor), если такой есть,
++ 1; MIN_UPDATER_VERSION/CONFIG_SCHEMA_VERSION берутся из манифеста с
+большим RELEASE_VERSION (явные флаги cut_release.sh важнее). dev-релиз публикуется как pre-release, поэтому
+`releases/latest` всегда указывает на стабильный релиз.
+
+Канал роутера задаёт `UPDATE_CHANNEL=stable|dev` (окружение или
+`speedtest2.env`, по умолчанию `stable`). stable качает манифест из
+`releases/latest/download`. dev берёт наибольший тег вида `x.y.z`
+(покомпонентное числовое сравнение) среди релизов любого канала из
+`UPDATE_RELEASES_API` (по умолчанию
+`https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10`;
+теги не вида x.y.z пропускаются, так что стабильный hotfix после dev-релиза
+не откатывает канал dev),
+качает манифест из `releases/download/<тег>` и требует, чтобы RELEASE_TAG
+манифеста совпал с этим тегом.
 
 В --check и --plan минимальная версия проверяется установленным CLI.
 --prepare получает четыре файла свежего обновлятора из точного RELEASE_TAG,
