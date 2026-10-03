@@ -56,7 +56,7 @@ chmod +x "$FAKE_INITD"
 # Валидные значения новых полей (порция 2 - "параметры замера скорости"),
 # отличные от дефолтов speedtest2.sh - чтобы отличать "сохранилось" от
 # "совпало с дефолтом по случайности".
-OK_TUNING="extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=100&stability_drop_after=50"
+OK_TUNING="extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=100&stability_drop_after=50&stable_min_uptime=70&stable_lookback=16&stable_min_runs=6"
 
 run_cgi() {
   # $1=METHOD, $2=тело (для POST) или "" для GET. Печатает вывод CGI в stdout.
@@ -114,6 +114,9 @@ assert_not_contains '"max_ping_ms"' "$OUT_GET" "GET has no misleading ping limit
 assert_contains '"max_tested":40' "$OUT_GET" "GET default candidate limit"
 assert_contains '"min_winners":3' "$OUT_GET" "GET default min_winners"
 assert_contains '"stability_window":200' "$OUT_GET" "GET default stability_window"
+assert_contains '"stable_min_uptime":80' "$OUT_GET" "GET default stable_min_uptime"
+assert_contains '"stable_lookback":24' "$OUT_GET" "GET default stable_lookback"
+assert_contains '"stable_min_runs":8' "$OUT_GET" "GET default stable_min_runs"
 assert_contains '"stability_drop_after":200' "$OUT_GET" "GET default stability_drop_after (= HISTORY_KEEP_RUNS)"
 assert_contains '"update_channel":"stable"' "$OUT_GET" "GET default update_channel (stable)"
 
@@ -136,6 +139,9 @@ grep -qF "TOPN='15'" "$W/speedtest2.env" || fail "TOPN not saved"
 grep -qF "ENOUGH='18'" "$W/speedtest2.env" || fail "ENOUGH not saved"
 grep -qF "MIN_WINNERS='2'" "$W/speedtest2.env" || fail "MIN_WINNERS not saved"
 grep -qF "STABILITY_WINDOW='100'" "$W/speedtest2.env" || fail "STABILITY_WINDOW not saved"
+grep -qF "STABLE_MIN_UPTIME='70'" "$W/speedtest2.env" || fail "STABLE_MIN_UPTIME not saved"
+grep -qF "STABLE_LOOKBACK='16'" "$W/speedtest2.env" || fail "STABLE_LOOKBACK not saved"
+grep -qF "STABLE_MIN_RUNS='6'" "$W/speedtest2.env" || fail "STABLE_MIN_RUNS not saved"
 grep -qF "STABILITY_DROP_AFTER='50'" "$W/speedtest2.env" || fail "STABILITY_DROP_AFTER not saved"
 [ ! -e "$W/stats_www/stats.html" ] || fail "устаревший stats.html не должен появляться после сохранения настроек"
 [ -s "$W/stats_www/stats.json" ] || fail "stats.json (JSON-режим render_stats.awk, шаг 4) was not (re)generated after valid POST"
@@ -180,6 +186,8 @@ assert_contains "TOPN" "$OUT_BAD9" "topn out of range"
 
 OUT_BAD10=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=0&stability_drop_after=50")
 assert_contains "окна стабильности" "$OUT_BAD10" "stability_window out of range"
+OUT_BAD11=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=100&stability_drop_after=50&stable_min_uptime=101")
+assert_contains "Минимальный Uptime" "$OUT_BAD11" "stable_min_uptime out of range"
 
 OUT_BAD11=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=Russia%7C%7CRU-&$OK_TUNING")
 assert_contains "пустые куски" "$OUT_BAD11" "geo_filter with empty segment rejected"

@@ -275,6 +275,48 @@ grep -q 'n0001' "$TEST_ROOT/win-mw4.txt" || fail "MIN_WINNERS+TOPN: самая �
 grep -q 'n0002' "$TEST_ROOT/win-mw4.txt" || fail "MIN_WINNERS+TOPN: вторая по скорости нода потеряна"
 grep -q 'n0003' "$TEST_ROOT/win-mw4.txt" && fail "MIN_WINNERS+TOPN: добор превысил TOPN"
 
+# --- Стабильность: нода с накопленной статистикой и uptime ниже
+#     STABLE_MIN_UPTIME за STABLE_LOOKBACK прогонов в пул не идёт, даже
+#     если быстрая; ноды без статистики проходят; нестабильные - последний
+#     резерв для MIN_WINNERS.
+STABLE_MIN_UPTIME=80; STABLE_LOOKBACK=10; STABLE_MIN_RUNS=5
+printf '%s\n' \
+  '500 n0001' \
+  '400 n0002' \
+  '300 n0003' \
+  '200 n0004' > "$TEST_ROOT/results-st.txt"
+printf 'n0001\tFlaky\nn0002\tSolid\nn0003\tNew\nn0004\tOldBad\n' > "$TEST_ROOT/map-st.txt"
+# Flaky: за последние 10 - 5 A из 10 (50%); Solid: 10/10; New: 3 проверки
+# (< STABLE_MIN_RUNS) - без фильтра; OldBad: плохо давно, последние 10 - все A.
+{
+  printf 'Flaky\tx\tx\tx\t0\t0\t0\t0\t0\t%s\n' 'AAAAAAAAAAADADADADAD'
+  printf 'Solid\tx\tx\tx\t0\t0\t0\t0\t0\t%s\n' 'AAAAAAAAAA'
+  printf 'New\tx\tx\tx\t0\t0\t0\t0\t0\t%s\n' '.......DDA'
+  printf 'OldBad\tx\tx\tx\t0\t0\t0\t0\t0\t%s\n' 'DDDDDDDDDDAAAAAAAAAA'
+} > "$TEST_ROOT/stab-st.tsv"
+select_winners "$TEST_ROOT/results-st.txt" "$TEST_ROOT/map-st.txt" "$TEST_ROOT/win-st.txt" 100 15 3 "$TEST_ROOT/stab-st.tsv"
+grep -q 'n0001' "$TEST_ROOT/win-st.txt" && fail "STABLE: нестабильная нода попала в пул"
+assert_eq "$(wc -l < "$TEST_ROOT/win-st.txt" | tr -d ' ')" 3
+grep -q 'Flaky' "$TEST_ROOT/win-st.txt.unstable" || fail "STABLE: отсеянная нода не записана в .unstable"
+grep -q '^50% Flaky$' "$TEST_ROOT/win-st.txt.unstable" || fail "STABLE: неверный uptime в .unstable"
+# MIN_WINNERS добирает нестабильной, только когда больше некем
+select_winners "$TEST_ROOT/results-st.txt" "$TEST_ROOT/map-st.txt" "$TEST_ROOT/win-st2.txt" 100 15 4 "$TEST_ROOT/stab-st.tsv"
+grep -q 'n0001' "$TEST_ROOT/win-st2.txt" || fail "STABLE: нестабильная нода не добрана как последний резерв"
+[ -s "$TEST_ROOT/win-st2.txt.unstable" ] && fail "STABLE: добранная нода не должна числиться отсеянной"
+# медленная стабильная добирается раньше быстрой нестабильной
+select_winners "$TEST_ROOT/results-st.txt" "$TEST_ROOT/map-st.txt" "$TEST_ROOT/win-st3.txt" 350 15 2 "$TEST_ROOT/stab-st.tsv"
+grep -q 'n0002' "$TEST_ROOT/win-st3.txt" || fail "STABLE: прошедшая порог стабильная потеряна"
+grep -q 'n0003' "$TEST_ROOT/win-st3.txt" || fail "STABLE: медленная стабильная не добрана раньше нестабильной"
+grep -q 'n0001' "$TEST_ROOT/win-st3.txt" && fail "STABLE: нестабильная добрана раньше стабильной"
+# STABLE_MIN_UPTIME=0 - фильтр выключен
+STABLE_MIN_UPTIME=0
+select_winners "$TEST_ROOT/results-st.txt" "$TEST_ROOT/map-st.txt" "$TEST_ROOT/win-st4.txt" 100 15 3 "$TEST_ROOT/stab-st.tsv"
+grep -q 'n0001' "$TEST_ROOT/win-st4.txt" || fail "STABLE: при STABLE_MIN_UPTIME=0 фильтр не должен работать"
+# нет файла статистики - как раньше
+STABLE_MIN_UPTIME=80
+select_winners "$TEST_ROOT/results-st.txt" "$TEST_ROOT/map-st.txt" "$TEST_ROOT/win-st5.txt" 100 15 3 "$TEST_ROOT/nope.tsv"
+grep -q 'n0001' "$TEST_ROOT/win-st5.txt" || fail "STABLE: без node_stability.tsv отбор должен быть как раньше"
+
 SEEN=$TEST_ROOT/seen-names.txt
 : > "$SEEN"
 remember_name A "$SEEN" || fail "first name was treated as duplicate"

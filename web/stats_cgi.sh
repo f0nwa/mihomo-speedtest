@@ -196,10 +196,11 @@ normalize_block() {
 }
 
 validate_settings_fields() {
-  # Проверяет уже раскодированные значения полей формы настройки (16
+  # Проверяет уже раскодированные значения полей формы настройки (19
   # штук: node_cap, keep_runs, keep_days, geo_filter, extype, size_mb,
   # dl_timeout, min_speed_mb, min_ratio, min_floor_mb, topn, enough,
-  # min_winners, stability_window, stability_drop_after и max_tested -
+  # min_winners, stability_window, stability_drop_after, stable_min_uptime,
+  # stable_lookback, stable_min_runs и max_tested -
   # берутся из одноимённых shell-переменных,
   # устанавливаемых ДО вызова этой функции - urldecode() из тела POST
   # /api/settings). Ни $ENV, ни другие файлы не трогает - только заполняет
@@ -276,6 +277,15 @@ validate_settings_fields() {
   if ! is_uint "$stability_window" || [ "$stability_window" -lt 1 ] || [ "$stability_window" -gt 5000 ]; then
     _add_err stability_window "«Окно для расчёта Uptime» (окна стабильности) должно быть целым от 1 до 5000 прогонов."
   fi
+  if ! is_uint "$stable_min_uptime" || [ "$stable_min_uptime" -gt 100 ]; then
+    _add_err stable_min_uptime "«Минимальный Uptime ноды для быстрого пула» должен быть целым от 0 до 100 % (0 = не учитывать)."
+  fi
+  if ! is_uint "$stable_lookback" || [ "$stable_lookback" -lt 1 ] || [ "$stable_lookback" -gt 5000 ]; then
+    _add_err stable_lookback "«За сколько прогонов считать Uptime для отбора» должно быть целым от 1 до 5000."
+  fi
+  if ! is_uint "$stable_min_runs" || [ "$stable_min_runs" -lt 1 ] || [ "$stable_min_runs" -gt 5000 ]; then
+    _add_err stable_min_runs "«Сколько проверок нужно, чтобы учитывать Uptime» должно быть целым от 1 до 5000."
+  fi
   if ! is_uint "$stability_drop_after"; then
     _add_err stability_drop_after "«Убирать из таблицы доступности ноду...» должно быть целым числом (0 = никогда)."
   fi
@@ -329,7 +339,9 @@ print_settings_json() {
       -v min_speed_mb="$(bytes_to_mbit "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
       -v min_floor_mb="$(bytes_to_mbit "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
       -v min_winners="$MIN_WINNERS" -v stability_window="$STABILITY_WINDOW" \
-      -v stability_drop_after="$STABILITY_DROP_AFTER" '
+      -v stability_drop_after="$STABILITY_DROP_AFTER" \
+      -v stable_min_uptime="$STABLE_MIN_UPTIME" -v stable_lookback="$STABLE_LOOKBACK" \
+      -v stable_min_runs="$STABLE_MIN_RUNS" '
     function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
     BEGIN {
       geo_filter = ENVIRON["MST_API_GEO"]
@@ -344,6 +356,7 @@ print_settings_json() {
       printf "\"min_speed_mb\":%s,\"min_ratio\":%s,\"min_floor_mb\":%s,", min_speed_mb + 0, min_ratio + 0, min_floor_mb + 0
       printf "\"topn\":%d,\"enough\":%d,\"min_winners\":%d,", topn + 0, enough + 0, min_winners + 0
       printf "\"stability_window\":%d,\"stability_drop_after\":%d,", stability_window + 0, stability_drop_after + 0
+      printf "\"stable_min_uptime\":%d,\"stable_lookback\":%d,\"stable_min_runs\":%d,", stable_min_uptime + 0, stable_lookback + 0, stable_min_runs + 0
       printf "\"geo_filter_candidates\":["
       gf_first = 1
     }
@@ -370,6 +383,9 @@ if [ "$method" = "POST" ]; then
   RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
   RAW_stability_window=""; RAW_stability_drop_after=""
   RAW_max_tested="$MAX_TESTED"
+  RAW_stable_min_uptime="$STABLE_MIN_UPTIME"
+  RAW_stable_lookback="$STABLE_LOOKBACK"
+  RAW_stable_min_runs="$STABLE_MIN_RUNS"
   RAW_update_check_hours="$UPDATE_CHECK_HOURS"
   RAW_update_channel="$UPDATE_CHANNEL"
   RAW_action=""
@@ -397,6 +413,9 @@ if [ "$method" = "POST" ]; then
   min_winners=$(urldecode "$RAW_min_winners")
   stability_window=$(urldecode "$RAW_stability_window")
   stability_drop_after=$(urldecode "$RAW_stability_drop_after")
+  stable_min_uptime=$(urldecode "$RAW_stable_min_uptime")
+  stable_lookback=$(urldecode "$RAW_stable_lookback")
+  stable_min_runs=$(urldecode "$RAW_stable_min_runs")
 
   validate_settings_fields
 
@@ -418,6 +437,9 @@ if [ "$method" = "POST" ]; then
     set_env_var MIN_WINNERS "$min_winners"
     set_env_var STABILITY_WINDOW "$stability_window"
     set_env_var STABILITY_DROP_AFTER "$stability_drop_after"
+    set_env_var STABLE_MIN_UPTIME "$stable_min_uptime"
+    set_env_var STABLE_LOOKBACK "$stable_lookback"
+    set_env_var STABLE_MIN_RUNS "$stable_min_runs"
     set_env_var UPDATE_CHECK_HOURS "$update_check_hours"
     set_env_var UPDATE_CHANNEL "$update_channel"
     if [ "$env_write_failed" = 1 ]; then

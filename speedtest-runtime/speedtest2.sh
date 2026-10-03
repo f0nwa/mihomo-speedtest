@@ -64,6 +64,9 @@ TOPN=15               # сколько нод класть в fast.yaml
 ENOUGH=20             # набрали столько выше порога - дальше не меряем
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
+STABLE_MIN_UPTIME=80  # %, нода с накопленной статистикой и uptime ниже этого в fast.yaml не идёт (0 = не учитывать)
+STABLE_LOOKBACK=24    # за сколько последних прогонов считать uptime для отбора (24 ~ 3 дня при прогоне раз в 3 часа)
+STABLE_MIN_RUNS=8     # фильтр по uptime включается, когда в этих прогонах у ноды не меньше стольких проверок
 DELAY_BATCH_SIZE=10   # сколько нод одновременно проверяет второе ядро
 DELAY_TIMEOUT_MS=5000 # таймаут одной ноды внутри небольшой пакетной группы
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'
@@ -288,25 +291,57 @@ select_winners() {
   # скорости, пока не наберём min_winners или top. Смысл: пустая/куцая
   # "самая быстрая" группа хуже, чем нода медленнее порога, но живая -
   # см. CHANGELOG.
+  # $7 (stabfile, опционально) - node_stability.tsv. Нода, у которой за
+  # последние STABLE_LOOKBACK прогонов не меньше STABLE_MIN_RUNS проверок
+  # (A/D) и доля живых ниже STABLE_MIN_UPTIME %, считается нестабильной:
+  # в пул не идёт даже при высокой скорости. Добирается последней - только
+  # если min_winners не набрать ни прошедшими порог, ни медленными
+  # стабильными. Ноды без накопленной статистики проходят как раньше.
+  # Отсеянные (и не добранные) пишутся в "$output.unstable": "uptime% имя".
   results=$1
   mapfile=$2
   output=$3
   minimum=$4
   top=$5
   min_winners=$6
+  stabfile=${7:-}
+  [ -n "$stabfile" ] && [ -f "$stabfile" ] || stabfile=""
 
-  sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" -v min_winners="$min_winners" '
+  sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" -v min_winners="$min_winners" \
+      -v stabfile="$stabfile" -v min_uptime="${STABLE_MIN_UPTIME:-0}" -v lookback="${STABLE_LOOKBACK:-24}" \
+      -v min_runs="${STABLE_MIN_RUNS:-8}" -v exclfile="$output.unstable" '
     BEGIN {
-      bn = 0
+      bn = 0; un = 0
       while ((getline line < mapfile) > 0) {
         tab = index(line, "\t")
         if (tab > 0) names[substr(line, 1, tab - 1)] = substr(line, tab + 1)
       }
       close(mapfile)
+      min_uptime += 0; lookback += 0; min_runs += 0
+      if (lookback < 1) lookback = 24
+      if (min_runs < 1) min_runs = 1
+      if (stabfile != "" && min_uptime > 0) {
+        while ((getline line < stabfile) > 0) {
+          if (split(line, f, "\t") < 10 || f[1] == "") continue
+          win = f[10]
+          if (length(win) > lookback) win = substr(win, length(win) - lookback + 1)
+          a = gsub(/A/, "A", win); d = gsub(/D/, "D", win)
+          if (a + d >= min_runs && a * 100 < min_uptime * (a + d))
+            unstable[f[1]] = int(a * 100 / (a + d) + 0.5)
+        }
+        close(stabfile)
+      }
     }
     {
       name = names[$2]
       if (name == "" || seen[name]) next
+      if (name in unstable) {
+        if ($1 > 0 && !useen[name]) {
+          useen[name] = 1
+          u_sp[un] = $1; u_idx[un] = $2; u_name[un] = name; un++
+        }
+        next
+      }
       if ($1 >= minimum && count < top) {
         print $1, $2
         seen[name] = 1
@@ -329,6 +364,17 @@ select_winners() {
         seen[backlog_name[i]] = 1
         count++
       }
+      # нестабильные - самый последний резерв, тоже по убыванию скорости
+      printf "" > exclfile
+      for (i = 0; i < un; i++) {
+        if (count < min_winners && count < top) {
+          print u_sp[i], u_idx[i]
+          count++
+        } else {
+          print unstable[u_name[i]] "% " u_name[i] > exclfile
+        }
+      }
+      close(exclfile)
     }
   ' > "$output"
 }
@@ -1116,7 +1162,11 @@ if [ -s "$WORK/wg_ok.txt" ]; then
   done < "$WORK/res.txt"
 fi
 wg_publish_fast "$EFFECTIVE_MIN"
-select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS"
+select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS" "$HISTORY_STABILITY"
+if [ -s "$WORK/win.txt.unstable" ]; then
+  say "Не взяты в fast.yaml как нестабильные (uptime за $STABLE_LOOKBACK прогонов ниже $STABLE_MIN_UPTIME%): $(wc -l < "$WORK/win.txt.unstable" | tr -d ' ')"
+  while read -r UPCT UNM; do say "  $UPCT  $UNM"; done < "$WORK/win.txt.unstable"
+fi
 WIN=$(wc -l < "$WORK/win.txt")
 BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
 if [ "$WIN" -lt 1 ]; then
