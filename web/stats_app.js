@@ -123,6 +123,8 @@ function stopSystemFooterPolling() {
 }
 
 function setAuthenticatedUi(authenticated) {
+  // auth-mode (экран входа без шапки) включает только renderAuthForm().
+  document.body.classList.remove('auth-mode');
   mainNav.hidden = !authenticated;
   logoutBtn.hidden = !authenticated;
   if (authenticated) { startSystemFooterPolling(); } else { stopSystemFooterPolling(); }
@@ -149,7 +151,24 @@ function renderAuthForm(mode) {
   stopLogPolling();
   setAuthenticatedUi(false);
   clearApp();
+  // Экран входа: шапка скрыта, над карточкой - логотип (тот же, что у
+  // вкладки браузера), карточка ~380 px по центру экрана.
+  document.body.classList.add('auth-mode');
+  var screen = el('div', 'auth-screen');
+  var box = el('div', 'auth-box');
+  var brand = el('div', 'auth-brand');
+  var icon = document.querySelector('link[rel="icon"]');
+  if (icon) {
+    var logo = el('img', 'auth-logo');
+    logo.src = icon.href;
+    logo.alt = '';
+    brand.appendChild(logo);
+  }
+  brand.appendChild(el('h1', null, 'MIHOMO-SPEEDTEST'));
+  brand.appendChild(el('p', 'meta', 'УЗЕЛ УПРАВЛЕНИЯ'));
+  box.appendChild(brand);
   var c = card(mode === 'setup' ? 'Первичная настройка' : 'Вход');
+  c.classList.add('auth-card');
   var form = el('form', 'auth-form');
   if (mode === 'setup') {
     form.appendChild(el('p', 'hint', 'Введите одноразовый код из терминала роутера и создайте учётную запись.'));
@@ -196,7 +215,9 @@ function renderAuthForm(mode) {
     });
   });
   c.appendChild(form);
-  app.appendChild(c);
+  box.appendChild(c);
+  screen.appendChild(box);
+  app.appendChild(screen);
 }
 
 function renderUninitialized() {

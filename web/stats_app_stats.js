@@ -503,6 +503,8 @@ function buildKpiRow(runsCount, lastRun) {
   row.appendChild(tile('ПРОГОНОВ В ИСТОРИИ', String(runsCount)));
   row.appendChild(tile('ЖИВЫХ НОД', lastRun ? (lastRun.alive + '/' + lastRun.total) : '-'));
   row.appendChild(tile('КАНАЛ', lastRun ? (fmtMbit(lastRun.channel_bytes) + ' Мбит/с') : '-'));
+  row.appendChild(tile('ПОРОГ', lastRun ? (fmtMbit(lastRun.threshold_bytes) + ' Мбит/с') : '-'));
+  row.appendChild(tile('ПОБЕДИТЕЛЕЙ', lastRun ? String(lastRun.winners) : '-'));
   row.appendChild(tile('ОБНОВЛЕНИЕ', '-', 'kpiUpdateTile'));
   return row;
 }
@@ -525,6 +527,10 @@ export function renderStats() {
     app.appendChild(buildKpiRow(runsCount, data.last_run));
     refreshUpdatesBadge();
 
+    // Карточки идут рядами (.card-row): на широком экране - рядом, на
+    // узком - друг под другом. Карточка "Идёт прогон" встаёт перед рядом.
+    var topRow = el('div', 'card-row');
+    app.appendChild(topRow);
     var lastRunCard = card('Последний прогон');
     if (data.last_run) {
       var lr = data.last_run;
@@ -539,8 +545,8 @@ export function renderStats() {
     // Кнопка ручного запуска - в этой же карточке ("состояние и время
     // последнего прогона"), чтобы её было видно сразу, без прокрутки
     // вниз мимо графика и таблицы доступности (см. TODO.md).
-    renderRunButton(lastRunCard, function () { startProgressPolling(app, lastRunCard); });
-    app.appendChild(lastRunCard);
+    renderRunButton(lastRunCard, function () { startProgressPolling(app, topRow); });
+    topRow.appendChild(lastRunCard);
 
     var lastMeasureCard = card('Последний замер');
     if (data.last_measurement && data.last_measurement.length) {
@@ -551,7 +557,10 @@ export function renderStats() {
     } else {
       lastMeasureCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
     }
-    app.appendChild(lastMeasureCard);
+    topRow.appendChild(lastMeasureCard);
+
+    var mainRow = el('div', 'card-row card-row-wide');
+    app.appendChild(mainRow);
 
     var chartCard = card('Доступность нод по прогонам');
     if (data.node_stability && data.node_stability.length) {
@@ -560,19 +569,21 @@ export function renderStats() {
     } else {
       chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
     }
-    app.appendChild(chartCard);
+    mainRow.appendChild(chartCard);
 
     var stabilityCard = card('Статистика доступности нод');
     if (data.node_stability && data.node_stability.length) {
       var stabilityTable = buildStabilityTable(data.node_stability);
       var stabilityEmpty = el('p', 'hint', 'Нет нод с выбранными статусами.');
       stabilityCard.appendChild(buildStabilityFilter(data.node_stability, stabilityTable, stabilityEmpty));
-      stabilityCard.appendChild(stabilityTable);
+      var tableBox = el('div', 'table-scroll');
+      tableBox.appendChild(stabilityTable);
+      stabilityCard.appendChild(tableBox);
       stabilityCard.appendChild(stabilityEmpty);
     } else {
       stabilityCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
     }
-    app.appendChild(stabilityCard);
+    mainRow.appendChild(stabilityCard);
   })['catch'](function (err) {
     if (!alive()) { return; }
     if (err.message === 'not_implemented') {

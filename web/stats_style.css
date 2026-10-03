@@ -15,21 +15,38 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
-.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+/* Адаптивная раскладка: панель на всю ширину окна (до 2200 px, дальше
+   строки становятся слишком длинными), ряды карточек и плитки сами
+   перестраиваются по ширине (auto-fit / flex-wrap), без отдельных
+   правил под каждое устройство. */
+.wrap{max-width:2200px;margin:0 auto;padding:16px max(16px,2%) 32px}
+header{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.header-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;align-items:center;gap:10px}
 .brand-led{width:8px;height:8px;flex:0 0 auto;background:var(--accent)}
 h1{font-size:17px;margin:0;letter-spacing:1.5px;font-weight:700;text-transform:uppercase}
 .meta{color:var(--muted);font-size:12.5px;margin:2px 0 0}
-nav{display:flex;gap:4px}
-nav a{color:var(--muted);text-decoration:none;font-size:13px;padding:6px 10px 4px;border-radius:0;border-bottom:2px solid transparent}
+/* Вкладки - отдельной строкой; на телефоне листаются вбок. */
+nav{display:flex;gap:2px;overflow-x:auto;white-space:nowrap;border-bottom:1px solid var(--border);scrollbar-width:thin}
+nav a{flex:0 0 auto;color:var(--muted);text-decoration:none;font-size:13px;padding:10px 12px 8px;border-radius:0;border-bottom:2px solid transparent}
 nav a:hover{background:var(--card-border)}
 nav a.active{background:transparent;color:var(--text);border-bottom-color:var(--accent)}
-.kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-.kpi{background:var(--card);border:1px solid var(--card-border);border-top:3px solid var(--accent);padding:14px 16px}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.kpi{min-width:0;background:var(--card);border:1px solid var(--card-border);border-top:3px solid var(--accent);padding:14px 16px}
 .kpi.kpi-danger{border-top-color:var(--danger)}
 .kpi-label{font-size:10px;letter-spacing:1px;color:var(--muted)}
-.kpi-value{font-size:22px;font-weight:600;margin-top:8px;font-variant-numeric:tabular-nums}
+.kpi-value{font-size:22px;font-weight:600;margin-top:8px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Ряды карточек (renderStats() в stats_app_stats.js): рядом, пока
+   хватает ширины, иначе друг под другом. */
+.card-row{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px}
+.card-row>.card{flex:1 1 380px;min-width:0;margin:0}
+.card-row-wide{align-items:flex-start}
+.card-row-wide>.card{flex-basis:820px}
+.table-scroll{overflow-x:auto}
+.table-scroll>table{min-width:720px}
+.table-scroll th,.table-scroll td{white-space:nowrap}
+/* Поля настроек не растягиваются на всю ширину большого монитора. */
+.field{max-width:760px}
 .theme-btn{border:1px solid var(--card-border);background:var(--card);color:var(--text);border-radius:0;padding:6px 10px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block;flex:0 0 auto}
 .card{background:var(--card);border:1px solid var(--card-border);border-radius:0;padding:16px 18px;margin-bottom:16px;box-shadow:var(--shadow)}
 h2{font-size:14.5px;margin:0 0 8px;font-weight:600}
@@ -80,14 +97,13 @@ pre{background:var(--card);border:1px solid var(--card-border);border-radius:0;p
 .node-chart-readout.active{color:var(--text)}
 .uptime-rows{display:flex;flex-direction:column;gap:2px}
 .uptime-row{display:flex;align-items:center;gap:10px}
-.uptime-name{flex:0 0 200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.uptime-name{flex:0 0 clamp(92px,24%,200px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .uptime-strip{flex:1 1 auto;min-width:0;height:14px;display:block;cursor:crosshair}
 .uptime-pct{flex:0 0 44px;text-align:right;font-size:12px;color:var(--muted)}
-.uptime-axis{display:flex;justify-content:space-between;margin:4px 54px 8px 210px;font-size:11px;color:var(--muted)}
+.uptime-axis{display:flex;justify-content:space-between;margin:4px 54px 8px calc(clamp(92px,24%,200px) + 10px);font-size:11px;color:var(--muted)}
 .uptime-axis span{flex:1}
 .sw.sw-skip{background:var(--muted);height:5px;margin-top:5px}
 .sw.sw-none{background:transparent;border:1px solid var(--card-border)}
-@media (max-width:640px){.uptime-name{flex-basis:110px}.uptime-axis{margin-left:120px}}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:600}
@@ -102,8 +118,19 @@ label.stability-filter-item{display:inline-flex;align-items:center;gap:6px;margi
 /* Раздел "Настройки" (шаг 4, /api/settings): подсветка поля с ошибкой,
    пришедшей из errors в ответе POST. */
 .input-err{border-color:var(--danger) !important}
-.auth-form{max-width:360px;margin:0 auto}
-.auth-form .submit{width:100%}
+/* Экран входа: шапка скрыта, карточка ~380 px по центру экрана. */
+body.auth-mode header{display:none}
+body.auth-mode .wrap{padding:0}
+.auth-screen{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px 16px}
+.auth-box{width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;gap:20px}
+.auth-brand{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.auth-brand .meta{margin:0}
+.auth-logo{width:56px;height:56px;margin-bottom:4px}
+.auth-card{width:100%;margin:0;border-top:3px solid var(--accent);padding:24px}
+.auth-form input{height:40px}
+.auth-form .submit{width:100%;height:44px;font-weight:600}
+/* Телефон: шрифт полей 16 px - иначе iOS увеличивает страницу при фокусе. */
+@media (max-width:640px){input[type=text],input[type=password],input[type=number],input[type=search],textarea,select{font-size:16px}.auth-form input{height:46px}.auth-card{padding:20px}}
 
 /* Раздел "Обновления" (порция 5, /api/updates/*): бейдж на вкладке,
    строки состояния файлов плана, блок структурного diff конфига. */
@@ -145,7 +172,7 @@ button.small.muted{border-color:var(--card-border);color:var(--muted)}
 .geo-flash{margin:8px 0 0}
 input.geo-search{max-width:360px}
 .geo-group-title{font-size:10.5px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin:14px 0 6px}
-.geo-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.geo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
 label.geo-country{display:flex;align-items:center;gap:8px;margin:0;padding:6px 10px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);font-size:13px;cursor:pointer}
 label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .geo-country input{accent-color:var(--accent);margin:0}
@@ -167,7 +194,7 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .geo-summary details{color:var(--muted);font-size:12.5px;margin-top:8px}
 .geo-summary summary{cursor:pointer}
 .geo-summary pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;color:var(--text)}
-@media (max-width:760px){.geo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.geo-cols{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:760px){.geo-cols{grid-template-columns:minmax(0,1fr)}}
 /* Вкладка "Конфиг": редактор config.yaml (CodeMirror 5 из codemirror.js/.css,
    подгружается только на этой вкладке) - поверх стилей самого CodeMirror
    тема под общую палитру панели. */
@@ -197,9 +224,6 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-backup-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .config-backup-actions .theme-btn{padding:4px 8px;font-size:12px}
 @media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backup-actions{justify-content:flex-start}}
-/* Шапка на узком экране: с вкладкой "Конфиг" пунктов меню стало больше -
-   переносим навигацию, а не выталкиваем кнопку "Выйти" за край. */
-@media (max-width:640px){header>div[style]{flex:1 1 100%!important;flex-wrap:wrap;justify-content:space-between}nav{flex-wrap:wrap}nav a{padding:6px 7px 4px}}
 
 /* Вкладка "XKeen" (stats_app_xkeen.js): кнопки команд и окно-консоль */
 .xk-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin-top:10px}

@@ -19,9 +19,11 @@
 -->
 <div class="wrap">
 <header>
+<div class="header-top">
 <div class="brand"><span class="brand-led" aria-hidden="true"></span><div><h1>MIHOMO-SPEEDTEST</h1><p class="meta">УЗЕЛ УПРАВЛЕНИЯ</p></div></div>
-<div style="display:flex;gap:8px;flex:0 0 auto;align-items:center">
-<nav id="mainNav" hidden>
+<button class="theme-btn" id="logoutBtn" type="button" hidden>Выйти</button>
+</div>
+<nav id="mainNav" aria-label="Разделы" hidden>
 <a href="/stats" data-link>Статистика</a>
 <a href="/settings" data-link>Настройки</a>
 <a href="/config" data-link>Конфиг</a>
@@ -29,8 +31,6 @@
 <a href="/log" data-link>Журнал</a>
 <a href="/updates" data-link>Обновления<span id="updatesBadge" class="nav-badge" hidden></span></a>
 </nav>
-<button class="theme-btn" id="logoutBtn" type="button" hidden>Выйти</button>
-</div>
 </header>
 <div id="app"></div>
 <footer id="sysFooter" class="sys-footer" hidden>
