@@ -13,6 +13,7 @@ import { renderSettings } from './app-settings.js';
 import { refreshUpdatesBadge, renderUpdates, stopUpdateJobPolling } from './app-updates.js';
 import { renderLog, stopLogPolling } from './app-log.js';
 import { configDirty, leaveConfig, renderConfig } from './app-config.js';
+import { renderXkeen, stopXkeenPolling, xkeenDirty } from './app-xkeen.js';
 
 function updateActiveNav(path) {
   var links = document.querySelectorAll('nav a[data-link]');
@@ -27,6 +28,8 @@ function navigate(path) {
   // Несохранённые правки на вкладке "Конфиг".
   if (configDirty() && path !== location.pathname &&
       !window.confirm('В редакторе конфига есть несохранённые изменения. Уйти со страницы?')) { return; }
+  if (xkeenDirty() && path !== location.pathname &&
+      !window.confirm('В списках XKeen есть несохранённые изменения. Уйти со страницы?')) { return; }
   history.pushState(null, '', path);
   render(path);
   updateActiveNav(path);
@@ -57,10 +60,12 @@ function render(path) {
   stopProgressPolling();
   stopUpdateJobPolling();
   stopLogPolling();
+  stopXkeenPolling();
   if (path === '/updates') { renderUpdates(); }
   else if (path === '/settings') { renderSettings(); }
   else if (path === '/log') { renderLog(); }
   else if (path === '/config') { renderConfig(); }
+  else if (path === '/xkeen') { renderXkeen(); }
   else { renderStats(); }
   if (path !== '/updates') { refreshUpdatesBadge(); }
 }

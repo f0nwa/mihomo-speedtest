@@ -15,6 +15,9 @@
 #   log             GET  - журнал последнего применения (save/restore/
 #                          restore-working) и идёт ли оно сейчас: веб-вкладка
 #                          опрашивает его, пока ждёт ответа на применение.
+# MST_CONFIG_LIB=1 - подключение как библиотеки: функции и переменные
+# определяются, действие не выполняется (см. stats_xkeen.sh).
+#
 # save/restore/restore-working принимают ?base=<отпечаток из read>: если
 # config.yaml успели поменять с момента открытия редактора - 409 conflict.
 #
@@ -510,7 +513,9 @@ cmd_restore_working() {
 }
 
 # ----- main -----
+# MST_CONFIG_LIB=1: только определить функции (их подключает stats_xkeen.sh).
 
+if [ "${MST_CONFIG_LIB:-0}" != 1 ]; then
 new_work
 method=${REQUEST_METHOD:-GET}
 action=${MST_CONFIG_ACTION:-read}
@@ -567,3 +572,4 @@ case $action:$method in
   *)
     fail_json 405 method_not_allowed "" ;;
 esac
+fi

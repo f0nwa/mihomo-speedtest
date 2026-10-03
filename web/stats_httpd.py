@@ -461,6 +461,7 @@ STATIC_FILES = {
     "app-updates.js": "stats_app_updates.js",
     "app-log.js": "stats_app_log.js",
     "app-config.js": "stats_app_config.js",
+    "app-xkeen.js": "stats_app_xkeen.js",
     "codemirror.js": "stats_codemirror.js",
     "codemirror.css": "stats_codemirror.css",
 }
@@ -504,6 +505,16 @@ API_ROUTES = {
     "api/config/restore": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore-working": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
     "api/config/log": ("stats_config.sh", {"MST_CONFIG_ACTION": "log"}),
+    # Команды XKeen: run запускает команду в фоне и отвечает сразу, вывод
+    # окно забирает опросом run-log - длинные таймауты не нужны.
+    "api/xkeen/run": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run"}),
+    "api/xkeen/run-log": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run-log"}),
+    # Списки XKeen: save/restore ждут xkeen -restart, проверку ядра и откат.
+    "api/xkeen": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "read"}),
+    "api/xkeen/save": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
+    "api/xkeen/backups": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "backups"}),
+    "api/xkeen/restore": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
+    "api/xkeen/log": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "log"}),
 }
 
 

@@ -200,3 +200,48 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 /* Шапка на узком экране: с вкладкой "Конфиг" пунктов меню стало больше -
    переносим навигацию, а не выталкиваем кнопку "Выйти" за край. */
 @media (max-width:640px){header>div[style]{flex:1 1 100%!important;flex-wrap:wrap;justify-content:space-between}nav{flex-wrap:wrap}nav a{padding:6px 7px 4px}}
+
+/* Вкладка "XKeen" (stats_app_xkeen.js): кнопки команд и окно-консоль */
+.xk-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin-top:10px}
+.xk-sep{width:1px;background:var(--card-border);margin:0 4px}
+.xk-btn,.xk-foot button{font:inherit}
+.xk-btn.danger{color:#ff8a80;border-color:#5a3330}
+.xk-desc{min-height:1.5em}
+.xk-dialog{width:min(760px,calc(100vw - 32px));padding:0;background:#0f1214;color:var(--text);border:1px solid var(--card-border);border-top:3px solid var(--accent);font:inherit}
+.xk-dialog::backdrop{background:rgba(8,10,12,.72)}
+.xk-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.xk-status{margin-left:auto;font-size:12px}
+.xk-status.ok{color:#7ee2a8}
+.xk-status.err{color:#ff8a80}
+.xk-x{background:none;border:0;color:var(--muted);width:28px;height:28px;cursor:pointer;font:inherit}
+.xk-x:disabled{opacity:.35;cursor:default}
+.xk-about{padding:8px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:#14171a}
+.xk-console{margin:0;border:0;min-height:240px;max-height:60vh}
+.xk-console .xk-prompt{color:var(--accent)}
+.xk-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border)}
+.xk-foot .submit{margin-top:0}
+.xk-grow{flex:1 1 auto}
+/* Списки XKeen (renderLists() в stats_app_xkeen.js) */
+.xk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.xk-grid .wide{grid-column:1/-1}
+@media (max-width:760px){.xk-grid{grid-template-columns:minmax(0,1fr)}}
+.xk-list-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.xk-list-head h2{margin:0}
+.xk-warn{background:#d1a53b1f;border:1px solid #d1a53b;padding:8px 12px;margin:8px 0;font-size:12.5px}
+.xk-rows{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.xk-row{display:flex;gap:8px;align-items:center;padding:4px 6px;background:var(--bg);border:1px solid var(--border)}
+.xk-row.off .xk-val{color:var(--muted);text-decoration:line-through}
+.xk-row input[type=text]{flex:1 1 auto;min-width:0;padding:5px 7px;font-size:13px}
+.xk-row .xk-note{color:var(--muted);border-color:transparent;background:transparent}
+.xk-cb{display:inline-block;width:13px;flex:0 0 13px}
+.xk-row input[type=checkbox]{flex:0 0 auto;accent-color:var(--accent)}
+.xk-row .submit{margin-top:0}
+.xk-empty{padding:14px;border:1px dashed var(--card-border);text-align:center;color:var(--muted);font-size:12.5px}
+.xk-add{display:flex;gap:8px;flex-wrap:wrap}
+.xk-add input{flex:1 1 180px;width:auto}
+.xk-add .submit{margin-top:0}
+.xk-err{color:#ff8a80;font-size:12px;margin:2px 0 0 4px}
+.xk-row input[type=text],.xk-add input,.xk-add button,.xk-savebar button,.xk-row button{font:inherit}
+.xk-json{font-family:inherit;font-size:13px;margin-top:6px}
+.xk-savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.xk-savebar .submit{margin-top:0}

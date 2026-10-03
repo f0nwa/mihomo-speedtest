@@ -220,4 +220,8 @@ grep -q '"api/config/save": ("stats_config.sh"' "$ROOT/web/stats_httpd.py" || fa
 grep -q '"api/config/log": ("stats_config.sh"' "$ROOT/web/stats_httpd.py" || fail "16: нет маршрута api/config/log"
 grep -q 'href="/config"' "$ROOT/web/stats_index.html" || fail "16: нет вкладки в меню"
 
+
+# --- lib: подключение без действия
+out=$(MST_CONFIG_LIB=1 sh -c '. "$1"; type reply >/dev/null && type jstr_file >/dev/null && echo LOADED' _ "$SCRIPT")
+[ "$out" = LOADED ] || fail "lib: $out"
 echo "test_stats_config.sh: OK"
