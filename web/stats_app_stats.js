@@ -4,41 +4,85 @@
 import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, fmtSigned, setLoading, showError, showNotYetMoved, statusLabel, viewGuard } from './app-core.js';
 import { refreshUpdatesBadge } from './app-updates.js';
 
-// ----- кнопка "Запустить сейчас" (уже полностью рабочая часть, шаг 1) -----
+// ----- строка состояния прогона с кнопкой "Запустить сейчас" -----
+//
+// Узкая панель над KPI: состояние (идёт прогон / нет), время последнего
+// прогона, число прогонов в истории и кнопка ручного запуска. Пока идёт
+// прогон, updateProgressCard() пишет сюда "N из M нод" и двигает полосу
+// прогресса под панелью (см. runBar ниже).
 
-function renderRunButton(container, onRunning) {
+var runBar = null;
+
+function renderRunBar(container, onRunning, lastRun, runsCount) {
   // onRunning() - необязательный колбэк, вызывается, когда обнаружился
   // (при открытии страницы) или только что начался активный прогон -
   // им пользуется startProgressPolling() ниже (карточка "Идёт прогон").
-  var btn = document.createElement('button');
-  btn.className = 'submit';
-  btn.type = 'button';
-  btn.textContent = 'Запустить сейчас';
-  var status = document.createElement('p');
-  status.className = 'hint';
-  container.appendChild(btn);
-  container.appendChild(status);
-
-  function refreshStatus() {
-    fetchJson('/api/run').then(function (d) {
-      status.textContent = d.running ? 'Прогон уже идёт.' : 'Сейчас прогонов нет.';
-      if (d.running && onRunning) { onRunning(); }
-    })['catch'](function (err) {
-      status.textContent = 'Не удалось узнать статус: ' + err.message;
-    });
+  // lastRun/runsCount не передаются, когда /api/stats ещё не готов -
+  // тогда в панели только состояние и кнопка.
+  var bar = el('div', 'run-bar');
+  var row = el('div', 'run-bar-row');
+  var state = el('span', 'run-state');
+  state.appendChild(el('span', 'run-led'));
+  var stateText = el('span', null, 'Проверяем состояние...');
+  state.appendChild(stateText);
+  row.appendChild(state);
+  function metaItem(label, value) {
+    var m = el('span', 'run-meta', label);
+    m.appendChild(el('b', null, value));
+    return m;
   }
+  if (runsCount !== undefined) {
+    row.appendChild(metaItem('Последний прогон: ', lastRun ? lastRun.iso : 'ещё не было'));
+    row.appendChild(metaItem('Прогонов в истории: ', String(runsCount)));
+  }
+  var btn = el('button', 'submit', '\u25B6 Запустить сейчас');
+  btn.type = 'button';
+  row.appendChild(btn);
+  var track = el('div', 'run-progress');
+  var fill = el('div', 'run-progress-fill');
+  track.appendChild(fill);
+  track.hidden = true;
+  bar.appendChild(row);
+  bar.appendChild(track);
+  container.appendChild(bar);
+
+  var running = false;
+  function setRunning(on, text) {
+    running = on;
+    bar.classList.toggle('running', on);
+    track.hidden = !on;
+    if (!on) { fill.style.width = '0'; }
+    btn.disabled = on;
+    btn.textContent = on ? 'Идёт прогон...' : '\u25B6 Запустить сейчас';
+    stateText.textContent = text || (on ? 'Идёт прогон' : 'Прогонов сейчас нет');
+  }
+
+  runBar = {
+    progress: function (tested, total) {
+      if (!running) { setRunning(true); }
+      if (total > 0) {
+        stateText.textContent = 'Идёт прогон: ' + tested + ' из ' + total + ' нод';
+        fill.style.width = Math.min(100, Math.round(tested / total * 100)) + '%';
+      }
+    }
+  };
+
+  fetchJson('/api/run').then(function (d) {
+    setRunning(!!d.running);
+    if (d.running && onRunning) { onRunning(); }
+  })['catch'](function (err) {
+    stateText.textContent = 'Не удалось узнать статус: ' + err.message;
+  });
 
   btn.addEventListener('click', function () {
     btn.disabled = true;
     fetchJson('/api/run', { method: 'POST' }).then(function (d) {
-      status.textContent = d.started ? 'Прогон запущен.' : 'Прогон уже шёл, новый не запускался.';
+      setRunning(!!d.running, d.started ? 'Прогон запущен' : (d.running ? 'Прогон уже шёл, новый не запускался' : null));
       if (d.running && onRunning) { onRunning(); }
     })['catch'](function (err) {
-      status.textContent = 'Не удалось запустить: ' + err.message;
-    })['finally'](function () { btn.disabled = false; });
+      setRunning(false, 'Не удалось запустить: ' + err.message);
+    });
   });
-
-  refreshStatus();
 }
 
 // ----- живой прогресс скоростного теста по нодам ТЕКУЩЕГО прогона
@@ -46,11 +90,11 @@ function renderRunButton(container, onRunning) {
 //
 // У /api/progress нет отдельного признака "прогона нет вовсе" (до первого
 // прогона сервер отвечает {}) - поэтому "идёт ли прогон" проверяется тем же
-// /api/run, что и раньше у кнопки "Запустить сейчас" (см. renderRunButton
+// /api/run, что и раньше у кнопки "Запустить сейчас" (см. renderRunBar
 // выше). Карточка обновляется НА МЕСТЕ (без переотрисовки всей
 // страницы) - полный renderStats() зовётся только один раз, когда
 // прогон завершается, чтобы подтянуть уже посчитанные финальные данные
-// (график/таблица/"последний прогон").
+// (график/таблица/строка состояния прогона).
 
 var PROGRESS_POLL_MS = 2000;
 var progressPollTimer = null;
@@ -89,6 +133,7 @@ function updateProgressCard(progress) {
   var tested = progress && typeof progress.tested === 'number' ? progress.tested : 0;
   var total = progress && typeof progress.total === 'number' ? progress.total : 0;
   var results = (progress && progress.results) || [];
+  if (runBar) { runBar.progress(tested, total); }
   var summary = progressCardEl.querySelector('.progress-summary');
   summary.textContent = total > 0
     ? ('Протестировано ' + tested + ' из ' + total + '.')
@@ -521,55 +566,18 @@ export function renderStats() {
     // как ошибку.
     var runsCount = data.runs && typeof data.runs.count === 'number' ? data.runs.count : 0;
 
-    var meta = el('p', 'hint', 'Обновлено: ' + (data.generated || '-') + ' · прогонов в истории: ' + runsCount);
-    app.appendChild(meta);
+    // Строка состояния прогона с кнопкой "Запустить сейчас" - над KPI,
+    // чтобы кнопку было видно сразу, без прокрутки (см. TODO.md).
+    // Карточка "Идёт прогон" встаёт перед рядом с таблицей и лентой.
+    var mainRow = el('div', 'card-row card-row-wide');
+    renderRunBar(app, function () { startProgressPolling(app, mainRow); }, data.last_run || null, runsCount);
 
     app.appendChild(buildKpiRow(runsCount, data.last_run));
     refreshUpdatesBadge();
 
-    // Карточки идут рядами (.card-row): на широком экране - рядом, на
-    // узком - друг под другом. Карточка "Идёт прогон" встаёт перед рядом.
-    var topRow = el('div', 'card-row');
-    app.appendChild(topRow);
-    var lastRunCard = card('Последний прогон');
-    if (data.last_run) {
-      var lr = data.last_run;
-      var p = el('p', 'hint');
-      p.textContent = lr.iso + ' - канал: ' + fmtMbit(lr.channel_bytes) + ' Мбит/с, порог: ' +
-        fmtMbit(lr.threshold_bytes) + ' Мбит/с, живых нод: ' + lr.alive + '/' + lr.total +
-        ', победителей: ' + lr.winners;
-      lastRunCard.appendChild(p);
-    } else {
-      lastRunCard.appendChild(el('p', 'hint', 'Прогонов ещё не было.'));
-    }
-    // Кнопка ручного запуска - в этой же карточке ("состояние и время
-    // последнего прогона"), чтобы её было видно сразу, без прокрутки
-    // вниз мимо графика и таблицы доступности (см. TODO.md).
-    renderRunButton(lastRunCard, function () { startProgressPolling(app, topRow); });
-    topRow.appendChild(lastRunCard);
-
-    var lastMeasureCard = card('Последний замер');
-    if (data.last_measurement && data.last_measurement.length) {
-      for (var m = 0; m < data.last_measurement.length; m++) {
-        var meas = data.last_measurement[m];
-        lastMeasureCard.appendChild(el('p', 'hint', meas.name + ': ' + (meas.unit === 'МБ/с' ? (Math.round(meas.speed_mb * 1048576 * 8 / 100000) / 10 + ' Мбит/с') : (meas.speed_mb + ' ' + meas.unit))));
-      }
-    } else {
-      lastMeasureCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
-    }
-    topRow.appendChild(lastMeasureCard);
-
-    var mainRow = el('div', 'card-row card-row-wide');
+    // Таблица доступности - первой, лента по прогонам - за ней: на
+    // широком экране рядом, на узком - друг под другом.
     app.appendChild(mainRow);
-
-    var chartCard = card('Доступность нод по прогонам');
-    if (data.node_stability && data.node_stability.length) {
-      var cap = (data.node_history && data.node_history.cap) || 8;
-      chartCard.appendChild(buildUptimeTimeline(data.node_stability, (data.runs && data.runs.series) || [], cap));
-    } else {
-      chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
-    }
-    mainRow.appendChild(chartCard);
 
     var stabilityCard = card('Статистика доступности нод');
     if (data.node_stability && data.node_stability.length) {
@@ -584,11 +592,20 @@ export function renderStats() {
       stabilityCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
     }
     mainRow.appendChild(stabilityCard);
+
+    var chartCard = card('Доступность нод по прогонам');
+    if (data.node_stability && data.node_stability.length) {
+      var cap = (data.node_history && data.node_history.cap) || 8;
+      chartCard.appendChild(buildUptimeTimeline(data.node_stability, (data.runs && data.runs.series) || [], cap));
+    } else {
+      chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
+    }
+    mainRow.appendChild(chartCard);
   })['catch'](function (err) {
     if (!alive()) { return; }
     if (err.message === 'not_implemented') {
       showNotYetMoved('Раздел статистики ещё переезжает на новый интерфейс.');
-      renderRunButton(app, function () { startProgressPolling(app, null); });
+      renderRunBar(app, function () { startProgressPolling(app, null); });
       return;
     }
     showError('Не удалось загрузить статистику: ', err);

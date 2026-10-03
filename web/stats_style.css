@@ -42,6 +42,18 @@ nav a.active{background:transparent;color:var(--text);border-bottom-color:var(--
 .card-row>.card{flex:1 1 380px;min-width:0;margin:0}
 .card-row-wide{align-items:flex-start}
 .card-row-wide>.card{flex-basis:820px}
+/* Строка состояния прогона над KPI (renderRunBar() в stats_app_stats.js) */
+.run-bar{background:var(--card);border:1px solid var(--card-border);margin-bottom:16px}
+.run-bar-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;padding:8px 8px 8px 16px}
+.run-state{display:inline-flex;align-items:center;gap:8px;font-size:13px}
+.run-led{width:8px;height:8px;flex:0 0 auto;background:var(--muted)}
+.run-bar.running .run-state{color:var(--accent)}
+.run-bar.running .run-led{background:var(--accent);animation:nav-badge-blink 1.4s ease-in-out infinite}
+.run-meta{font-size:12px;color:var(--muted)}
+.run-meta b{color:var(--text);font-weight:400}
+.run-bar button.submit{margin:0 0 0 auto}
+.run-progress{height:3px;background:var(--border)}
+.run-progress-fill{height:100%;width:0;background:var(--accent);transition:width .3s}
 .table-scroll{overflow-x:auto}
 .table-scroll>table{min-width:720px}
 .table-scroll th,.table-scroll td{white-space:nowrap}
