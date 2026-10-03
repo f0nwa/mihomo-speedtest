@@ -144,4 +144,9 @@ curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/uninsta
 конфига, созданный на основе конфигуратора rockblack и доработанный автором
 проекта.
 
+## Благодарности
+
+- [misuk1](https://github.com/misuk1) - за идею `speedtest2.fast.yaml` и
+  awk-обработки.
+
 Лицензия - [MIT](LICENSE).
