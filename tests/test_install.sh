@@ -818,7 +818,54 @@ EOF
   esac
   rm -rf "$DIR"
 )
-rm -rf "$WORK_URL" "$FAKEBIN_URL"
+# Роутер за роутером провайдера: WAN (eth3) тоже получает частный адрес и
+# стоит в списке раньше LAN-моста. Вывод - реальный Keenetic.
+FAKEBIN_WAN=$(mktemp -d)
+cat > "$FAKEBIN_WAN/ip" <<'EOF'
+#!/bin/sh
+case "$*" in
+  *route*) echo "default via 192.168.101.1 dev eth3  metric 1000 " ;;
+  *addr*) cat "$FAKE_IP_ADDRS" ;;
+esac
+EOF
+chmod +x "$FAKEBIN_WAN/ip"
+FAKE_IP_ADDRS=$FAKEBIN_WAN/addrs
+export FAKE_IP_ADDRS
+
+check_advertise() {
+  # $1 - bind, $2 - ожидаемый адрес, $3 - описание
+  got=$(
+    PATH="$FAKEBIN_WAN:$PATH"
+    export PATH
+    INSTALL_LIB_ONLY=1 SELFDIR="$ROOT/installer" . "$SCRIPT"
+    advertise_host "$1"
+  )
+  [ "$got" = "$2" ] || { echo "FAIL: advertise_host ($3): ждали $2, получили '$got'" >&2; exit 1; }
+}
+
+cat > "$FAKE_IP_ADDRS" <<'EOF'
+9: ezcfg0    inet 198.51.100.37/32 scope global ezcfg0\       valid_lft forever preferred_lft forever
+11: eth3    inet 192.168.101.2/24 brd 192.168.101.255 scope global eth3\       valid_lft forever preferred_lft forever
+35: br0    inet 192.168.2.1/24 brd 192.168.2.255 scope global br0\       valid_lft forever preferred_lft forever
+36: br1    inet 10.1.30.1/24 brd 10.1.30.255 scope global br1\       valid_lft forever preferred_lft forever
+39: nwg0    inet 172.16.83.3/24 scope global nwg0\       valid_lft forever preferred_lft forever
+EOF
+check_advertise 0.0.0.0 192.168.2.1 "br0 важнее частного WAN-адреса"
+check_advertise 192.168.50.1 192.168.50.1 "явный STATS_HTTP_BIND"
+
+cat > "$FAKE_IP_ADDRS" <<'EOF'
+9: ezcfg0    inet 10.0.0.5/32 scope global ezcfg0\       valid_lft forever preferred_lft forever
+11: eth3    inet 192.168.101.2/24 brd 192.168.101.255 scope global eth3\       valid_lft forever preferred_lft forever
+36: br1    inet 10.1.30.1/24 brd 10.1.30.255 scope global br1\       valid_lft forever preferred_lft forever
+EOF
+check_advertise 0.0.0.0 10.1.30.1 "без br0 пропускаются WAN и /32"
+
+cat > "$FAKE_IP_ADDRS" <<'EOF'
+11: eth3    inet 192.168.101.2/24 brd 192.168.101.255 scope global eth3\       valid_lft forever preferred_lft forever
+EOF
+check_advertise 0.0.0.0 192.168.101.2 "единственный адрес - на WAN"
+
+rm -rf "$WORK_URL" "$FAKEBIN_URL" "$FAKEBIN_WAN"
 echo "test_install.sh: advertise_host/print_web_url OK"
 
 

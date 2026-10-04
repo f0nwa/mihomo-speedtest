@@ -916,35 +916,56 @@ initialize_web_auth() {
 }
 
 advertise_host() {
-  # $1 = STATS_HTTP_BIND. Копия stats_httpd_advertise_host() из
-  # speedtest-runtime/speedtest2.sh (см. её комментарий там) - install.sh
-  # не подключает speedtest2.sh как библиотеку, поэтому логика
-  # продублирована буквально, по образцу уже существующего дублирования
-  # has_fast_group() между install.sh/uninstall.sh. STATS_HTTPD_IP_CMD
-  # задаётся дефолтом инлайн (а не отдельной верхнеуровневой переменной,
-  # как в speedtest2.sh) - install.sh этой переменной не объявляет.
+  # $1 = STATS_HTTP_BIND. Печатает адрес роутера для ссылки на
+  # веб-интерфейс, когда служба слушает 0.0.0.0.
+  #
+  # Нельзя брать просто первый частный адрес: если роутер стоит за
+  # роутером провайдера, WAN тоже получает "серый" адрес (на Keenetic
+  # eth3 192.168.101.2), и он идёт в списке раньше LAN-моста - ссылка
+  # указывала на WAN. Порядок выбора:
+  #   1) br0 - LAN-мост "Домашняя сеть" (Bridge0) на Keenetic;
+  #   2) первый частный адрес на интерфейсе, через который НЕ идёт
+  #      маршрут по умолчанию (это WAN), и не /32 (служебные вроде
+  #      ezcfg0 на Keenetic);
+  #   3) первый частный адрес вообще, затем просто первый адрес.
   case "$1" in
     0.0.0.0|"") ;;
     *) printf '%s' "$1"; return 0 ;;
   esac
-  command -v "${STATS_HTTPD_IP_CMD:-ip}" >/dev/null 2>&1 || return 0
-  "${STATS_HTTPD_IP_CMD:-ip}" -4 -o addr show scope global 2>/dev/null \
-    | awk '{print $4}' | cut -d/ -f1 | awk '
-        function is_private(ip,    o, n) {
-          n = split(ip, o, ".")
-          if (n != 4) return 0
-          if (o[1] == 10) return 1
-          if (o[1] == 192 && o[2] == 168) return 1
-          if (o[1] == 172 && o[2] >= 16 && o[2] <= 31) return 1
-          return 0
-        }
-        !got_any { first = $0; got_any = 1 }
-        is_private($0) && !got_priv { priv = $0; got_priv = 1 }
-        END {
-          if (got_priv) print priv
-          else if (got_any) print first
-        }
-      '
+  ah_ip=${STATS_HTTPD_IP_CMD:-ip}
+  command -v "$ah_ip" >/dev/null 2>&1 || return 0
+  ah_wan=$("$ah_ip" -4 route show default 2>/dev/null \
+    | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1) }' \
+    | tr '\n' ' ')
+  "$ah_ip" -4 -o addr show scope global 2>/dev/null | awk -v wan=" $ah_wan " '
+    function is_private(ip,    o, n) {
+      n = split(ip, o, ".")
+      if (n != 4) return 0
+      if (o[1] == 10) return 1
+      if (o[1] == 192 && o[2] == 168) return 1
+      if (o[1] == 172 && o[2] >= 16 && o[2] <= 31) return 1
+      return 0
+    }
+    {
+      dev = $2; sub(/@.*/, "", dev)
+      addr = ""
+      for (i = 1; i < NF; i++) if ($i == "inet") { addr = $(i + 1); break }
+      if (addr == "") next
+      split(addr, a, "/"); ip = a[1]; plen = a[2]
+    }
+    !got_any { first = ip; got_any = 1 }
+    is_private(ip) && !got_priv { priv = ip; got_priv = 1 }
+    dev == "br0" && !got_br0 { br0 = ip; got_br0 = 1 }
+    index(wan, " " dev " ") { next }
+    plen == "32" { next }
+    is_private(ip) && !got_lan { lan = ip; got_lan = 1 }
+    END {
+      if (got_br0) print br0
+      else if (got_lan) print lan
+      else if (got_priv) print priv
+      else if (got_any) print first
+    }
+  '
 }
 
 print_web_url() {
