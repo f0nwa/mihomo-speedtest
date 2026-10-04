@@ -44,7 +44,15 @@ cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
-(ulimit -f 4096; awk -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -f "$DIR/migrate_config.awk" "$source_file" "$template_file") || fail 'Структура конфига не поддерживается; выход сохранён'
+# Причину отказа migrate_config.awk пишет в отдельный файл (без значений
+# конфига) - без неё пользователь видел только общую фразу и не мог понять,
+# что поправить.
+if ! (ulimit -f 4096; awk -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -v REASONF="$WORK/reason" -f "$DIR/migrate_config.awk" "$source_file" "$template_file"); then
+  reason=
+  [ -f "$WORK/reason" ] && reason=$(head -n 1 "$WORK/reason" | cut -c1-300)
+  [ -n "$reason" ] || reason='причина не определена'
+  fail "Структура конфига не поддерживается: $reason; выход сохранён"
+fi
 [ "$(wc -c < "$WORK/candidate" | tr -d ' ')" -le 4194304 ] && [ "$(wc -c < "$WORK/report" | tr -d ' ')" -le 65536 ] || fail 'Результат превышает лимит'
 chmod 0600 "$WORK/candidate" "$WORK/report" || fail 'Не удалось защитить результат'
 # Оба назначения в RAM. Отчёт публикуется первым; ошибка не заменяет кандидат.

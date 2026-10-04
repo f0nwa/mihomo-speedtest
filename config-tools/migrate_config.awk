@@ -11,19 +11,44 @@ BEGIN {
   SERVICE_LISTENER="mst-speedtest"; SERVICE_PORT="7896"
   split("port mixed-port socks-port redir-port tproxy-port", port_keys, " ")
 }
-function bad() { failed=1; exit 1 }
+# Причина отказа - в REASONF (первая же, дальше не перезаписывается).
+# Только имена ключей/провайдеров и номера строк: значения (ссылки
+# подписок, пароли) в причину не попадают.
+# busybox awk (роутер) требует объявлять функцию до первого вызова -
+# порядок функций ниже важен; конкатенацию со скобками пишем без
+# пробела "имя (" - иначе busybox видит вызов функции.
+function bad(reason) {
+  if(!failed && REASONF!="" && reason!="") {printf "%s\n", reason > REASONF; close(REASONF)}
+  failed=1; exit 1
+}
+# Разделитель списка: "" перед первым элементом, ", " перед остальными.
+# Не "x=x (n++ ? ...)": busybox awk читает "имя (" как вызов функции.
+function sep_next(n) {return (n ? ", " : "")}
+function where() {return (side==1 ? "конфиг" : "шаблон") ", строка " FNR}
 function trim(s) { sub(/^[ \t]+/,"",s); sub(/[ \t\r]+$/,"",s); return s }
 function header(s, t) { t=s; sub(/:.*/,"",t); return t }
 {
   side=(FILENAME==SOURCE ? 1 : 2)
   line=$0; sub(/\r$/,"",line)
-  if (line ~ /\t/ || line ~ /^---/ || line ~ /^\.\.\./) bad()
+  if (line ~ /\t/) bad(where() ": табуляция - YAML допускает только пробелы")
+  if (line ~ /^---/ || line ~ /^\.\.\./) bad(where() ": разделитель документов YAML (--- или ...) - нужен один документ")
   if (line ~ /^[A-Za-z0-9_-]+:/) {
     key=header(line)
-    if (seen[side,key]++) bad()
+    if (seen[side,key]++) bad(where() ": ключ " key ": повторяется")
     order[side,++nkeys[side]]=key
-  } else if (line ~ /^[^ #]/) bad()
+  } else if (line ~ /^[^ #]/) bad(where() ": строка без отступа не похожа на ключ верхнего уровня (ключ в кавычках, список или поток?)")
   sections[side,key]=sections[side,key] line "\n"
+}
+function save_provider(name,part) {
+  if (provider_seen[name]++) bad("proxy-providers: провайдер " name " повторяется")
+  if (name=="fast") {if(part !~ /\n    type: file[ ]*\n/ || part ~ /\n    url:/) bad("proxy-providers: провайдер fast зарезервирован под быстрый пул и должен быть type: file без url - переименуйте свою подписку fast"); return}
+  if (part ~ /\n    type: file[ ]*\n/) {print "REVIEW|file-provider-replaced|" name > REPORT;return}
+  if (part !~ /\n    url:/) bad("proxy-providers: у провайдера " name " нет url: на отступе 4 пробела (поддерживаются http-подписки и type: file)")
+  # Ограниченная структура ключей с именами проекта, значения не интерпретируем.
+  sub(/\n[ \n]*$/,"\n",part)
+  providers=providers part
+  subnames=subnames sep_next(nprov++) name
+  print "PRESERVED|subscription|" name > REPORT
 }
 function extract_providers(text, a,n,j,s,name,part,type,names) {
   n=split(text,a,"\n"); name=""; part=""
@@ -32,28 +57,25 @@ function extract_providers(text, a,n,j,s,name,part,type,names) {
     if (s ~ /^  [A-Za-z0-9_-]+:[ ]*$/) {
       if (name!="") save_provider(name,part)
       name=trim(s);sub(/:.*$/,"",name);part=s "\n"
-    } else if(s ~ /^  [^ #]/) bad()
+    } else if(s ~ /^  [^ #]/) bad("proxy-providers: имя провайдера должно быть простым словом (латиница, цифры, - и _) без кавычек, а параметры - с отступом 4 пробела")
     else if (name!="" && s !~ /^  # --- SUBSCRIPTIONS:/ && s !~ /^#/) part=part s "\n"
   }
   if (name!="") save_provider(name,part)
 }
-function save_provider(name,part) {
-  if (provider_seen[name]++) bad()
-  if (name=="fast") {if(part !~ /\n    type: file[ ]*\n/ || part ~ /\n    url:/) bad(); return}
-  if (part ~ /\n    type: file[ ]*\n/) {print "REVIEW|file-provider-replaced|" name > REPORT;return}
-  if (part !~ /\n    url:/) bad()
-  # Ограниченная структура ключей с именами проекта, значения не интерпретируем.
-  sub(/\n[ \n]*$/,"\n",part)
-  providers=providers part
-  subnames=subnames (nprov++ ? ", " : "") name
-  print "PRESERVED|subscription|" name > REPORT
-}
 function unquote(v) {v=trim(v);if(v ~ /^".*"$/ || v ~ /^\047.*\047$/) v=substr(v,2,length(v)-2);return v}
+function save_listener(entry,name,port) {
+  if(name=="" || name ~ /[|]/) bad("listeners: у входа нет name или в name есть символ |")
+  if(listener_seen[name]++) bad("listeners: вход " name " повторяется")
+  if(name==SERVICE_LISTENER) return
+  if(port==SERVICE_PORT) bad("listeners: вход " name " занимает порт " SERVICE_PORT ", нужный mihomo-speedtest - смените порт")
+  listenertext=listenertext entry
+  nlisteners++
+}
 # Свои входы пользователя: только блочные записи "  - ключ: ..." с
 # вложенными строками на 4+ пробела. Служебный вход не переносится.
 function extract_listeners(text, a,n,j,s,entry,name,port) {
   n=split(text,a,"\n")
-  if(a[1] !~ /^listeners:[ ]*(\[\])?[ ]*$/) bad()
+  if(a[1] !~ /^listeners:[ ]*(\[\])?[ ]*$/) bad("listeners: поддерживается только блочный список (каждый вход с \"  - \")")
   if(a[1] ~ /\[\]/) return
   entry=""
   for(j=2;j<=n;j++) {
@@ -63,18 +85,11 @@ function extract_listeners(text, a,n,j,s,entry,name,port) {
       if(entry!="") save_listener(entry,name,port)
       entry=s "\n";name="";port=""
     } else if(s ~ /^    / && entry!="") entry=entry s "\n"
-    else bad()
+    else bad("listeners: поддерживается только блочный список, параметры входа - с отступом 4 пробела")
     if(s ~ /^(  - |    )name:/) {name=s;sub(/^[ -]*name:/,"",name);name=unquote(name)}
     if(s ~ /^(  - |    )port:/) {port=s;sub(/^[ -]*port:/,"",port);port=unquote(port)}
   }
   if(entry!="") save_listener(entry,name,port)
-}
-function save_listener(entry,name,port) {
-  if(name=="" || name ~ /[|]/ || listener_seen[name]++) bad()
-  if(name==SERVICE_LISTENER) return
-  if(port==SERVICE_PORT) bad()
-  listenertext=listenertext entry
-  nlisteners++
 }
 function static_names(text, side,a,n,j,s,value) {
   n=split(text,a,"\n")
@@ -82,10 +97,10 @@ function static_names(text, side,a,n,j,s,value) {
     s=a[j]
     if (s ~ /^  - name:/) {
       value=s;sub(/^  - name:[ ]*/,"",value);value=trim(value)
-      if (value=="" || value ~ /[|\r\n]/) bad()
-      if (side==1) { staticnames=staticnames (nstatic++ ? ", " : "") value }
+      if (value=="" || value ~ /[|\r\n]/) bad("proxies: пустое имя ноды или в имени есть символ |")
+      if (side==1) { staticnames=staticnames sep_next(nstatic++) value }
       else template_names[value]=1
-    } else if (s ~ /^  - /) bad()
+    } else if (s ~ /^  - /) bad("proxies: у каждой ноды первым ключом должен идти name (\"  - name: ...\")")
   }
 }
 # Разбивает только однострочные flow-списки ссылок, сохраняя кавычки и запятые.
@@ -106,13 +121,13 @@ function remap_refs(s, start,end,body,j,ch,quote,escape,token,count,result,inser
     else if (ch=="," || ch=="]") {
       token=trim(token)
       if (token in template_names) {
-        if (!inserted) {if (nstatic) result=result (count++ ? ", " : "") staticnames;inserted=1}
-      } else if (token!="") result=result (count++ ? ", " : "") token
+        if (!inserted) {if (nstatic) result=result sep_next(count++) staticnames;inserted=1}
+      } else if (token!="") result=result sep_next(count++) token
       token=""
       if (ch=="]") {end=j;break}
     } else token=token ch
   }
-  if (!end || quote!="") bad()
+  if (!end || quote!="") bad("proxy-groups/anchors: не удалось разобрать однострочный список proxies: [...]")
   return substr(s,1,start) result substr(s,end)
 }
 # Проверяет ссылки вне кавычек и комментариев, не исполняя YAML.
@@ -137,7 +152,7 @@ function aliases(s, j,ch,quote,escape,name,k,previous,indent) {
     else if((ch=="*" || ch=="&") && (j==1 || substr(s,j-1,1) ~ /[ :,[{-]/)) {
       name="";k=j+1
       while(substr(s,k,1) ~ /^[A-Za-z0-9_-]$/) {name=name substr(s,k,1);k++}
-      if(name=="") bad()
+      if(name=="") bad("якорь или ссылка (& или *) без имени")
       if(ch=="&") definitions[name]=1;else references[name]=1
       j=k-1
     }
@@ -173,14 +188,18 @@ function render(text, section, a,n,j,s,subsection,proxies,dns,listeners) {
 }
 END {
   if(failed) exit 1
-  if(sections[1,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/ || sections[2,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/) exit 1
-  if(sections[1,"proxies"] !~ /^proxies:[ ]*(\[\])?[ ]*\n/) exit 1
-  if (!seen[1,"proxy-providers"] || !seen[1,"proxies"] || !seen[2,"anchors"] || !seen[2,"proxy-groups"]) exit 1
+  if(!seen[1,"proxy-providers"]) bad("в конфиге нет секции proxy-providers: - миграция переносит подписки оттуда")
+  if(sections[1,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/) bad("proxy-providers: поддерживается только блочная запись (proxy-providers: и провайдеры на следующих строках), не { ... }")
+  # Нет своих нод - то же, что "proxies: []" (многие конфиги живут только
+  # на подписках и секцию proxies не заводят вовсе).
+  if(!seen[1,"proxies"]) {seen[1,"proxies"]=1; sections[1,"proxies"]="proxies: []\n"}
+  if(sections[1,"proxies"] !~ /^proxies:[ ]*(\[\])?[ ]*\n/) bad("proxies: поддерживается блочный список нод или пустой proxies: [] - не однострочная запись")
+  if(sections[2,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/ || !seen[2,"anchors"] || !seen[2,"proxy-groups"]) bad("шаблон config.example.yaml повреждён (нет proxy-providers/anchors/proxy-groups) - переустановите проект")
   template="";for(j=1;j<=nkeys[2];j++) template=template sections[2,order[2,j]]
   split("SUBSCRIPTIONS STATIC_PROXIES STATIC_DNS STATIC_LISTENERS",markers," ")
-  for(j=1;j<=4;j++) if(marker_count(template,markers[j] ":BEGIN")!=1 || marker_count(template,markers[j] ":END")!=1) exit 1
-  for(j=1;j<=4;j++) if(marker_position(template,markers[j] ":BEGIN")>marker_position(template,markers[j] ":END")) exit 1
-  if(sections[2,"anchors"] !~ /\n  sub-names: &sub-names /) exit 1
+  for(j=1;j<=4;j++) if(marker_count(template,markers[j] ":BEGIN")!=1 || marker_count(template,markers[j] ":END")!=1) bad("шаблон config.example.yaml повреждён (маркер " markers[j] ") - переустановите проект")
+  for(j=1;j<=4;j++) if(marker_position(template,markers[j] ":BEGIN")>marker_position(template,markers[j] ":END")) bad("шаблон config.example.yaml повреждён (порядок маркеров " markers[j] ") - переустановите проект")
+  if(sections[2,"anchors"] !~ /\n  sub-names: &sub-names /) bad("шаблон config.example.yaml повреждён (нет sub-names) - переустановите проект")
   if(marker_position(sections[1,"dns"],"STATIC_DNS:END")) sections[1,"dns"]=substr(sections[1,"dns"],1,marker_position(sections[1,"dns"],"STATIC_DNS:END")-1)
   sub(/\n[ \n]*$/,"\n",sections[1,"dns"])
   # Файлы создаются только после первичной проверки; обёртка не публикует ошибочный результат.
@@ -199,7 +218,7 @@ END {
   if(nlisteners) print "PRESERVED|section|listeners" > REPORT
   for(j=1;j<=5;j++) if(seen[1,port_keys[j]]) {
     v=sections[1,port_keys[j]];sub(/^[^:]*:/,"",v);sub(/\n.*/,"",v)
-    if(unquote(v)==SERVICE_PORT) bad()
+    if(unquote(v)==SERVICE_PORT) bad(port_keys[j] ": порт " SERVICE_PORT " нужен mihomo-speedtest - смените порт")
   }
   if(failed) exit 1
   if(seen[1,"dns"]) print "PRESERVED|section|dns" > REPORT
@@ -229,5 +248,5 @@ END {
   close(OUT);close(REPORT)
   while((getline candidate_line < OUT)>0) aliases(candidate_line)
   close(OUT)
-  for(alias_name in references) if(!(alias_name in definitions)) bad()
+  for(alias_name in references) if(!(alias_name in definitions)) bad("ссылка *" alias_name " осталась без определения: якорь &" alias_name " был в заменяемой секции (anchors/proxy-groups/rules) - перенесите значение в саму ноду или настройку")
 }

@@ -98,5 +98,44 @@ class Migration(unittest.TestCase):
   self.old.write_text(self.old.read_text().replace('routing-mark: 111','routing-mark: 111\nmixed-port: 7896'));self.run_cli(False)
  def test_flow_listener_rejected(self):
   self.schema2('listeners:\n  - {name: my-socks, type: socks, port: 7777}\n\n');self.run_cli(False)
+ # --- Причина отказа и конфиг без proxies: (только подписки) ---
+ def reason(self,expected):
+  r=self.run_cli(False);self.assertIn(expected,r.stderr)
+  for x in ['PRIVATE_TOKEN','PRIVATE_PASSWORD','PRIVATE_API_SECRET','причина не определена']:self.assertNotIn(x,r.stderr)
+ def without_proxies(self):
+  a=self.old.read_text();start=a.index('proxies:\n');end=a.index('# --- Провайдеры прокси ---');self.old.write_text(a[:start]+a[end:])
+ def test_missing_proxies_section_is_empty_static(self):
+  self.without_proxies();self.run_cli();t=self.out.read_text()
+  self.assertIn('PRIVATE_TOKEN',t);self.assertNotIn('server: proxy-node',t);self.assertEqual(sum(x.startswith('proxies:') for x in t.splitlines()),1)
+  first=self.out.read_bytes();self.old.write_bytes(first);self.out.unlink();self.run_cli();self.assertEqual(self.out.read_bytes(),first)
+ def test_reason_duplicate_key(self):
+  self.old.write_text(self.old.read_text()+'log-level: info\n');self.reason('ключ log-level: повторяется')
+ def test_reason_tab(self):
+  self.old.write_text(self.old.read_text()+'dns2:\n\tenable: true\n');self.reason('конфиг, строка')
+ def test_reason_provider_without_url(self):
+  self.old.write_text(self.old.read_text().replace('    url: "https://subscription-1','    nourl: "https://subscription-1'));self.reason('нет url:')
+ def test_reason_quoted_provider(self):
+  self.old.write_text(self.old.read_text().replace('  provider-b:', '  "provider-b":'));self.reason('имя провайдера')
+ def test_reason_missing_providers(self):
+  a=self.old.read_text();self.old.write_text(a.replace('proxy-providers:','old-providers:'));self.reason('нет секции proxy-providers')
+ def test_reason_missing_anchor(self):
+  s=self.old.read_text().replace('anchors:', 'anchors:\n  private-secret: &private-secret PRIVATE_PASSWORD').replace('password: "PRIVATE_PASSWORD"', 'password: *private-secret')
+  self.old.write_text(s);self.reason('ссылка *private-secret')
+ def test_reason_broken_template(self):
+  self.template.write_text(self.base.replace('SUBSCRIPTIONS:END','OTHER:END'));self.reason('шаблон config.example.yaml повреждён')
+ def test_reason_service_port(self):
+  self.old.write_text(self.old.read_text().replace('routing-mark: 111','routing-mark: 111\nmixed-port: 7896'));self.reason('mixed-port: порт 7896')
 unittest.main(argv=["test_migrate_config"],verbosity=2)
 PY
+
+# На роутере awk - busybox: он строже gawk (функцию нужно объявить до
+# вызова, "имя (" читается как вызов функции). Под gawk миграция проходила,
+# а на роутере падала на любом конфиге - поэтому, если busybox есть,
+# прогоняем те же тесты ещё раз под его awk.
+if [ -z "${MST_BUSYBOX_PASS:-}" ] && command -v busybox >/dev/null 2>&1 && busybox awk 'BEGIN{}' >/dev/null 2>&1; then
+  bb=$(mktemp -d)
+  trap 'rm -rf "$bb"' EXIT
+  ln -s "$(command -v busybox)" "$bb/awk"
+  echo "test_migrate_config: повтор под busybox awk (как на роутере)" >&2
+  PATH="$bb:$PATH" MST_BUSYBOX_PASS=1 sh "$0"
+fi
