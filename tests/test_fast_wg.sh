@@ -40,6 +40,8 @@ has '  - name: FAST-WG' "$WORK/wg.yaml" "группа создана"
 has "    proxies: [REJECT, 'WG Bob''s', 'AWG-NL']" "$WORK/wg.yaml" "в группе только WG-ноды"
 has '    proxies: [FAST-WG]' "$WORK/wg.yaml" "группа в '⚡ Быстрый пул'"
 has '    hidden: true' "$WORK/wg.yaml" "группа скрыта"
+has '    interval: 300' "$WORK/wg.yaml" "у группы своя проверка задержки"
+has '    lazy: false' "$WORK/wg.yaml" "проверка не ленивая"
 fast_block=$(awk '/# --- FAST_WG:BEGIN/{f=1} f{print} /# --- FAST_WG:END/{f=0}' "$WORK/wg.yaml")
 case $fast_block in *include-all*|*Hysteria2*) fail "в FAST-WG попали не-WG ноды" ;; esac
 
