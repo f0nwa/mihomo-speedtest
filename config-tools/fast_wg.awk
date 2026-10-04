@@ -5,7 +5,10 @@
 #   # --- FAST_WG:BEGIN/END ---      сама группа FAST-WG (proxy-groups:)
 #   # --- FAST_WG_REF:BEGIN/END ---  строка "proxies: [FAST-WG]" в '⚡ Быстрый пул'
 # Есть ноды "type: wireguard" (AmneziaWG - тот же тип) - группа содержит
-# [REJECT, <эти ноды>] (REJECT - "победителя нет", выбирает спидтест);
+# [REJECT, <эти ноды>] (REJECT - "победителя нет", выбирает спидтест) и
+# свою проверку задержки: select сам ноды не проверяет, а пул проверяет
+# только группу целиком - без неё у WG-нод пропадают пинги. lazy: false -
+# группу трогают редко, ленивая проверка бы не запускалась;
 # нет - оба блока пустые. Маркеры остаются, повторный прогон ничего не
 # меняет. Ноды из подписок не учитываются: их состав на момент сборки
 # конфига неизвестен. Конфиг без маркеров выводится как есть; непарные
@@ -55,6 +58,9 @@ END {
         print ind "- name: FAST-WG"
         print ind "  type: select"
         print ind "  proxies: [REJECT" wg "]"
+        print ind "  url: \"https://www.gstatic.com/generate_204\""
+        print ind "  interval: 300"
+        print ind "  lazy: false"
         print ind "  hidden: true"
       }
     } else if (marker(s, "FAST_WG_REF") && s ~ /:BEGIN/) {
