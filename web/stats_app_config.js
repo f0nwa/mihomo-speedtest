@@ -109,6 +109,7 @@ function createEditor(host, text, onChange) {
       extraKeys: { Tab: function (c) { c.replaceSelection('  '); } }
     });
     var marked = null;
+    var importMarks = [];
     if (onChange) { cm.on('change', onChange); }
     return {
       getValue: function () { return cm.getValue(); },
@@ -120,6 +121,21 @@ function createEditor(host, text, onChange) {
         cm.addLineClass(marked, 'background', 'cm-err-line');
         cm.setCursor({ line: marked, ch: 0 });
         cm.scrollIntoView({ line: marked, ch: 0 }, 120);
+      },
+      // Подсветка импорта: list - [номер строки с 0, 'add'|'mod']; полоса
+      // слева (фоновый слой строки, как cm-err-line), снимается clearImport() и setValue().
+      markImport: function (list) {
+        importMarks.forEach(function (h) { cm.removeLineClass(h[0], 'background', h[1]); });
+        importMarks = [];
+        (list || []).forEach(function (m) {
+          var cls = m[1] === 'mod' ? 'cm-import-mod' : 'cm-import-add';
+          var h = cm.addLineClass(m[0], 'background', cls);
+          if (h) { importMarks.push([h, cls]); }
+        });
+      },
+      clearImport: function () {
+        importMarks.forEach(function (h) { cm.removeLineClass(h[0], 'background', h[1]); });
+        importMarks = [];
       },
       refresh: function () { cm.refresh(); }
     };
@@ -137,6 +153,8 @@ function createEditor(host, text, onChange) {
         var pos = lines.slice(0, n - 1).join('\n').length + (n > 1 ? 1 : 0);
         ta.focus(); ta.setSelectionRange(pos, pos + (lines[n - 1] || '').length);
       },
+      markImport: function () {},   // в textarea подсветки нет - только сводка
+      clearImport: function () {},
       refresh: function () {}
     };
   });
@@ -165,6 +183,54 @@ function lineDiff(a, b) {
   while (i < n) { out.push(['-', x[i++]]); }
   while (j < m) { out.push(['+', y[j++]]); }
   return out;
+}
+
+// Строки нового текста, которых не было в старом: [номер с 0, 'add'|'mod'].
+// 'mod' - добавленная строка сразу на месте удалённой (замена), 'add' - новая.
+// null - тексты слишком большие для сравнения.
+function importLineMarks(before, after) {
+  var d = lineDiff(before, after);
+  if (d === null) { return null; }
+  var out = [], j = 0, del = false;
+  d.forEach(function (r) {
+    if (r[0] === '-') { del = true; return; }
+    if (r[0] === '+') { out.push([j, del ? 'mod' : 'add']); j++; return; }
+    del = false; j++;
+  });
+  return out;
+}
+
+// Ограничения импорта WireGuard (см. stats_config.sh import-wg).
+var WG_MAX_FILES = 20;
+var WG_MAX_BYTES = 65536;
+
+// Отчёт import-wg -> статус для каждой записи окна (по имени ноды; сначала
+// ADDED/REPLACED, потом ERROR - так повтор имени отметит ошибкой второй файл).
+function importStatuses(entries, report) {
+  var lines = (report || []).map(function (l) { return l.split('|'); });
+  entries.forEach(function (e) { if (!e.localErr) { e.status = null; e.skipped = []; } });
+  function take(name) {
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (!e.localErr && e.status === null && e.name === name) { return e; }
+    }
+    return null;
+  }
+  lines.forEach(function (p) {
+    if (p[0] !== 'ADDED' && p[0] !== 'REPLACED') { return; }
+    var e = take(p.slice(1).join('|'));
+    if (e) { e.status = p[0] === 'ADDED' ? ['ok', 'новая'] : ['ok', 'заменит существующую']; }
+  });
+  lines.forEach(function (p) {
+    if (p[0] !== 'ERROR') { return; }
+    var e = take(p.slice(1, -1).join('|'));
+    if (e) { e.status = ['err', 'ошибка: ' + p[p.length - 1]]; }
+  });
+  lines.forEach(function (p) {
+    if (p[0] !== 'SKIPPED_KEY') { return; }
+    var name = p.slice(1, -1).join('|');
+    entries.forEach(function (e) { if (e.name === name && e.skipped) { e.skipped.push(p[p.length - 1]); } });
+  });
 }
 
 // Рисует diff: только изменённые строки с 3 строками контекста.
@@ -291,10 +357,18 @@ export function renderConfig() {
     var fmtBtn = btn(row2, 'Исправить формат', true);
     var tplBtn = btn(row2, 'Миграция к шаблону', true);
     var workBtn = btn(row2, 'Откат к рабочему бэкапу', true);
-    repairCard.appendChild(el('p', 'hint', 'Исправление формата и миграция только меняют текст в редакторе - ' +
+    var wgBtn = btn(row2, 'Импорт WireGuard', true);
+    repairCard.appendChild(el('p', 'hint', 'Исправление формата, миграция и импорт WireGuard только меняют текст в редакторе - ' +
       'проверьте результат и нажмите «Сохранить и применить». Откат к рабочему бэкапу сразу применяет ' +
-      'самый свежий бэкап, который проходит mihomo -t.'));
+      'самый свежий бэкап, который проходит mihomo -t. Импорт WireGuard добавляет ноды из файлов .conf ' +
+      '(WireGuard и AmneziaWG) в proxies: и в группы 🚀 Авто по пингу, 🛡️Fallback-Stable, ⚙️Manual и FAST-WG; ' +
+      'новые строки отмечаются зелёной полосой слева, изменённые - жёлтой.'));
     repairCard.appendChild(row2);
+    var wgInput = el('input');
+    wgInput.type = 'file'; wgInput.accept = '.conf'; wgInput.multiple = true; wgInput.hidden = true;
+    repairCard.appendChild(wgInput);
+    var importHost = el('div');
+    repairCard.appendChild(importHost);
     app.appendChild(repairCard);
 
     var backupsCard = card('Бэкапы');
@@ -304,7 +378,7 @@ export function renderConfig() {
     backupsCard.appendChild(backupView);
     app.appendChild(backupsCard);
 
-    var all = [checkBtn, saveBtn, diffBtn, resetBtn, fmtBtn, tplBtn, workBtn];  // logBtn - доступна и во время применения
+    var all = [checkBtn, saveBtn, diffBtn, resetBtn, fmtBtn, tplBtn, workBtn, wgBtn];  // logBtn - доступна и во время применения
     function busy(on) {
       all.forEach(function (b) { b.disabled = on; });
       var rb = backupsBody.querySelectorAll('button');
@@ -406,7 +480,7 @@ export function renderConfig() {
     function reload(okText, kind, keepEditor) {
       fetchConfigJson('/api/config', 'text').then(function (d) {
         view.base = d.base; view.saved = d.text || '';
-        if (!keepEditor) { view.editor.setValue(view.saved); view.editor.markLine(0); }
+        if (!keepEditor) { view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); }
         setDirty();
         if (okText) { msg(okText, kind || 'ok'); }
         loadBackups();
@@ -514,7 +588,7 @@ export function renderConfig() {
     });
     resetBtn.addEventListener('click', function () {
       if (view.dirty && !window.confirm('Отменить все несохранённые правки?')) { return; }
-      view.editor.setValue(view.saved); view.editor.markLine(0); setDirty(); msg('', ''); clearOutput();
+      view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); setDirty(); msg('', ''); clearOutput();
     });
     function repair(mode) {
       busy(true); clearOutput(); msg('Починка...', '');
@@ -549,6 +623,151 @@ export function renderConfig() {
       }).then(function () { busy(false); });
     }
     fmtBtn.addEventListener('click', function () { repair('format'); });
+
+    // ----- Импорт WireGuard (.conf -> ноды, stats_config.sh import-wg) -----
+    // Окно со списком файлов: имя ноды правится, статус - ответ роутера
+    // (запрос после выбора файлов и через 400 мс после правки имени).
+    // «Добавить в конфиг» ставит текст из ответа в редактор и подсвечивает
+    // новое; до «Сохранить и применить» ничего не применяется.
+    wgBtn.addEventListener('click', function () { wgInput.value = ''; wgInput.click(); });
+    wgInput.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(wgInput.files || []);
+      if (!files.length) { return; }
+      if (files.length > WG_MAX_FILES) { msg('За один раз можно импортировать не больше ' + WG_MAX_FILES + ' файлов.', 'err'); return; }
+      Promise.all(files.map(function (f) {
+        var e = { file: f.name, name: f.name.replace(/\.conf$/i, ''), text: '', localErr: '', status: null, skipped: [] };
+        if (f.size > WG_MAX_BYTES) { e.localErr = 'файл больше 64 КБ'; return Promise.resolve(e); }
+        return f.text().then(function (s) {
+          e.text = s;
+          if (/^### MST-/m.test(s)) { e.localErr = 'недопустимая строка ### MST- в файле'; }
+          return e;
+        });
+      })).then(openImport)['catch'](function (err) { msg('Не удалось прочитать файлы: ' + err.message, 'err'); });
+    });
+    function openImport(entries) {
+      while (importHost.firstChild) { importHost.removeChild(importHost.firstChild); }
+      var box = el('div', 'config-import');
+      box.appendChild(el('h2', null, 'Импорт WireGuard'));
+      box.appendChild(el('p', 'hint', 'Имя ноды можно поправить. Нода с таким же именем в конфиге будет заменена.'));
+      var list = el('div', 'config-import-list');
+      box.appendChild(list);
+      var row = el('div', 'btn-row');
+      var addBtn = btn(row, 'Добавить в конфиг');
+      var cancelBtn = btn(row, 'Отмена', true);
+      box.appendChild(row);
+      importHost.appendChild(box);
+      var seq = 0, last = null, lastBody = null, timer = null;
+      entries.forEach(function (e) {
+        var r = el('div', 'config-import-row');
+        r.appendChild(el('span', 'config-import-file', e.file));
+        e.input = el('input'); e.input.type = 'text'; e.input.value = e.name; e.input.maxLength = 64;
+        e.input.setAttribute('aria-label', 'Имя ноды для ' + e.file);
+        e.input.disabled = !!e.localErr;
+        e.input.addEventListener('input', function () {
+          e.name = e.input.value.trim();
+          clearTimeout(timer); timer = setTimeout(function () { timer = null; request(); }, 400);
+          addBtn.disabled = true;
+        });
+        r.appendChild(e.input);
+        e.statusEl = el('span', 'config-import-status hint');
+        r.appendChild(e.statusEl);
+        list.appendChild(r);
+      });
+      function paint() {
+        var good = false;
+        entries.forEach(function (e) {
+          var s = e.localErr ? ['err', 'ошибка: ' + e.localErr] : (e.status || ['', 'проверка...']);
+          if (s[0] === 'ok') { good = true; }
+          e.statusEl.textContent = s[1] + (e.skipped && e.skipped.length && s[0] === 'ok' ? ' (пропущены ключи: ' + e.skipped.join(', ') + ')' : '');
+          e.statusEl.className = 'config-import-status ' + (s[0] === 'ok' ? 'msg-ok' : (s[0] === 'err' ? 'msg-err' : 'hint'));
+        });
+        // Пока ждём пересчёта после правки имени - статусы устарели.
+        addBtn.disabled = !good || timer !== null;
+      }
+      function body() {
+        var b = '';
+        entries.forEach(function (e) {
+          if (e.localErr) { return; }
+          b += '### MST-WG ' + e.name + '\n' + e.text + (/\n$/.test(e.text) ? '' : '\n');
+        });
+        return b + '### MST-CONFIG\n' + view.editor.getValue();
+      }
+      function request() {
+        var my = ++seq, b = body();
+        entries.forEach(function (e) { if (!e.localErr) { e.status = null; } });
+        paint(); addBtn.disabled = true;
+        return postText('/api/config/import-wg', b).then(function (r) {
+          if (my !== seq) { return null; }
+          last = r; lastBody = b;
+          importStatuses(entries, r.report);
+          paint();
+          return r;
+        })['catch'](function (err) {
+          if (my !== seq) { return null; }
+          var d = err.data || {};
+          entries.forEach(function (e) { if (!e.localErr) { e.status = ['err', 'ошибка: ' + (d.message || err.message)]; } });
+          paint();
+          return null;
+        });
+      }
+      function hasNodes(r) {
+        return (r.report || []).some(function (l) { return /^(ADDED|REPLACED)\|/.test(l); });
+      }
+      cancelBtn.addEventListener('click', function () {
+        seq++; clearTimeout(timer); timer = null;
+        while (importHost.firstChild) { importHost.removeChild(importHost.firstChild); }
+      });
+      addBtn.addEventListener('click', function () {
+        // Имя правили только что или текст редактора поменялся, пока окно
+        // было открыто, - сначала пересчитать (отложенный пересчёт отменяется).
+        var pending = timer !== null;
+        clearTimeout(timer); timer = null;
+        var p = (!pending && last && lastBody === body()) ? Promise.resolve(last) : request();
+        p.then(function (r) {
+          if (!r || !hasNodes(r)) { return; }   // нечего добавлять - статусы уже в окне
+          seq++;
+          applyImport(r);
+          while (importHost.firstChild) { importHost.removeChild(importHost.firstChild); }
+        });
+      });
+      request();
+    }
+    function applyImport(r) {
+      var before = view.editor.getValue();
+      view.editor.clearImport();
+      view.editor.setValue(r.text || '');
+      var marks = importLineMarks(before, r.text || '');
+      if (marks) { view.editor.markImport(marks); }
+      setDirty();
+      var n = { ADDED: 0, REPLACED: 0 }, groups = [], missing = [], fast = 'none';
+      (r.report || []).forEach(function (l) {
+        var p = l.split('|');
+        if (p[0] in n) { n[p[0]]++; }
+        if (p[0] === 'GROUP') { groups.push(p[1]); }
+        if (p[0] === 'GROUP_MISSING') { missing.push(p[1]); }
+        if (p[0] === 'FASTWG') { fast = p[1]; }
+      });
+      clearOutput();
+      showCheck(r.check, 'Ноды добавлены в редактор, конфиг проходит mihomo -t. Проверьте подсвеченное и нажмите «Сохранить и применить».');
+      var box = el('div');
+      output.insertBefore(box, output.firstChild);
+      box.appendChild(el('h2', null, 'Импорт WireGuard'));
+      var ul = el('ul', 'config-fixes');
+      ul.appendChild(el('li', null, 'добавлено нод: ' + n.ADDED + ', заменено: ' + n.REPLACED));
+      if (fast === 'created') { ul.appendChild(el('li', null, 'создана группа FAST-WG (лучшая WG-нода в ⚡ Быстрый пул)')); }
+      if (fast === 'updated') { ul.appendChild(el('li', null, 'дополнена группа FAST-WG')); }
+      if (groups.length) { ul.appendChild(el('li', null, 'дописано в группы: ' + groups.join(', '))); }
+      if (missing.length) { ul.appendChild(el('li', 'msg-err', 'группы не найдены или их proxies: записан не в одну строку - добавьте ноды вручную: ' + missing.join(', '))); }
+      if (!marks) { ul.appendChild(el('li', 'hint', 'конфиг слишком большой для подсветки изменений')); }
+      box.appendChild(ul);
+      var undoRow = el('div', 'btn-row');
+      var undoBtn = btn(undoRow, 'Отменить импорт', true);
+      box.appendChild(undoRow);
+      undoBtn.addEventListener('click', function () {
+        view.editor.clearImport(); view.editor.setValue(before); view.editor.markLine(0); setDirty();
+        clearOutput(); msg('Импорт отменён - текст в редакторе как до импорта.', '');
+      });
+    }
     tplBtn.addEventListener('click', function () {
       if (!window.confirm('Миграция заменит служебные разделы проекта (группы, правила, провайдеры) на версии из ' +
         'шаблона, сохранив подписки и локальные настройки. Результат попадёт в редактор, применение - отдельно. Продолжить?')) { return; }

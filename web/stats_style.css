@@ -224,6 +224,14 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-editor .cm-s-default .cm-meta,.config-editor .cm-s-default .cm-bracket{color:#8b9096}
 .config-editor .cm-s-default .cm-variable-2,.config-editor .cm-s-default .cm-tag,.config-editor .cm-s-default .cm-def{color:#c792ea}
 .config-editor .cm-err-line{background:#d1453b33}
+.config-editor .cm-import-add{background:#16a34a1f;border-left:4px solid #16a34a}
+.config-editor .cm-import-mod{background:#d4a72c1f;border-left:4px solid #d4a72c}
+.config-import{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}
+.config-import-list{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.config-import-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(160px,1.2fr) 2fr;gap:8px;align-items:center;font-size:13px}
+.config-import-file{overflow-wrap:anywhere;color:var(--muted)}
+.config-import-status{margin:0;font-size:12px}
+@media (max-width:640px){.config-import-row{grid-template-columns:1fr;gap:2px;padding-bottom:6px;border-bottom:1px solid var(--border)}}
 .config-textarea{display:block;width:100%;height:62vh;min-height:320px;background:#11151c;color:#d7dee6;border:0;padding:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre;tab-size:2}
 .config-status.config-dirty{color:#e0b060}
 .config-diff{max-height:420px}
