@@ -14,7 +14,7 @@ class ConfigPreparation(unittest.TestCase):
   try:Preparation.setUp(self)
   finally:tempfile.tempdir=original
   self.config=self.target/'opt/etc/mihomo/config.yaml';self.config.write_text((ROOT/'config-tools'/'config.example.yaml').read_text()+'secret: "VERY_PRIVATE_SECRET"\n')
-  for name in ['migrate_config.sh','migrate_config.awk','config_diff.awk','config.example.yaml']:
+  for name in ['migrate_config.sh','migrate_config.awk','fast_wg.awk','config_diff.awk','config.example.yaml']:
    p=ROOT/'config-tools'/name;self.add('config-tools',name,p.read_bytes() if p.exists() else b'# not implemented\n','0755' if name.endswith('.sh') else '0644','sh' if name.endswith('.sh') else 'awk' if name.endswith('.awk') else 'none')
   self.binary=self.root/'mihomo';self.binary.write_text('#!/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -d) shift; dir=$1 ;; -f) shift; config=$1 ;; esac; shift; done\ncase "$dir" in /tmp/*|/private/tmp/*) ;; *) exit 9 ;; esac\nprintf "%s\\n" "$dir" >> "$MIHOMO_CALLS"\n[ -z "${SAFE_PATHS:-}" ] && [ "${SKIP_SAFE_PATH_CHECK:-false}" != true ] || exit 8\n[ "$MIHOMO_FAIL" = 0 ] || { echo VERY_PRIVATE_SECRET >&2; exit 7; }\nprintf checked > "$dir/cache.db"\n');self.binary.chmod(0o755)
   self.calls=self.root/'mihomo-calls';self.env.update(UPDATE_MIHOMO_BIN=str(self.binary),MIHOMO_CALLS=str(self.calls),MIHOMO_FAIL='0',SAFE_PATHS='/opt',SKIP_SAFE_PATH_CHECK='true')

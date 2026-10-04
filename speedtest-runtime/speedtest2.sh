@@ -47,7 +47,7 @@ API_MAIN=127.0.0.1:9090   # уточняется по external-controller раб
 # а на уже работающем экземпляре ноды в основном: служебная группа и вход
 # из config.example.yaml (порция 1 плана 2026-09-28-wg-main-core-speedtest).
 WG_GROUP=MST-SPEEDTEST
-WG_FAST_GROUP=MST-FAST-WG   # победитель среди WG/AWG - участник '⚡ Быстрый пул'
+WG_FAST_GROUP=FAST-WG       # победитель среди WG/AWG - участник '⚡ Быстрый пул'
 WG_LISTENER=mst-speedtest
 WG_PORT=7896
 MAIN_CONFIG=${MAIN_CONFIG:-$MIHOMO_DIR/config.yaml}
@@ -843,7 +843,7 @@ wg_group_now() {
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
   if ! wg_now=$(wg_group_now "$WG_FAST_GROUP"); then
-    say "WARN: Группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (нужна миграция конфига)"
+    say "WARN: Группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (группа создаётся только для WG/AWG-нод из proxies: конфига, ноды подписок в неё не входят; добавьте ноду в proxies: или обновите конфиг)"
     return 0
   fi
   wg_best=$(awk -v min="$1" -v okfile="$WORK/wg_ok.txt" '

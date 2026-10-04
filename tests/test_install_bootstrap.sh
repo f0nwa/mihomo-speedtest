@@ -12,7 +12,7 @@ component_of() {
     speedtest2.sh|prep.awk|providers.awk|node_stats_update.awk|sub_convert.awk) echo speedtest-runtime ;;
     render_stats.awk|stats_cgi.sh|stats_run.sh|stats_update.sh|stats_config.sh|stats_xkeen.sh|stats_httpd.py|stats_auth.py|stats_auth.sh|stats_index.html|stats_style.css|stats_app.js|stats_app_core.js|stats_app_stats.js|stats_app_settings.js|stats_app_updates.js|stats_app_log.js|stats_app_config.js|stats_app_xkeen.js|stats_codemirror.js|stats_codemirror.css|render_progress.awk|stats_service.sh|stats_init.sh) echo web ;;
     version_check.sh) echo installer ;;
-    migrate_config.sh|migrate_config.awk|config_diff.awk|setup.sh|detect_ua.sh|render_config.awk|existing_config.awk|config.example.yaml) echo config-tools ;;
+    migrate_config.sh|migrate_config.awk|config_diff.awk|setup.sh|detect_ua.sh|render_config.awk|fast_wg.awk|existing_config.awk|config.example.yaml) echo config-tools ;;
     *) echo . ;;
   esac
 }

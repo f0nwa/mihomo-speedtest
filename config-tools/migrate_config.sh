@@ -53,6 +53,9 @@ if ! (ulimit -f 4096; awk -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v R
   [ -n "$reason" ] || reason='причина не определена'
   fail "Структура конфига не поддерживается: $reason; выход сохранён"
 fi
+# Служебная группа FAST-WG - только при WG/AWG-нодах в proxies: (fast_wg.awk).
+awk -f "$DIR/fast_wg.awk" "$WORK/candidate" > "$WORK/candidate.wg" && mv -f "$WORK/candidate.wg" "$WORK/candidate" \
+  || fail 'Не удалось собрать группу FAST-WG; выход сохранён'
 [ "$(wc -c < "$WORK/candidate" | tr -d ' ')" -le 4194304 ] && [ "$(wc -c < "$WORK/report" | tr -d ' ')" -le 65536 ] || fail 'Результат превышает лимит'
 chmod 0600 "$WORK/candidate" "$WORK/report" || fail 'Не удалось защитить результат'
 # Оба назначения в RAM. Отчёт публикуется первым; ошибка не заменяет кандидат.

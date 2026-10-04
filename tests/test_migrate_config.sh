@@ -34,6 +34,17 @@ class Migration(unittest.TestCase):
  def test_empty_static_does_not_restore_demo_nodes(self):
   a=self.old.read_text();start=a.index('proxies:\n');end=a.index('# --- Провайдеры прокси ---');self.old.write_text(a[:start]+'proxies: []\n\n'+a[end:])
   self.run_cli();self.assertNotIn('server: proxy-node',self.out.read_text());self.assertIn('proxies: []',self.out.read_text())
+ def add_wg(self):
+  self.old.write_text(self.old.read_text().replace('  # --- STATIC_PROXIES:END ---','  - name: My AWG\n    type: wireguard\n    server: 10.0.0.1\n  # --- STATIC_PROXIES:END ---'))
+ def test_fast_wg_only_with_wg_nodes(self):
+  self.run_cli();t=self.out.read_text()
+  self.assertNotIn('name: FAST-WG',t);self.assertNotIn('[FAST-WG]',t);self.assertNotIn('MST-FAST-WG',t)
+  self.add_wg();self.run_cli();t=self.out.read_text()
+  self.assertIn("  - name: FAST-WG\n    type: select\n    proxies: [REJECT, 'My AWG']\n    hidden: true\n",t)
+  self.assertIn('    proxies: [FAST-WG]\n',t)
+ def test_repeat_migration_with_wg_is_stable(self):
+  self.add_wg();self.run_cli();first=self.out.read_bytes();self.old.write_bytes(first);self.run_cli()
+  self.assertEqual(self.out.read_bytes(),first)
  def test_repeat_migration_is_stable(self):
   self.run_cli();first=self.out.read_bytes();self.old.write_bytes(first);self.run_cli();self.assertEqual(self.out.read_bytes(),first)
  def test_duplicate_root_key_rejected_without_replacing_output(self):

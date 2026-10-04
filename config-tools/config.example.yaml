@@ -99,9 +99,11 @@ proxy-groups:
   - name: '⚡ Быстрый пул'
     type: url-test
     use: [fast]
-    # MST-FAST-WG - лучшая WireGuard/AmneziaWG-нода по замеру speedtest2.sh
+    # FAST-WG - лучшая WireGuard/AmneziaWG-нода по замеру speedtest2.sh
     # (в fast.yaml такие ноды не пишутся: второй клиент с тем же ключом).
-    proxies: [MST-FAST-WG]
+    # Ссылка на FAST-WG ниже есть, только если в proxies: есть WG/AWG-ноды.
+    # --- FAST_WG_REF:BEGIN --- (генерируется по proxies:, не редактировать руками)
+    # --- FAST_WG_REF:END ---
     url: "https://www.gstatic.com/generate_204"
     interval: 60
     tolerance: 50
@@ -289,14 +291,12 @@ proxy-groups:
     include-all: true
     hidden: true
 
-  # Служебная группа mihomo-speedtest: победитель замера среди
-  # WireGuard/AmneziaWG-нод, участник '⚡ Быстрый пул'. Спидтест выбирает в ней
+  # Служебная группа mihomo-speedtest FAST-WG: победитель замера среди
+  # WireGuard/AmneziaWG-нод из proxies:, участник '⚡ Быстрый пул'. Создаётся,
+  # только если такие ноды есть, и содержит только их. Спидтест выбирает в ней
   # ноду через API; REJECT - "победителя нет", пул такую группу не выбирает.
-  - name: MST-FAST-WG
-    type: select
-    proxies: [REJECT]
-    include-all: true
-    hidden: true
+  # --- FAST_WG:BEGIN --- (генерируется по proxies:, не редактировать руками)
+  # --- FAST_WG:END ---
 
 # --- Входы ---
 listeners:

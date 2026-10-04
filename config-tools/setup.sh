@@ -396,6 +396,11 @@ main() {
   awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" \
       -v listeners_file="$listeners_file" -v mihomo_dir="$MIHOMO_DIR" \
       -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered" || render_rc=$?
+  # Служебная группа FAST-WG - только при WG/AWG-нодах в proxies: (fast_wg.awk).
+  if [ "$render_rc" = 0 ]; then
+    awk -f "$SELFDIR/fast_wg.awk" "$rendered" > "$rendered.wg" && mv -f "$rendered.wg" "$rendered" || render_rc=$?
+    rm -f "$rendered.wg"
+  fi
   rm -f "$specs_file"
   [ -z "$static_file" ] || rm -f "$static_file"
   [ -z "$dns_file" ] || rm -f "$dns_file"

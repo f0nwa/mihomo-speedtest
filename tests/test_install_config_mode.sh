@@ -11,7 +11,7 @@ T=$(mktemp -d /tmp/install-config-mode-test.XXXXXX)
 trap 'rm -rf "$T"' EXIT INT TERM
 
 mkdir -p "$T/self" "$T/bin" "$T/mihomo"
-cp "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" \
+cp "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/config.example.yaml" "$T/self/"
 
 cat > "$T/bin/mihomo" <<'INNER'

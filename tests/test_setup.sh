@@ -192,7 +192,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN3"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK3/"
 cat > "$WORK3/install.sh" <<'EOF'
 #!/bin/sh
@@ -310,7 +310,7 @@ done
 printf '200'
 EOF
 chmod +x "$FAKEBIN4"/*
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK4/"
 cat > "$WORK4/install.sh" <<'EOF'
 #!/bin/sh
@@ -401,7 +401,7 @@ chmod +x "$FAKEBIN5"/*
 # должна остановиться ДО первого же вопроса про подписки, config.yaml не
 # должен появиться, install.sh не должен запускаться.
 WORK5A=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5A/"
 cat > "$WORK5A/install.sh" <<'EOF'
 #!/bin/sh
@@ -426,7 +426,7 @@ rm -rf "$WORK5A"
 # равно задаётся - SKIP_DNS_GUARD_CHECK отключает только проверку Xkeen
 # UI, не весь вопрос целиком (для этого есть отдельный SKIP_CONFIRM).
 WORK5B=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5B/"
 cat > "$WORK5B/install.sh" <<'EOF'
 #!/bin/sh
@@ -450,7 +450,7 @@ rm -rf "$WORK5B"
 # Сценарий "подтверждение": та же активная защита, ответ "y" - установка
 # должна пройти как обычно, предупреждение должно быть показано.
 WORK5C=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5C/"
 cat > "$WORK5C/install.sh" <<'EOF'
 #!/bin/sh
@@ -532,7 +532,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN6"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK6/"
 cat > "$WORK6/install.sh" <<'EOF'
 #!/bin/sh
@@ -617,7 +617,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN7"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK7/"
 cat > "$WORK7/install.sh" <<'EOF'
 #!/bin/sh

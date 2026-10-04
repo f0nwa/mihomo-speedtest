@@ -298,7 +298,7 @@ detect_config_schema() {
 }
 config_tools() {
   mkdir "$WORK/migration-tools" || die 'Не удалось подготовить инструменты миграции'
-  for config_tool in migrate_config.sh migrate_config.awk config_diff.awk config.example.yaml; do
+  for config_tool in migrate_config.sh migrate_config.awk fast_wg.awk config_diff.awk config.example.yaml; do
     config_number=$(awk -F'|' -v name="$config_tool" '$1=="FILE"{n++;if($2=="config-tools"&&$3==name&&$4=="/opt/etc/mihomo-speedtest/" name) {number=n;count++}} END{if(count!=1)exit 1;print number}' "$WORK/records") || die 'Релиз не содержит обязательный инструмент миграции'
     safe_path "$CONFIG_PAYLOAD/files/$config_number"
     cp "$CONFIG_PAYLOAD/files/$config_number" "$WORK/migration-tools/$config_tool" || die 'Не удалось скопировать проверенный инструмент'

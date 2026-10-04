@@ -66,6 +66,7 @@ FILE|config-tools|config-tools/config_diff.awk|/opt/etc/mihomo-speedtest/config_
 FILE|config-tools|config-tools/setup.sh|/opt/etc/mihomo-speedtest/setup.sh|0755|sh
 FILE|config-tools|config-tools/detect_ua.sh|/opt/etc/mihomo-speedtest/detect_ua.sh|0755|sh
 FILE|config-tools|config-tools/render_config.awk|/opt/etc/mihomo-speedtest/render_config.awk|0644|awk
+FILE|config-tools|config-tools/fast_wg.awk|/opt/etc/mihomo-speedtest/fast_wg.awk|0644|awk
 FILE|config-tools|config-tools/existing_config.awk|/opt/etc/mihomo-speedtest/existing_config.awk|0644|awk
 FILE|config-tools|config-tools/config.example.yaml|/opt/etc/mihomo-speedtest/config.example.yaml|0644|none
 

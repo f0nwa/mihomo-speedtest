@@ -93,7 +93,7 @@ wg_select 'Blanc "NL"' || fail "wg_select failed"
 grep -qx 'http://127.0.0.1:9090/proxies/MST-SPEEDTEST' "$T/select_args" || fail "wg_select: неверный URL группы"
 grep -qxF '{"name":"Blanc \"NL\""}' "$T/select_args" || fail "wg_select: неверное тело"
 
-# --- wg_publish_fast: лучший WG выше порога -> MST-FAST-WG, иначе REJECT
+# --- wg_publish_fast: лучший WG выше порога -> FAST-WG, иначе REJECT
 #     только если текущий выбор проверялся и не прошёл ---
 printf 'n0002\tBlanc_NL_AMS_1\nn0003\tOther WG\n' > "$WORK/wg_ok.txt"
 publish_case() {  # $1 now, $2 alive.txt, $3 res.txt
@@ -112,7 +112,7 @@ publish_case REJECT '100 n0002
 ' '2000000 n0002
 3000000 n0003
 '
-grep -q 'MST-FAST-WG' "$T/put" && grep -qF '{"name":"Other WG"}' "$T/put" || fail "лучший WG выше порога не выбран в MST-FAST-WG"
+grep -q 'FAST-WG' "$T/put" && grep -qF '{"name":"Other WG"}' "$T/put" || fail "лучший WG выше порога не выбран в FAST-WG"
 publish_case 'Other WG' '90 n0003
 ' '3000000 n0003
 '
@@ -129,8 +129,8 @@ grep -qF '{"name":"REJECT"}' "$T/put" || fail "не ответивший тек�
 publish_case MISSING '100 n0002
 ' '2000000 n0002
 '
-[ ! -s "$T/put" ] || fail "без группы MST-FAST-WG выбирать нечего"
-grep -q 'Группы MST-FAST-WG нет' "$RUN_LOG" || fail "нет причины про отсутствие MST-FAST-WG"
+[ ! -s "$T/put" ] || fail "без группы FAST-WG выбирать нечего"
+grep -q 'Группы FAST-WG нет' "$RUN_LOG" || fail "нет причины про отсутствие FAST-WG"
 unset -f curl
 
 # --- main(): пул только из WG - второе ядро не запускается, замер через
@@ -158,8 +158,8 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
     printf '%s\n' "$*" >> "$E/curl.log"
     case "$*" in
       *127.0.0.1:9099*) return 7 ;;
-      *'-X PUT'*'/proxies/MST'*) return 0 ;;
-      *'/proxies/MST'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
+      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/proxies/FAST-WG'*) return 0 ;;
+      *'/proxies/MST'*|*'/proxies/FAST-WG'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
       *'/delay?'*) printf '%s' '{"delay":126}' ;;
       *'127.0.0.1:7896'*) printf '%s' '200 1000000' ;;
       *'speed.cloudflare.com'*) printf '%s' '200 10000000' ;;
@@ -179,7 +179,7 @@ grep -q 'Лучший результат: 8.0 Мбит/с' "$E/speedtest.log" ||
 grep -q 'МБ/с' "$E/speedtest.log" && fail "в журнале остались МБ/с"
 [ "$(awk -F '\t' '$1 == "Blanc_NL_AMS_1" { print $10 }' "$E/stability.tsv")" = "A" ] || fail "окно стабильности WG-ноды не A"
 
-# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул через MST-FAST-WG ---
+# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул через FAST-WG ---
 E=$T/e2e_win; mkdir -p "$E/www"
 cat > "$E/sources.yaml" <<'YAML'
 proxies:
@@ -203,8 +203,8 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
     printf '%s\n' "$*" >> "$E/curl.log"
     case "$*" in
       *127.0.0.1:9099*) return 7 ;;
-      *'-X PUT'*'/proxies/MST'*) return 0 ;;
-      *'/proxies/MST'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
+      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/proxies/FAST-WG'*) return 0 ;;
+      *'/proxies/MST'*|*'/proxies/FAST-WG'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
       *'/delay?'*) printf '%s' '{"delay":126}' ;;
       *'127.0.0.1:7896'*) printf '%s' '200 1000000' ;;
       *'speed.cloudflare.com'*) printf '%s' '200 2000000' ;;
@@ -213,7 +213,7 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
   }
   main
 ) > "$E/out.txt" 2>&1 || true
-grep -q -- '-X PUT.*MST-FAST-WG' "$E/curl.log" || fail "WG-победитель не выбран в MST-FAST-WG"
+grep -q -- '-X PUT.*FAST-WG' "$E/curl.log" || fail "WG-победитель не выбран в FAST-WG"
 grep -q "WG: Blanc_NL_AMS_1 -> '⚡ Быстрый пул'" "$E/speedtest.log" || fail "нет строки о WG-победителе в пуле"
 [ ! -e "$E/fast.yaml" ] || fail "WG-победитель записан в fast.yaml"
 
