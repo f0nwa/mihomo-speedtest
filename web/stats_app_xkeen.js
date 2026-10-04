@@ -211,7 +211,12 @@ function showDone(code, seconds) {
 }
 
 function copyOutput() {
-  var text = '~ # xkeen ' + dlg.cmd.flag + '\n' + dlg.text;
+  copyText('~ # xkeen ' + dlg.cmd.flag + '\n' + dlg.text, dlg.node);
+}
+
+// host - куда временно вставить textarea (внутри открытого <dialog>,
+// иначе выделение вне модального окна не работает).
+function copyText(text, host) {
   var fallback = function () {
     // Панель открыта по http - clipboard API там может быть недоступен.
     var ta = el('textarea');
@@ -219,10 +224,10 @@ function copyOutput() {
     ta.setAttribute('readonly', '');
     ta.style.position = 'fixed';
     ta.style.opacity = '0';
-    dlg.node.appendChild(ta);
+    host.appendChild(ta);
     ta.select();
     try { document.execCommand('copy'); } catch (e) { /* нечего делать */ }
-    dlg.node.removeChild(ta);
+    host.removeChild(ta);
   };
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(text).then(null, fallback);
@@ -251,6 +256,11 @@ var LISTS = [
 ];
 
 var xk = null; // состояние вкладки: files, json, cards, bar, apply, msg, saving
+
+// Режим карточки списка: 'list' (записи с галочками) или 'text' (файл
+// целиком в одном поле - удобно скопировать или вставить с другого роутера).
+// Живёт, пока открыта панель.
+var listModes = {};
 
 export function xkeenDirty() {
   if (!xk || !xk.files) { return false; }
@@ -399,8 +409,9 @@ function drawCard(d) {
   while (c.firstChild) { c.removeChild(c.firstChild); }
   var head = el('div', 'xk-list-head');
   head.appendChild(el('h2', null, d.title));
-  var on = f.rows.filter(function (r) { return r.type === 'entry'; }).length;
-  head.appendChild(el('span', 'hint', f.name + ' · включено ' + on));
+  var count = el('span', 'hint xk-grow', countText(f));
+  head.appendChild(count);
+  head.appendChild(modeSwitch(d));
   c.appendChild(head);
   c.appendChild(el('p', 'hint', d.help));
   if (d.key === 'port_exclude') {
@@ -409,6 +420,7 @@ function drawCard(d) {
       c.appendChild(el('div', 'xk-warn', 'Сейчас заполнены «Порты проксирования» - XKeen учитывает только их, этот список не действует. Используйте что-то одно.'));
     }
   }
+  if (listModes[d.key] === 'text') { drawText(d, f, c, count); return; }
   var list = el('div', 'xk-rows');
   f.rows.forEach(function (r, i) {
     if (r.type === 'blank') { return; }
@@ -445,6 +457,78 @@ function drawCard(d) {
   add.appendChild(addBtn);
   c.appendChild(add);
   c.appendChild(addErr);
+}
+
+function countText(f) {
+  var on = f.rows.filter(function (r) { return r.type === 'entry'; }).length;
+  return f.name + ' · включено ' + on;
+}
+
+function modeSwitch(d) {
+  var box = el('div', 'xk-mode');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', 'Вид списка');
+  [['list', 'Список'], ['text', 'Текст']].forEach(function (m) {
+    var b = el('button', null, m[1]);
+    b.type = 'button';
+    var cur = (listModes[d.key] || 'list') === m[0];
+    b.setAttribute('aria-pressed', cur ? 'true' : 'false');
+    b.title = m[0] === 'text' ? 'Весь файл одним текстом - скопировать или вставить целиком' : 'Записи по одной, с галочками';
+    b.addEventListener('click', function () {
+      if (cur) { return; }
+      listModes[d.key] = m[0];
+      drawCard(d);
+    });
+    box.appendChild(b);
+  });
+  return box;
+}
+
+// Текстовый режим: файл целиком. Каждое изменение разбирается теми же
+// parseRows(), так что ошибки, счётчик и сохранение работают как в списке.
+// Карточку не перерисовываем при вводе - иначе пропадёт курсор.
+function drawText(d, f, c, count) {
+  var ta = el('textarea', 'xk-json xk-text');
+  ta.rows = Math.min(Math.max(f.rows.length + 1, 6), 20);
+  ta.spellcheck = false;
+  ta.wrap = 'off';
+  ta.value = fileText(f);
+  ta.placeholder = 'По одной записи в строке. # в начале - выключено или пояснение.';
+  ta.setAttribute('aria-label', d.title + ' - текст файла');
+  c.appendChild(ta);
+  var errs = el('div');
+  c.appendChild(errs);
+  var showErrs = function () {
+    while (errs.firstChild) { errs.removeChild(errs.firstChild); }
+    var bad = 0;
+    f.rows.forEach(function (r, i) {
+      if (!r.err) { return; }
+      bad += 1;
+      if (bad <= 5) { errs.appendChild(el('div', 'xk-err', 'Строка ' + (i + 1) + ' «' + (r.value || r.raw) + '»: ' + r.err)); }
+    });
+    if (bad > 5) { errs.appendChild(el('div', 'xk-err', '...и ещё строк с ошибками: ' + (bad - 5))); }
+    ta.classList.toggle('input-err', bad > 0);
+  };
+  showErrs();
+  ta.addEventListener('input', function () {
+    f.rows = parseRows(ta.value, d.kind);
+    f.trailing = ta.value === '' || /\n$/.test(ta.value);
+    count.textContent = countText(f);
+    showErrs();
+    if (d.key === 'port_proxying') { drawCard(LISTS[0]); }
+    drawBar();
+  });
+  var foot = el('div', 'xk-add');
+  foot.appendChild(el('span', 'hint xk-grow', 'Можно вставить список целиком - например, скопированный с другого роутера.'));
+  var cp = el('button', 'submit secondary', 'Скопировать');
+  cp.type = 'button';
+  cp.addEventListener('click', function () {
+    copyText(ta.value, c);
+    cp.textContent = 'Скопировано ✓';
+    setTimeout(function () { cp.textContent = 'Скопировать'; }, 1500);
+  });
+  foot.appendChild(cp);
+  c.appendChild(foot);
 }
 
 function drawRow(d, f, r, i) {

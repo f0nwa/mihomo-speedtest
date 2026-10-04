@@ -287,5 +287,10 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-err{color:#ff8a80;font-size:12px;margin:2px 0 0 4px}
 .xk-row input[type=text],.xk-add input,.xk-add button,.xk-savebar button,.xk-row button{font:inherit}
 .xk-json{font-family:inherit;font-size:13px;margin-top:6px}
+.xk-mode{display:inline-flex;border:1px solid var(--card-border)}
+.xk-mode button{font:inherit;font-size:12px;padding:3px 10px;background:transparent;color:var(--muted);border:0;cursor:pointer}
+.xk-mode button[aria-pressed=true]{background:var(--accent);color:#0f1214}
+.xk-text{margin:10px 0 6px;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+.xk-add .xk-grow{align-self:center}
 .xk-savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .xk-savebar .submit{margin-top:0}
