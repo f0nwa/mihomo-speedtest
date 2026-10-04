@@ -129,16 +129,41 @@ bootstrap_fetch_once() {
   return "$bfo_rc"
 }
 
+bootstrap_retryable() {
+  # Повторять имеет смысл только быстрые сетевые сбои: DNS, отказ в
+  # соединении, обрыв. Таймаут (28) уже ждал UPDATE_HTTP_TIMEOUT - вместо
+  # повтора сразу переходим к обходу через mihomo. Ошибки HTTP, размера и
+  # сертификата повтор не исправит.
+  case $1 in 6|7|35|52|56) return 0 ;; *) return 1 ;; esac
+}
+
+bootstrap_fetch_retry() {
+  # До INSTALL_RETRIES попыток (по умолчанию 3) с паузой INSTALL_RETRY_DELAY
+  # секунд (по умолчанию 2), растущей с номером попытки.
+  bfr_max=${INSTALL_RETRIES:-3}
+  case $bfr_max in ''|*[!0-9]*|0) bfr_max=1 ;; esac
+  bfr_try=1
+  while :; do
+    bfr_rc=0
+    bootstrap_fetch_once "$1" "$2" "$3" || bfr_rc=$?
+    [ "$bfr_rc" -ne 0 ] || return 0
+    bootstrap_retryable "$bfr_rc" && [ "$bfr_try" -lt "$bfr_max" ] || return "$bfr_rc"
+    echo "Сбой загрузки ($(bootstrap_curl_reason "$bfr_rc")), повтор $((bfr_try + 1)) из $bfr_max..." >&2
+    sleep $(( ${INSTALL_RETRY_DELAY:-2} * bfr_try ))
+    bfr_try=$((bfr_try + 1))
+  done
+}
+
 bootstrap_download_to() {
   bdt_rc=0
-  bootstrap_fetch_once "$1" "$2" "$3" || bdt_rc=$?
+  bootstrap_fetch_retry "$1" "$2" "$3" || bdt_rc=$?
   if [ "$bdt_rc" -ne 0 ] && [ -z "${BOOTSTRAP_PROXY:-}" ]; then
     # Напрямую не вышло - один раз пробуем через mihomo, дальше все
     # файлы качаются через тот же прокси.
     echo "Не удалось скачать $1 напрямую: $(bootstrap_curl_reason "$bdt_rc")" >&2
     if bootstrap_enable_proxy; then
       bdt_rc=0
-      bootstrap_fetch_once "$1" "$2" "$3" || bdt_rc=$?
+      bootstrap_fetch_retry "$1" "$2" "$3" || bdt_rc=$?
     else
       BOOTSTRAP_FAIL_HINT=1
       return 1

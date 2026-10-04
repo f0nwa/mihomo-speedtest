@@ -225,6 +225,33 @@ printf 'mixed-port: 7890\nexternal-controller: 0.0.0.0:9090\n' > "$PROXY_CFG"
 ) || exit 1
 echo "test_install.sh: обход загрузки через mihomo OK" >&2
 
+(
+  # Повторы: два обрыва (56), потом успех - без перехода на прокси.
+  CONFIG=$TEST_ROOT/no-such-config.yaml
+  INSTALL_RETRY_DELAY=0
+  CNT=$TEST_ROOT/retry.cnt; echo 0 > "$CNT"
+  bootstrap_http_get() { n=$(($(cat "$CNT") + 1)); echo "$n" > "$CNT"; [ "$n" -ge 3 ] || return 56; printf 'ok\n'; }
+  bootstrap_download_to https://example.test/r "$TEST_ROOT/r.txt" 100 2>"$TEST_ROOT/r.err" || fail "третья попытка должна пройти"
+  assert_eq "$(cat "$CNT")" '3'
+  assert_eq "${BOOTSTRAP_PROXY:-}" ''
+  grep -q 'повтор 2 из 3' "$TEST_ROOT/r.err" || fail "нет сообщения о повторе"
+) || exit 1
+
+(
+  # Таймаут (28) и ошибка HTTP (22) не повторяются.
+  CONFIG=$TEST_ROOT/no-such-config.yaml
+  INSTALL_RETRY_DELAY=0
+  INSTALL_PROXY_FALLBACK=0
+  for code in 28 22; do
+    CNT=$TEST_ROOT/retry.cnt; echo 0 > "$CNT"
+    BOOTSTRAP_PROXY_TRIED=
+    bootstrap_http_get() { echo $(($(cat "$CNT") + 1)) > "$CNT"; return "$code"; }
+    bootstrap_download_to https://example.test/r "$TEST_ROOT/r.txt" 100 2>/dev/null && fail "код $code должен провалиться"
+    assert_eq "$(cat "$CNT")" '1'
+  done
+) || exit 1
+echo "test_install.sh: повторы загрузки OK" >&2
+
 CRON_BIN=$TEST_ROOT/cronbin
 mkdir -p "$CRON_BIN"
 CRON_STORE=$TEST_ROOT/crontab.txt
