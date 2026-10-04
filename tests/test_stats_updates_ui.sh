@@ -10,6 +10,12 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 grep -q "row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }" "$FILE" \
   || fail "п.1: кнопки 'Проверить сейчас'/'Обновить' не в одной строке сверху"
 grep -q "card('Обновления')" "$FILE" || fail "п.1: нет единой карточки 'Обновления' сверху"
+grep -q "Настройки обновлений" "$FILE" || fail "нет карточки 'Настройки обновлений' на вкладке «Обновления»"
+grep -q "save_updates" "$FILE" || fail "карточка настроек обновлений должна сохранять через action=save_updates"
+SETTINGS_FILE=$(dirname "$FILE")/stats_app_settings.js
+if grep -q "fields: \['update_channel'" "$SETTINGS_FILE"; then
+  fail "настройки обновлений должны быть убраны из раздела «Настройки»"
+fi
 
 # 2. нет отдельного экрана подтверждения - клик "Обновить" сразу запускает
 #    prepare, а после его завершения (без подтверждения) сам запускает apply.

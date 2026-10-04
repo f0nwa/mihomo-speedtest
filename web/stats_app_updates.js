@@ -3,6 +3,7 @@
 import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMessage, viewGuard } from './app-core.js';
 import { stopProgressPolling } from './app-stats.js';
 import { stopLogPolling } from './app-log.js';
+import { buildField } from './app-settings.js';
 
 // ----- раздел "Обновления" (/api/updates/*) -----
 
@@ -169,13 +170,65 @@ function renderUpdatesProgress(action) {
   });
 }
 
+// Карточка «Настройки обновлений»: канал и частота проверки. Раньше жила в
+// «Настройках», перенесена сюда, к кнопкам проверки и обновления.
+// Сохраняет отдельным действием save_updates (save_update_settings() в
+// stats_cgi.sh) - остальные настройки не трогает.
+function buildUpdateSettingsCard(values) {
+  var form = document.createElement('form');
+  form.className = 'card';
+  form.appendChild(el('h2', null, 'Настройки обновлений'));
+  ['update_channel', 'update_check_hours'].forEach(function (name) {
+    form.appendChild(buildField(name, values[name]));
+  });
+  var row = el('div', 'btn-row');
+  var saveBtn = el('button', 'submit', 'Сохранить');
+  saveBtn.type = 'submit';
+  row.appendChild(saveBtn);
+  form.appendChild(row);
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    saveBtn.disabled = true;
+    showFormMessage(form, null);
+    form.querySelectorAll('.input-err').forEach(function (x) { x.classList.remove('input-err'); });
+    var body = new URLSearchParams(new FormData(form));
+    body.set('action', 'save_updates');
+    fetchJson('/api/settings', { method: 'POST', body: body }).then(function (resp) {
+      saveBtn.disabled = false;
+      if (resp.ok) {
+        showFormMessage(form, 'Сохранено. Новый канал учтётся при следующей проверке или сразу по кнопке «Проверить сейчас».', 'ok');
+        return;
+      }
+      var errs = resp.errors || {};
+      var texts = [];
+      Object.keys(errs).forEach(function (key) {
+        texts.push(errs[key]);
+        var bad = form.querySelector('[name="' + key + '"]');
+        if (bad) { bad.classList.add('input-err'); }
+      });
+      showFormMessage(form, texts.join(' ') || 'Не удалось сохранить.', 'err');
+    })['catch'](function (err) {
+      saveBtn.disabled = false;
+      showFormMessage(form, 'Не удалось сохранить: ' + err.message, 'err');
+    });
+  });
+  return form;
+}
+
 export function renderUpdates() {
   stopProgressPolling();
   stopUpdateJobPolling();
   stopLogPolling();
   setLoading();
   var alive = viewGuard();
+  // Настройки обновлений грузятся параллельно; их ошибка не ломает раздел -
+  // просто не будет карточки «Настройки обновлений».
+  var settingsReq = fetchJson('/api/settings')['catch'](function () { return null; });
   fetchJson('/api/updates/status').then(function (data) {
+    return settingsReq.then(function (settings) { return [data, settings]; });
+  }).then(function (pair) {
+    var data = pair[0];
+    var settings = pair[1];
     if (!alive()) { return; }
     clearApp();
     var lc = data.last_check;
@@ -254,6 +307,7 @@ export function renderUpdates() {
     row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }
     summary.appendChild(row);
     app.appendChild(summary);
+    if (settings && settings.values) { app.appendChild(buildUpdateSettingsCard(settings.values)); }
     // Вместо полного списка файлов - текст последнего релиза "что
     // нового" (п.4 задачи редизайна). lc.notes заполняет cmd_check() на
     // backend: и для доступного обновления, и для уже установленной

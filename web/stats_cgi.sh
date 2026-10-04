@@ -58,6 +58,38 @@ reset_node_stats() {
   fi
 }
 
+save_update_settings() {
+  # Карточка «Настройки обновлений» на вкладке «Обновления»: сохраняет только
+  # UPDATE_CHANNEL и UPDATE_CHECK_HOURS (остальные поля формы настроек туда
+  # не приходят и трогаться не должны). Печатает JSON {"ok":true} или
+  # {"ok":false,"errors":{поле:текст}}.
+  echo "Content-Type: application/json; charset=utf-8"
+  echo
+  su_ch=$(urldecode "$RAW_update_channel")
+  su_h=$(urldecode "$RAW_update_check_hours")
+  case $su_ch in
+    stable|dev) ;;
+    *) printf '{"ok":false,"errors":{"update_channel":"Канал обновлений: stable или dev."}}'; return 0 ;;
+  esac
+  case $su_h in
+    1|2|3|4|6|8|12|24) ;;
+    *) printf '{"ok":false,"errors":{"update_check_hours":"Частота проверки обновлений: 1, 2, 3, 4, 6, 8, 12 или 24 часа."}}'; return 0 ;;
+  esac
+  env_write_failed=0
+  set_env_var UPDATE_CHECK_HOURS "$su_h"
+  set_env_var UPDATE_CHANNEL "$su_ch"
+  if [ "$env_write_failed" = 1 ]; then
+    printf '{"ok":false,"errors":{"save":"Не удалось записать настройки (нет места или файловая система только для чтения)."}}'
+    return 0
+  fi
+  # Новая частота - сразу в crontab (см. тот же вызов в основной форме).
+  if [ -f "$DIR/stats_update.sh" ] && ! REQUEST_METHOD= MST_UPDATE_ACTION= ENV="$ENV" sh "$DIR/stats_update.sh" cron-sync add >/dev/null 2>&1; then
+    printf '{"ok":false,"errors":{"update_check_hours":"Настройки сохранены, но не удалось обновить расписание проверки в crontab."}}'
+    return 0
+  fi
+  printf '{"ok":true}'
+}
+
 urldecode() {
   # Раньше: busybox httpd -d "$1" - на сборке Entware BusyBox без апплета
   # httpd (busybox httpd -d "2" -> "httpd: applet not found", код 127,
@@ -392,6 +424,10 @@ if [ "$method" = "POST" ]; then
   eval "$(parse_body_fields)"
   if [ "$RAW_action" = reset_node_stats ]; then
     reset_node_stats
+    exit 0
+  fi
+  if [ "$RAW_action" = save_updates ]; then
+    save_update_settings
     exit 0
   fi
 

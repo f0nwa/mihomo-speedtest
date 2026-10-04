@@ -320,6 +320,22 @@ grep -qF "UPDATE_CHANNEL='dev'" "$W/speedtest2.env" || fail "invalid update_chan
 run_cgi_json POST "node_cap=4&keep_runs=50&keep_days=10&geo_filter=ru-block2&$OK_TUNING" >/dev/null
 grep -qF "UPDATE_CHANNEL='dev'" "$W/speedtest2.env" || fail "omitted update_channel must keep current value"
 
+# --- action=save_updates (карточка на вкладке «Обновления»): только канал и частота ---
+NODE_CAP_BEFORE=$(grep "^STATS_NODE_CAP=" "$W/speedtest2.env")
+BLOCK_BEFORE=$(grep "^BLOCK=" "$W/speedtest2.env")
+OUT_SU=$(run_cgi_json POST "action=save_updates&update_channel=stable&update_check_hours=6")
+assert_contains '{"ok":true}' "$OUT_SU" "save_updates ok"
+grep -qF "UPDATE_CHANNEL='stable'" "$W/speedtest2.env" || fail "save_updates: канал не сохранён"
+grep -qF "UPDATE_CHECK_HOURS='6'" "$W/speedtest2.env" || fail "save_updates: частота не сохранена"
+[ "$(grep "^STATS_NODE_CAP=" "$W/speedtest2.env")" = "$NODE_CAP_BEFORE" ] || fail "save_updates не должен трогать node_cap"
+[ "$(grep "^BLOCK=" "$W/speedtest2.env")" = "$BLOCK_BEFORE" ] || fail "save_updates не должен трогать гео-фильтр"
+OUT_SU_BAD=$(run_cgi_json POST "action=save_updates&update_channel=beta&update_check_hours=6")
+assert_contains '"ok":false' "$OUT_SU_BAD" "save_updates: неверный канал отклонён"
+assert_contains '"update_channel":"' "$OUT_SU_BAD" "save_updates: ошибка по полю update_channel"
+OUT_SU_BAD2=$(run_cgi_json POST "action=save_updates&update_channel=dev&update_check_hours=5")
+assert_contains '"update_check_hours":"' "$OUT_SU_BAD2" "save_updates: неверная частота отклонена"
+grep -qF "UPDATE_CHANNEL='stable'" "$W/speedtest2.env" || fail "save_updates с ошибкой не должен менять канал"
+
 if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$OUT_JSON_GET2" | tail -n +3 > "$TEST_ROOT/api_settings_get.json"
   python3 - "$TEST_ROOT/api_settings_get.json" <<'PYCHECK' || fail "JSON GET /api/settings не распарсился"
