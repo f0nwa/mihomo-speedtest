@@ -1133,12 +1133,43 @@ restart_core_and_wait() {
   return 1
 }
 
+# Файл, в который реально пишется конфиг: при config.yaml-ссылке (XKeen UI
+# держит профили в profiles/*.yaml и переключает активный ссылкой) - сам
+# профиль, ссылка не трогается. Копия stats_config.sh:config_target().
+config_target() {
+  if [ -L "$CONFIG" ]; then
+    ct=$(readlink "$CONFIG") || return 1
+    case $ct in
+      /*) printf '%s\n' "$ct" ;;
+      *) printf '%s/%s\n' "$(dirname "$CONFIG")" "$ct" ;;
+    esac
+  else
+    printf '%s\n' "$CONFIG"
+  fi
+}
+
+# Атомарная замена содержимого $2 файлом $1 с сохранением прав и владельца
+# $2 (в конфиге - secret и ссылки подписок, не делаем его 0644).
+replace_config_file() {
+  rc_new=$2.mst-install-new
+  rm -f "$rc_new"
+  if [ -f "$2" ]; then cp -p "$2" "$rc_new" || { rm -f "$rc_new"; return 1; }; fi
+  cat "$1" > "$rc_new" || { rm -f "$rc_new"; return 1; }
+  cmp -s "$1" "$rc_new" || { rm -f "$rc_new"; return 1; }
+  mv -f "$rc_new" "$2" || { rm -f "$rc_new"; return 1; }
+}
+
 # 0 - конфиг мигрирован и ядро работает; 1 - конфиг не тронут (или
 # возвращён из бэкапа и ядро поднялось); 2 - ядро не поднялось даже на
 # прежнем конфиге, продолжать установку нельзя.
 migrate_to_template() {
   mt_work=$(mktemp -d "$TMPROOT/mst-install-migrate.XXXXXX") || { echo "Не удалось создать временный каталог" >&2; return 1; }
-  if ! sh "$SELFDIR/migrate_config.sh" --source "$CONFIG" --template "$SELFDIR/config.example.yaml" \
+  mt_target=$(config_target) || { echo "Не удалось определить файл конфига" >&2; rm -rf "$mt_work"; return 1; }
+  # migrate_config.sh не читает символические ссылки - даём ему копию.
+  if ! cp "$CONFIG" "$mt_work/source.yaml"; then
+    echo "Не удалось прочитать $CONFIG" >&2; rm -rf "$mt_work"; return 1
+  fi
+  if ! sh "$SELFDIR/migrate_config.sh" --source "$mt_work/source.yaml" --template "$SELFDIR/config.example.yaml" \
       --output "$mt_work/config.yaml" --report "$mt_work/report" >"$mt_work/log" 2>&1; then
     mt_reason=$(sed -n 's/^ERROR: //p' "$mt_work/log" | head -n 1)
     echo "Миграция невозможна: ${mt_reason:-$(tail -n 1 "$mt_work/log")}" >&2
@@ -1162,8 +1193,8 @@ migrate_to_template() {
     rm -rf "$mt_work"; return 1
   fi
   echo "Старый конфиг сохранён в $mt_backup" >&2
-  if ! atomic_install "$mt_work/config.yaml" "$CONFIG"; then
-    echo "Не удалось записать $CONFIG, он не тронут" >&2
+  if ! replace_config_file "$mt_work/config.yaml" "$mt_target"; then
+    echo "Не удалось записать $mt_target, конфиг не тронут" >&2
     rm -rf "$mt_work"; return 1
   fi
   rm -rf "$mt_work"
@@ -1173,7 +1204,7 @@ migrate_to_template() {
     return 0
   fi
   echo "mihomo не поднялся с новым конфигом - возвращаю прежний из $mt_backup" >&2
-  if atomic_install "$mt_backup" "$CONFIG" && restart_core_and_wait; then
+  if replace_config_file "$mt_backup" "$mt_target" && restart_core_and_wait; then
     echo "Ядро работает на прежнем конфиге" >&2
     return 1
   fi

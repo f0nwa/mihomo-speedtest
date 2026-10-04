@@ -117,7 +117,32 @@ run_mode '1\ny\n'
 grep -q "Миграция невозможна:.*log-level" "$T/err" || fail "нет причины отказа миграции: $(cat "$T/err")"
 unchanged "невозможная миграция"; own_notice "невозможная миграция"
 
-# 8. Быстрый пул уже есть - ничего не спрашиваем и не трогаем.
+# 8. config.yaml - символическая ссылка на профиль XKeen UI: миграция
+# пишет в профиль, ссылка остаётся; при откате - тоже.
+sed '/^log-level: info$/d' "$T/own.yaml" > "$T/own-link.yaml"
+mkdir -p "$T/mihomo/profiles"
+link_mode() {
+  rm -f "$CONFIG" "$CONFIG".*.bak "$FAKE_XKEEN_LOG"
+  cp "$T/own-link.yaml" "$T/mihomo/profiles/default.yaml"
+  chmod 0640 "$T/mihomo/profiles/default.yaml"
+  ln -s profiles/default.yaml "$CONFIG"
+  rc=0
+  printf '%b' "$1" | ( resolve_config_mode ) 2>"$T/err" || rc=$?
+  echo "$rc" > "$T/rc"
+  [ -L "$CONFIG" ] && [ "$(readlink "$CONFIG")" = profiles/default.yaml ] || fail "$2: config.yaml перестал быть ссылкой"
+}
+link_mode '1\ny\n' "ссылка, миграция"
+[ "$(cat "$T/rc")" = 0 ] || fail "ссылка, миграция: rc $(cat "$T/rc"): $(cat "$T/err")"
+has_fast_group "$T/mihomo/profiles/default.yaml" || fail "ссылка: профиль не мигрирован"
+grep -q PRIVATE_TOKEN "$T/mihomo/profiles/default.yaml" || fail "ссылка: потеряна подписка"
+[ "$(stat -c %a "$T/mihomo/profiles/default.yaml" 2>/dev/null || stat -f %Lp "$T/mihomo/profiles/default.yaml")" = 640 ] || fail "ссылка: права профиля изменились"
+set -- "$CONFIG".*.bak
+[ -f "$1" ] && [ ! -L "$1" ] && cmp -s "$1" "$T/own-link.yaml" || fail "ссылка: бэкап должен быть копией содержимого"
+FAKE_CURL_RC=7 link_mode '1\ny\n' "ссылка, откат"
+cmp -s "$T/mihomo/profiles/default.yaml" "$T/own-link.yaml" || fail "ссылка, откат: профиль не восстановлен"
+rm -f "$CONFIG" "$CONFIG".*.bak; rm -rf "$T/mihomo/profiles"
+
+# 9. Быстрый пул уже есть - ничего не спрашиваем и не трогаем.
 cp "$ROOT/config-tools/config.example.yaml" "$T/own.yaml"
 run_mode ''
 [ "$(cat "$T/rc")" = 0 ] && [ ! -s "$T/err" ] || fail "с провайдером fast вопросов быть не должно: $(cat "$T/err")"
