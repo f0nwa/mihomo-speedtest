@@ -39,14 +39,32 @@ function header(s, t) { t=s; sub(/:.*/,"",t); return t }
   } else if (line ~ /^[^ #]/) bad(where() ": строка без отступа не похожа на ключ верхнего уровня (ключ в кавычках, список или поток?)")
   sections[side,key]=sections[side,key] line "\n"
 }
+# Строка "    url: ..." подписки (первая, как есть).
+function provider_url(part, a,n,j) {
+  n=split(part,a,"\n")
+  for (j=2;j<=n;j++) if (a[j] ~ /^    url:/) return a[j]
+  return ""
+}
+# Блок "    header:" подписки с вложенными строками (6+ пробелов), как есть.
+function provider_header(part, a,n,j,out,inside) {
+  n=split(part,a,"\n");out="";inside=0
+  for (j=2;j<=n;j++) {
+    if (a[j] ~ /^    header:/) {out=a[j] "\n";inside=(a[j] ~ /^    header:[ ]*$/);continue}
+    if (inside && a[j] ~ /^      /) out=out a[j] "\n"
+    else if (a[j] ~ /^    [^ ]/) inside=0
+  }
+  return out
+}
 function save_provider(name,part) {
   if (provider_seen[name]++) bad("proxy-providers: провайдер " name " повторяется")
   if (name=="fast") {if(part !~ /\n    type: file[ ]*\n/ || part ~ /\n    url:/) bad("proxy-providers: провайдер fast зарезервирован под быстрый пул и должен быть type: file без url - переименуйте свою подписку fast"); return}
   if (part ~ /\n    type: file[ ]*\n/) {print "REVIEW|file-provider-replaced|" name > REPORT;return}
   if (part !~ /\n    url:/) bad("proxy-providers: у провайдера " name " нет url: на отступе 4 пробела (поддерживаются http-подписки и type: file)")
-  # Ограниченная структура ключей с именами проекта, значения не интерпретируем.
-  sub(/\n[ \n]*$/,"\n",part)
-  providers=providers part
+  # Из подписки переносятся только url и header (User-Agent); тип,
+  # интервал, exclude-filter (&geofilter) и health-check - якоря шаблона,
+  # path - по имени. Иначе подписка, расписанная без якорей, теряет
+  # гео-фильтр. Значения не интерпретируем.
+  providers=providers "  " name ":\n    <<: *http-provider\n" provider_url(part) "\n    path: ./proxy-providers/" name ".yaml\n" provider_header(part) "    health-check: *gstatic-health-check\n"
   subnames=subnames sep_next(nprov++) name
   print "PRESERVED|subscription|" name > REPORT
 }

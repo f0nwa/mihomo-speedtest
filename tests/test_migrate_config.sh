@@ -22,9 +22,19 @@ class Migration(unittest.TestCase):
   self.assertEqual(sum(x.startswith('dns:') for x in text.splitlines()),1);self.assertEqual(self.old.read_bytes(),before)
   for s in ['PRIVATE_TOKEN','PRIVATE_PASSWORD','PRIVATE_API_SECRET']:self.assertNotIn(s,r.stdout+r.stderr+self.report.read_text())
   self.assertEqual(stat.S_IMODE(self.out.stat().st_mode),0o600)
- def test_provider_options_preserved(self):
-  self.old.write_text(self.old.read_text().replace('    url: "https://subscription-1','    interval: 987\n    header-extra: secret-option\n    url: "https://subscription-1'))
-  self.run_cli();self.assertIn('interval: 987',self.out.read_text());self.assertIn('header-extra: secret-option',self.out.read_text())
+ def test_provider_rebuilt_from_template_anchors(self):
+  # Подписка без якорей (type/interval/health-check расписаны вручную) -
+  # переносятся только url и header, остальное - якоря шаблона, иначе
+  # подписка теряет exclude-filter (&geofilter) из &http-provider.
+  a=self.old.read_text();start=a.index('  provider-a:\n');end=a.index('  provider-b:\n')
+  self.old.write_text(a[:start]+'  provider-a:\n    type: http\n    url: "https://subscription-1.example.com/PRIVATE_TOKEN"\n    path: ./old/a.yaml\n    interval: 987\n    header-extra: secret-option\n    header:\n      User-Agent:\n        - "custom-agent"\n    health-check:\n      enable: true\n      url: "http://www.msftncsi.com/ncsi.txt"\n      interval: 300\n'+a[end:])
+  self.run_cli();t=self.out.read_text()
+  want='  provider-a:\n    <<: *http-provider\n    url: "https://subscription-1.example.com/PRIVATE_TOKEN"\n    path: ./proxy-providers/provider-a.yaml\n    header:\n      User-Agent:\n        - "custom-agent"\n    health-check: *gstatic-health-check\n  provider-b:\n'
+  self.assertIn(want,t)
+  for s in ['interval: 987','header-extra','msftncsi','./old/a.yaml','    type: http\n']:self.assertNotIn(s,t)
+ def test_provider_without_header_gets_no_header(self):
+  self.run_cli();t=self.out.read_text()
+  self.assertIn('  provider-b:\n    <<: *http-provider\n    url: "https://subscription-2.example.com/CHANGE_ME"\n    path: ./proxy-providers/provider-b.yaml\n    health-check: *gstatic-health-check\n',t)
  def test_unknown_and_managed_edits_are_reported_without_values(self):
   self.old.write_text(self.old.read_text()+'tun: {enable: true, device: SECRET_DEVICE}\n')
   self.run_cli();report=self.report.read_text();self.assertIn('REVIEW|unknown-top-key|tun',report);self.assertNotIn('SECRET_DEVICE',report)
