@@ -1049,6 +1049,152 @@ version_main() {
   return 0
 }
 
+# Отпечаток провайдера fast (path: ./fast.yaml) - именно его ведёт
+# speedtest2.sh. Копия has_fast_group() из uninstall.sh (см. комментарий
+# там же).
+has_fast_group() {
+  grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
+}
+
+own_config_notice() {
+  {
+    echo
+    echo "ВНИМАНИЕ: остаётся ваш конфиг - быстрый пул НЕ применяется."
+    echo "  Спидтест будет замерять ноды и вести статистику, но лучшие ноды"
+    echo "  (fast.yaml) не попадут в маршрутизацию, пока в конфиге нет провайдера fast."
+    echo "  Чтобы включить пул самостоятельно, добавьте в $CONFIG:"
+    echo "    в proxy-providers:"
+    echo "      fast:"
+    echo "        type: file"
+    echo "        path: ./fast.yaml"
+    echo "    и группу с use: [fast] (например, type: url-test), на которую ссылаются ваши правила."
+    echo "  Или мигрируйте позже: веб-интерфейс, раздел «Починка» -> «Миграция к шаблону»,"
+    echo "  либо переустановка с CONFIG_MODE=template."
+    echo
+  } >&2
+}
+
+# Конфиг без быстрого пула: мигрировать к шаблону или остаться на своём.
+# Результат - в CONFIG_MODE_CHOSEN (template/own). CONFIG_MODE=template|own
+# в окружении - ответ без вопроса. Enter и отсутствие терминала (cron,
+# обновлятор) - свой конфиг: это ничего не меняет в рабочем config.yaml.
+choose_config_mode() {
+  CONFIG_MODE_CHOSEN=own
+  case "${CONFIG_MODE:-}" in
+    template|own) CONFIG_MODE_CHOSEN=$CONFIG_MODE; return 0 ;;
+    '') ;;
+    *) echo "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template или own) - оставляю свой конфиг" >&2; return 0 ;;
+  esac
+  {
+    echo "В конфиге нет быстрого пула (провайдер fast и группы шаблона проекта)."
+    echo "  1) мигрировать конфиг к шаблону проекта: подписки, свои ноды, DNS, свои входы"
+    echo "     и локальные настройки (порты, external-controller, sniffer и т.п.) сохранятся;"
+    echo "     группы, rule-providers и правила будут из шаблона (ваши останутся только в бэкапе)"
+    echo "  2) оставить свой конфиг - только статистика, быстрый пул настраиваете сами"
+  } >&2
+  printf 'Введите номер или Enter для 2: ' >&2
+  read -r cm_input || { cm_input=""; echo >&2; }
+  case $cm_input in
+    1) CONFIG_MODE_CHOSEN=template ;;
+  esac
+}
+
+# Сводка отчёта migrate_config.sh: только имена, без значений.
+print_migration_report() {
+  awk -F'|' '
+    function add(k, v) { list[k] = list[k] sep[k] v; sep[k] = ", " }
+    $1 == "PRESERVED" && $2 == "subscription" { add("subs", $3) }
+    $1 == "PRESERVED" && $2 == "section" { add("sections", $3) }
+    $1 == "PRESERVED" && $2 == "local-key" { add("keys", $3) }
+    $1 == "REVIEW" && $2 == "managed-section-replaced" { add("replaced", $3) }
+    $1 == "REVIEW" && $2 == "unknown-top-key" { add("dropped", $3) }
+    $1 == "REVIEW" && $2 == "file-provider-replaced" { add("files", $3) }
+    END {
+      print "Миграция подготовлена:"
+      if (list["subs"] != "") print "  сохранятся подписки: " list["subs"]
+      if (list["sections"] != "") print "  сохранятся секции: " list["sections"]
+      if (list["keys"] != "") print "  сохранятся настройки: " list["keys"]
+      if (list["replaced"] != "") print "  будут заменены шаблоном: " list["replaced"]
+      if (list["dropped"] != "") print "  НЕ перенесутся (шаблон их не знает): " list["dropped"]
+      if (list["files"] != "") print "  НЕ перенесутся file-провайдеры: " list["files"]
+    }
+  ' "$1" >&2
+}
+
+# xkeen -restart и ожидание API ядра (как в setup.sh). Вывод xkeen - в
+# /dev/null: иначе запущенный им демон держит stdout установщика.
+restart_core_and_wait() {
+  "${XKEEN_BIN:-xkeen}" -restart >/dev/null 2>&1 </dev/null || true
+  rc_i=0
+  while [ "$rc_i" -lt "${CORE_WAIT:-20}" ]; do
+    curl -s -m 2 "http://$API_MAIN/version" >/dev/null 2>&1 && return 0
+    sleep 1; rc_i=$((rc_i + 1))
+  done
+  return 1
+}
+
+# 0 - конфиг мигрирован и ядро работает; 1 - конфиг не тронут (или
+# возвращён из бэкапа и ядро поднялось); 2 - ядро не поднялось даже на
+# прежнем конфиге, продолжать установку нельзя.
+migrate_to_template() {
+  mt_work=$(mktemp -d "$TMPROOT/mst-install-migrate.XXXXXX") || { echo "Не удалось создать временный каталог" >&2; return 1; }
+  if ! sh "$SELFDIR/migrate_config.sh" --source "$CONFIG" --template "$SELFDIR/config.example.yaml" \
+      --output "$mt_work/config.yaml" --report "$mt_work/report" >"$mt_work/log" 2>&1; then
+    mt_reason=$(sed -n 's/^ERROR: //p' "$mt_work/log" | head -n 1)
+    echo "Миграция невозможна: ${mt_reason:-$(tail -n 1 "$mt_work/log")}" >&2
+    rm -rf "$mt_work"; return 1
+  fi
+  print_migration_report "$mt_work/report"
+  printf 'Применить новый конфиг (старый сохранится бэкапом рядом)? [y/N] ' >&2
+  read -r mt_ans || { mt_ans=""; echo >&2; }
+  case $mt_ans in
+    [Yy]*) ;;
+    *) echo "Миграция отменена, конфиг не тронут" >&2; rm -rf "$mt_work"; return 1 ;;
+  esac
+  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$mt_work/config.yaml" >"$mt_work/mtest" 2>&1; then
+    echo "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут:" >&2
+    tail -n 5 "$mt_work/mtest" >&2
+    rm -rf "$mt_work"; return 1
+  fi
+  mt_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
+  if ! cp -p "$CONFIG" "$mt_backup"; then
+    echo "Не удалось сохранить бэкап $mt_backup, конфиг не тронут" >&2
+    rm -rf "$mt_work"; return 1
+  fi
+  echo "Старый конфиг сохранён в $mt_backup" >&2
+  if ! atomic_install "$mt_work/config.yaml" "$CONFIG"; then
+    echo "Не удалось записать $CONFIG, он не тронут" >&2
+    rm -rf "$mt_work"; return 1
+  fi
+  rm -rf "$mt_work"
+  echo "Перезапускаю ядро с новым конфигом (xkeen -restart)..." >&2
+  if restart_core_and_wait; then
+    echo "Конфиг мигрирован к шаблону, ядро работает" >&2
+    return 0
+  fi
+  echo "mihomo не поднялся с новым конфигом - возвращаю прежний из $mt_backup" >&2
+  if atomic_install "$mt_backup" "$CONFIG" && restart_core_and_wait; then
+    echo "Ядро работает на прежнем конфиге" >&2
+    return 1
+  fi
+  echo "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH (бэкап: $mt_backup)" >&2
+  return 2
+}
+
+# Нет провайдера fast: спросить, что делать с конфигом. 0 - продолжать
+# установку (конфиг мигрирован или остаётся свой), 1 - остановиться.
+resolve_config_mode() {
+  has_fast_group "$CONFIG" && return 0
+  choose_config_mode
+  if [ "$CONFIG_MODE_CHOSEN" = template ]; then
+    mtt_rc=0; migrate_to_template || mtt_rc=$?
+    [ "$mtt_rc" = 0 ] && return 0
+    [ "$mtt_rc" = 2 ] && return 1
+  fi
+  own_config_notice
+  return 0
+}
+
 # Пробный прогон speedtest2.sh при установке/переустановке может занимать
 # от десятков секунд до нескольких минут (зависит от числа нод), а сам
 # speedtest2.sh обычным ходом ничего не пишет в консоль - весь его лог
@@ -1107,6 +1253,13 @@ main() {
     echo "$CONFIG не проходит mihomo -t" >&2
     return 1
   }
+
+  # Вопросы о конфиге и гео-фильтре должны читать терминал, а не тело
+  # install.sh под "curl ... | sh" (см. reopen_tty()). Миграция - до
+  # разбора провайдеров: дальше всё работает уже с итоговым конфигом
+  # (в том числе гео-фильтр &geofilter из шаблона).
+  reopen_tty
+  resolve_config_mode || return 1
 
   if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
     echo "providers.awk не смог разобрать $CONFIG" >&2

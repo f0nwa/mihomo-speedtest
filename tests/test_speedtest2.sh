@@ -340,6 +340,14 @@ if prepare_nodes; then
 fi
 grep -q 'inline proxy maps are not supported' "$WORK/prep.err" || fail "prepare_nodes lost parser diagnostic"
 
+# Режим "свой конфиг": провайдер fast определяется по path: ./fast.yaml,
+# а не по любому упоминанию fast (fastly в правилах и т.п.).
+printf 'proxy-providers:\n  fast:\n    type: file\n    path: ./fast.yaml\n' > "$TEST_ROOT/with-fast.yaml"
+printf 'proxy-providers:\n  sub:\n    url: "https://x/fastly"\nrules:\n  - GEOSITE,fastly,DIRECT\n' > "$TEST_ROOT/own.yaml"
+has_fast_group "$TEST_ROOT/with-fast.yaml" || fail "has_fast_group не нашёл провайдер fast"
+! has_fast_group "$TEST_ROOT/own.yaml" || fail "has_fast_group принял fastly за провайдер fast"
+! has_fast_group "$TEST_ROOT/no-such.yaml" || fail "has_fast_group без конфига должен давать ложь"
+
 API_MAIN=127.0.0.1:9090
 API=127.0.0.1:9099
 DELAY_URL='https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204'

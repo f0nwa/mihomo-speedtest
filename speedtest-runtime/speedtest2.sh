@@ -656,6 +656,12 @@ prepare_nodes() {
       -f "$PREP" $conv_sources > "$WORK/all.yaml" 2> "$WORK/prep.err"
 }
 
+# Отпечаток провайдера fast (path: ./fast.yaml) - копия has_fast_group()
+# из uninstall.sh.
+has_fast_group() {
+  grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
+}
+
 reload_provider() {
   main_curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/fast" >/dev/null 2>&1
 }
@@ -1209,7 +1215,11 @@ if ! publish_file "$WORK/last.new" "$LAST"; then
 fi
 below_note=""
 [ "$BELOW_MIN" -gt 0 ] && below_note=" (из них $BELOW_MIN ниже порога скорости - набрано до минимума $MIN_WINNERS)"
-if reload_provider; then
+if ! has_fast_group "$MAIN_CONFIG"; then
+  # Режим "свой конфиг" (см. install.sh:resolve_config_mode): провайдера
+  # fast нет, перечитывать нечего - это не ошибка, а выбор пользователя.
+  say "INFO: в конфиге нет провайдера fast - быстрый пул не применяется, только статистика ($WIN нод -> fast.yaml)$below_note"
+elif reload_provider; then
   say "OK: $WIN нод -> fast.yaml (проверено $(wc -l < "$WORK/res.txt") из $ALIVE живых, провайдер перечитан)$below_note"
 elif [ "$FAST_CHANGED" = 1 ]; then
   say "WARN: fast.yaml обновлён, провайдер не перечитан"
