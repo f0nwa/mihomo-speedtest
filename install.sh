@@ -1050,6 +1050,15 @@ run_trial_with_heartbeat() {
   wait "$trial_heartbeat_pid" 2>/dev/null || true
 }
 
+# Хвост журнала пробного прогона - в stderr, как и весь вывод install.sh.
+# Порядок редиректов важен: ">&2 2>/dev/null", а не наоборот. При
+# "2>/dev/null >&2" stdout копировался с уже перенаправленного в
+# /dev/null fd 2, и хвост журнала молча пропадал.
+print_trial_log_tail() {
+  echo "Пробный запуск завершён, хвост журнала:" >&2
+  tail -5 "$DIR/speedtest.log" >&2 2>/dev/null || true
+}
+
 main() {
   check_mihomo_process && check_versions || return 1
 
@@ -1154,8 +1163,7 @@ main() {
 
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
-    echo "Пробный запуск завершён, хвост журнала:" >&2
-    tail -5 "$DIR/speedtest.log" 2>/dev/null >&2 || true
+    print_trial_log_tail
   fi
 
   echo "Установка завершена" >&2
@@ -1187,4 +1195,9 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then
     --version) version_main ;;
     *) main "$@" ;;
   esac
+  # Явный выход обязателен: под "curl ... | sh" reopen_tty() переключает
+  # stdin процесса sh на /dev/tty, и без exit оболочка после main стала бы
+  # читать "продолжение скрипта" с терминала - установка как будто висит
+  # без приглашения консоли, а набранное выполнилось бы как команды.
+  exit $?
 fi
