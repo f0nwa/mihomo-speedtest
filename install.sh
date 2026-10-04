@@ -87,11 +87,17 @@ bootstrap_sha256_of() {
 }
 
 bootstrap_http_get() {
+  # Код возврата - код curl: по нему bootstrap_download_to() объясняет
+  # причину отказа (bootstrap_curl_reason). BOOTSTRAP_PROXY непуст - качаем
+  # через прокси (см. bootstrap_enable_proxy); TLS при этом сквозной.
   if [ -n "${UPDATE_HTTP_CMD:-}" ]; then $UPDATE_HTTP_CMD "$1"
   elif command -v curl >/dev/null 2>&1; then
-    case $1 in
-      https://*) curl -fsSL --proto '=https' --proto-redir '=https' --max-time "${UPDATE_HTTP_TIMEOUT:-15}" --max-filesize "$2" "$1" 2>/dev/null ;;
-      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 --max-time "${UPDATE_HTTP_TIMEOUT:-15}" --max-filesize "$2" "$1" 2>/dev/null ;;
+    bhg_url=$1
+    set -- --max-time "${UPDATE_HTTP_TIMEOUT:-30}" --max-filesize "$2"
+    [ -z "${BOOTSTRAP_PROXY:-}" ] || set -- "$@" -x "$BOOTSTRAP_PROXY"
+    case $bhg_url in
+      https://*) curl -fsSL --proto '=https' --proto-redir '=https' "$@" "$bhg_url" 2>/dev/null ;;
+      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 "$@" "$bhg_url" 2>/dev/null ;;
       *) return 1 ;;
     esac
   else
@@ -100,11 +106,51 @@ bootstrap_http_get() {
   fi
 }
 
-bootstrap_download_to() {
+bootstrap_curl_reason() {
+  case $1 in
+    6) echo "не удалось определить адрес сервера (DNS)" ;;
+    7) echo "не удалось подключиться к серверу" ;;
+    28) echo "сервер не ответил вовремя (таймаут)" ;;
+    35|52|56) echo "соединение оборвано (часто так выглядит блокировка у провайдера)" ;;
+    51|58|60|77) echo "ошибка проверки сертификата (проверьте время на роутере и пакет ca-certificates)" ;;
+    22) echo "сервер вернул ошибку HTTP (нет файла или лимит запросов GitHub)" ;;
+    63) echo "файл больше заявленного размера" ;;
+    5) echo "не удалось определить адрес прокси" ;;
+    97) echo "прокси отказал в соединении" ;;
+    *) echo "ошибка загрузки (код curl $1)" ;;
+  esac
+}
+
+bootstrap_fetch_once() {
   write_limit=$3
   [ "$write_limit" -ge 262144 ] || write_limit=262144
-  if ! (ulimit -f "$(( (write_limit + 511) / 512 ))"; bootstrap_http_get "$1" "$3") > "$2"; then
-    echo "Не удалось скачать $1 - проверьте сеть и сертификаты роутера" >&2
+  bfo_rc=0
+  (ulimit -f "$(( (write_limit + 511) / 512 ))"; bootstrap_http_get "$1" "$3") > "$2" || bfo_rc=$?
+  return "$bfo_rc"
+}
+
+bootstrap_download_to() {
+  bdt_rc=0
+  bootstrap_fetch_once "$1" "$2" "$3" || bdt_rc=$?
+  if [ "$bdt_rc" -ne 0 ] && [ -z "${BOOTSTRAP_PROXY:-}" ]; then
+    # Напрямую не вышло - один раз пробуем через mihomo, дальше все
+    # файлы качаются через тот же прокси.
+    echo "Не удалось скачать $1 напрямую: $(bootstrap_curl_reason "$bdt_rc")" >&2
+    if bootstrap_enable_proxy; then
+      bdt_rc=0
+      bootstrap_fetch_once "$1" "$2" "$3" || bdt_rc=$?
+    else
+      BOOTSTRAP_FAIL_HINT=1
+      return 1
+    fi
+  fi
+  if [ "$bdt_rc" -ne 0 ]; then
+    if [ -n "${BOOTSTRAP_PROXY:-}" ]; then
+      echo "Не удалось скачать $1 через прокси $BOOTSTRAP_PROXY: $(bootstrap_curl_reason "$bdt_rc")" >&2
+    else
+      echo "Не удалось скачать $1: $(bootstrap_curl_reason "$bdt_rc")" >&2
+    fi
+    BOOTSTRAP_FAIL_HINT=1
     return 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
@@ -112,6 +158,98 @@ bootstrap_download_to() {
     echo "Пустой файл или превышен лимит загрузки: $1" >&2
     return 1
   }
+}
+
+# --- Обход блокировки GitHub через сам mihomo ------------------------------
+# Собственный трафик роутера XKeen обычно не проксирует, и github.com /
+# release-assets.githubusercontent.com может быть недоступен напрямую.
+# mihomo при этом уже запущен, поэтому повторяем загрузку через него:
+# 1) INSTALL_PROXY из окружения (http://..., socks5h://...) - как есть;
+# 2) mixed-port / port / socks-port из config.yaml, если он уже открыт;
+# 3) иначе временно открываем mixed-port через API (PATCH /configs, в
+#    файл конфига не пишется) и закрываем его после загрузки
+#    (bootstrap_disable_proxy). TLS через прокси сквозной, а SHA256
+#    файлов сверяется по манифесту, так что безопасность та же.
+BOOTSTRAP_TEMP_PORT=${INSTALL_TEMP_PROXY_PORT:-17890}
+
+bootstrap_config_value() {
+  # Однострочное значение ключа верхнего уровня config.yaml без кавычек.
+  [ -f "$CONFIG" ] || return 0
+  sed -n "s/^$1:[[:space:]]*['\"]\{0,1\}\([^'\"#[:space:]]*\).*/\1/p" "$CONFIG" | head -n 1
+}
+
+bootstrap_api_init() {
+  bai_ctl=$(bootstrap_config_value external-controller)
+  [ -n "$bai_ctl" ] || bai_ctl=$API_MAIN
+  bai_port=${bai_ctl##*:}
+  case $bai_port in ''|*[!0-9]*) return 1 ;; esac
+  BOOTSTRAP_API="127.0.0.1:$bai_port"
+  BOOTSTRAP_API_SECRET=$(bootstrap_config_value secret)
+}
+
+bootstrap_api_patch() {
+  # $1 - тело JSON. secret передаём через -K из stdin, не в argv.
+  command -v curl >/dev/null 2>&1 || return 1
+  if [ -n "${BOOTSTRAP_API_SECRET:-}" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$BOOTSTRAP_API_SECRET" |
+      curl -fsS -m 5 -K - -X PATCH -H 'Content-Type: application/json' \
+        -d "$1" "http://$BOOTSTRAP_API/configs" >/dev/null 2>&1
+  else
+    curl -fsS -m 5 -X PATCH -H 'Content-Type: application/json' \
+      -d "$1" "http://$BOOTSTRAP_API/configs" >/dev/null 2>&1
+  fi
+}
+
+bootstrap_enable_proxy() {
+  [ -z "${BOOTSTRAP_PROXY_TRIED:-}" ] || return 1
+  BOOTSTRAP_PROXY_TRIED=1
+  if [ -n "${INSTALL_PROXY:-}" ]; then
+    BOOTSTRAP_PROXY=$INSTALL_PROXY
+    echo "Пробую через прокси из INSTALL_PROXY: $BOOTSTRAP_PROXY" >&2
+    return 0
+  fi
+  # INSTALL_PROXY_FALLBACK=0 - не трогать mihomo (тесты, ручной отказ).
+  [ "${INSTALL_PROXY_FALLBACK:-1}" != 0 ] || return 1
+  for bep_key in mixed-port port socks-port; do
+    bep_port=$(bootstrap_config_value "$bep_key")
+    case $bep_port in ''|0|*[!0-9]*) continue ;; esac
+    case $bep_key in
+      socks-port) BOOTSTRAP_PROXY="socks5h://127.0.0.1:$bep_port" ;;
+      *) BOOTSTRAP_PROXY="http://127.0.0.1:$bep_port" ;;
+    esac
+    echo "Пробую через mihomo ($bep_key $bep_port из конфига)" >&2
+    return 0
+  done
+  bootstrap_api_init || return 1
+  if bootstrap_api_patch "{\"mixed-port\": $BOOTSTRAP_TEMP_PORT}"; then
+    BOOTSTRAP_TEMP_PROXY_OPEN=1
+    BOOTSTRAP_PROXY="http://127.0.0.1:$BOOTSTRAP_TEMP_PORT"
+    echo "Пробую через mihomo: временно открыт mixed-port $BOOTSTRAP_TEMP_PORT (только на время загрузки)" >&2
+    sleep 1
+    return 0
+  fi
+  echo "Обойти через mihomo не вышло: API $BOOTSTRAP_API недоступен или mihomo не запущен" >&2
+  return 1
+}
+
+bootstrap_disable_proxy() {
+  [ -n "${BOOTSTRAP_TEMP_PROXY_OPEN:-}" ] || return 0
+  bootstrap_api_patch '{"mixed-port": 0}' ||
+    echo "Не удалось закрыть временный mixed-port $BOOTSTRAP_TEMP_PORT - закроется при перезапуске mihomo" >&2
+  BOOTSTRAP_TEMP_PROXY_OPEN=
+}
+
+bootstrap_fail_hint() {
+  [ -n "${BOOTSTRAP_FAIL_HINT:-}" ] || return 0
+  cat >&2 <<'EOF'
+
+Не удалось скачать релиз с GitHub. Что можно сделать:
+  - в XKeen включить проксирование трафика самого роутера и проверить, что
+    github.com и *.githubusercontent.com идут через стабильную ноду;
+  - указать прокси вручную (например, mixed-port mihomo):
+      curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install.sh | INSTALL_PROXY=http://127.0.0.1:7890 sh
+  - скопировать файлы проекта на роутер вручную (см. README.md).
+EOF
 }
 
 bootstrap_check_download() {
@@ -259,7 +397,16 @@ bootstrap_skip_for_action() {
 if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && bootstrap_needed; then
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
-  bootstrap_selfinstall || {
+  [ -z "${INSTALL_PROXY:-}" ] || bootstrap_enable_proxy
+  # Прерывание (Ctrl+C) не должно оставить открытым временный mixed-port.
+  trap 'bootstrap_disable_proxy; exit 130' INT TERM
+  bootstrap_rc=0
+  bootstrap_selfinstall || bootstrap_rc=$?
+  trap - INT TERM
+  bootstrap_disable_proxy
+  BOOTSTRAP_PROXY=
+  [ "$bootstrap_rc" -eq 0 ] || {
+    bootstrap_fail_hint
     echo "Автоматическая установка не удалась. Скопируйте файлы проекта на роутер вручную (см. README.md) и запустите sh install.sh снова" >&2
     exit 1
   }

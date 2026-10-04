@@ -169,6 +169,62 @@ fi
 [ -z "${BLOCK:-}" ] || fail "BLOCK must stay empty after invalid numeric choice"
 unset BLOCK_COUNT BLOCK_1 BLOCK_2
 
+# --- Загрузка релиза: причина отказа и обход через mihomo ---
+case $(bootstrap_curl_reason 6) in *DNS*) ;; *) fail "curl 6 должен объясняться как DNS" ;; esac
+case $(bootstrap_curl_reason 28) in *таймаут*) ;; *) fail "curl 28 должен объясняться как таймаут" ;; esac
+case $(bootstrap_curl_reason 99) in *'код curl 99'*) ;; *) fail "неизвестный код должен печататься" ;; esac
+
+PROXY_CFG=$TEST_ROOT/proxy-config.yaml
+printf 'mixed-port: 7890\nexternal-controller: 0.0.0.0:9090\n' > "$PROXY_CFG"
+(
+  CONFIG=$PROXY_CFG
+  # Напрямую - "блокировка" (curl 35), через прокси - успех.
+  bootstrap_http_get() { [ -n "${BOOTSTRAP_PROXY:-}" ] || return 35; printf 'ok\n'; }
+  bootstrap_download_to https://example.test/manifest.txt "$TEST_ROOT/dl.txt" 100 2>"$TEST_ROOT/dl.err" \
+    || fail "загрузка должна пройти через mixed-port из конфига"
+  assert_eq "$BOOTSTRAP_PROXY" 'http://127.0.0.1:7890'
+  grep -q 'напрямую: соединение оборвано' "$TEST_ROOT/dl.err" || fail "нет причины отказа прямой загрузки"
+  # Следующий файл сразу идёт через тот же прокси.
+  bootstrap_download_to https://example.test/f2 "$TEST_ROOT/dl2.txt" 100 2>/dev/null || fail "второй файл через прокси"
+) || exit 1
+
+(
+  # Портов в конфиге нет - временно открываем mixed-port через API и закрываем.
+  printf 'external-controller: 0.0.0.0:9191\nsecret: s3\n' > "$PROXY_CFG"
+  CONFIG=$PROXY_CFG
+  PATCH_LOG=$TEST_ROOT/patch.log; : > "$PATCH_LOG"
+  bootstrap_api_patch() { echo "$BOOTSTRAP_API $BOOTSTRAP_API_SECRET $1" >> "$PATCH_LOG"; }
+  bootstrap_enable_proxy 2>/dev/null || fail "временный mixed-port через API"
+  assert_eq "$BOOTSTRAP_PROXY" 'http://127.0.0.1:17890'
+  bootstrap_disable_proxy
+  assert_eq "$(sed -n 1p "$PATCH_LOG")" '127.0.0.1:9191 s3 {"mixed-port": 17890}'
+  assert_eq "$(sed -n 2p "$PATCH_LOG")" '127.0.0.1:9191 s3 {"mixed-port": 0}'
+) || exit 1
+
+(
+  # Ни портов, ни API - отказ с подсказкой.
+  printf 'allow-lan: true\n' > "$PROXY_CFG"
+  CONFIG=$PROXY_CFG
+  bootstrap_api_patch() { return 1; }
+  bootstrap_http_get() { return 6; }
+  if bootstrap_download_to https://example.test/m "$TEST_ROOT/dl3.txt" 100 2>"$TEST_ROOT/dl3.err"; then
+    fail "без прокси загрузка должна провалиться"
+  fi
+  assert_eq "$BOOTSTRAP_FAIL_HINT" '1'
+  grep -q 'Обойти через mihomo не вышло' "$TEST_ROOT/dl3.err" || fail "нет сообщения о неудачном обходе"
+  bootstrap_fail_hint 2>&1 | grep -q 'INSTALL_PROXY=' || fail "подсказка должна предлагать INSTALL_PROXY"
+) || exit 1
+
+(
+  # INSTALL_PROXY важнее конфига.
+  printf 'mixed-port: 7890\n' > "$PROXY_CFG"
+  CONFIG=$PROXY_CFG
+  INSTALL_PROXY=socks5h://10.0.0.1:1080
+  bootstrap_enable_proxy 2>/dev/null
+  assert_eq "$BOOTSTRAP_PROXY" 'socks5h://10.0.0.1:1080'
+) || exit 1
+echo "test_install.sh: обход загрузки через mihomo OK" >&2
+
 CRON_BIN=$TEST_ROOT/cronbin
 mkdir -p "$CRON_BIN"
 CRON_STORE=$TEST_ROOT/crontab.txt

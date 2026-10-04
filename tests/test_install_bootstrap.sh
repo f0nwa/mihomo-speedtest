@@ -16,6 +16,10 @@ component_of() {
     *) echo . ;;
   esac
 }
+# Обход через mihomo (bootstrap_enable_proxy) в этих тестах не нужен: на
+# машине разработчика он мог бы открыть mixed-port у настоящего mihomo.
+INSTALL_PROXY_FALLBACK=0
+export INSTALL_PROXY_FALLBACK
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/install-bootstrap-test.XXXXXX")
 
 CLEANUP_PIDS=""
