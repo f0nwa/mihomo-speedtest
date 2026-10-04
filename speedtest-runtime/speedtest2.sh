@@ -838,8 +838,10 @@ wg_group_now() {
 # wg_publish_fast - WG/AWG-ноды не пишутся в fast.yaml (второй клиент с тем
 # же ключом), вместо этого лучшая из прошедших порог $1 выбирается в группе
 # WG_FAST_GROUP, которая входит в '⚡ Быстрый пул'. Нет прошедших порог:
-# REJECT, если текущий выбор проверялся в этом прогоне и не прошёл (не
-# ответил или ниже порога); не дошедший до замера выбор не трогаем.
+# REJECT, только если текущий выбор замерен в этом прогоне ниже порога.
+# Не ответившую или не дошедшую до замера ноду не трогаем: пул сам
+# проверяет FAST-WG пингом через выбранную ноду и пропускает её, пока она
+# не отвечает, а ожив, она вернётся в пул без ожидания следующего прогона.
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
   if ! wg_now=$(wg_group_now "$WG_FAST_GROUP"); then
@@ -861,12 +863,11 @@ wg_publish_fast() {
   [ "$wg_now" != REJECT ] || return 0
   wg_now_idx=$(awk -F '\t' -v n="$wg_now" '$2 == n { print $1; exit }' "$WORK/wg_ok.txt")
   [ -n "$wg_now_idx" ] || return 0
-  wg_now_state=$(awk -v k="$wg_now_idx" -v min="$1" -v alive="$WORK/alive.txt" '
-    BEGIN { while ((getline l < alive) > 0) { split(l, a, " "); if (a[2] == k) up = 1 } }
-    $2 == k { tested = 1; if ($1 < min) slow = 1 }
-    END { print (!up || (tested && slow)) ? "fail" : "keep" }' "$WORK/res.txt")
+  wg_now_state=$(awk -v k="$wg_now_idx" -v min="$1" '
+    $2 == k && $1 < min { slow = 1 }
+    END { print slow ? "fail" : "keep" }' "$WORK/res.txt")
   if [ "$wg_now_state" = fail ]; then
-    wg_select_in "$WG_FAST_GROUP" REJECT && say "WG: $wg_now не прошёл замер - убран из '⚡ Быстрый пул'"
+    wg_select_in "$WG_FAST_GROUP" REJECT && say "WG: $wg_now ниже порога скорости - убран из '⚡ Быстрый пул' до следующего прогона"
   fi
   return 0
 }

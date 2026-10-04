@@ -94,7 +94,7 @@ grep -qx 'http://127.0.0.1:9090/proxies/MST-SPEEDTEST' "$T/select_args" || fail 
 grep -qxF '{"name":"Blanc \"NL\""}' "$T/select_args" || fail "wg_select: неверное тело"
 
 # --- wg_publish_fast: лучший WG выше порога -> FAST-WG, иначе REJECT
-#     только если текущий выбор проверялся и не прошёл ---
+#     только если текущий выбор замерен ниже порога ---
 printf 'n0002\tBlanc_NL_AMS_1\nn0003\tOther WG\n' > "$WORK/wg_ok.txt"
 publish_case() {  # $1 now, $2 alive.txt, $3 res.txt
   printf '%s' "$2" > "$WORK/alive.txt"; printf '%s' "$3" > "$WORK/res.txt"; : > "$T/put"; : > "$RUN_LOG"
@@ -125,7 +125,7 @@ publish_case Blanc_NL_AMS_1 '100 n0002
 ' ''
 [ ! -s "$T/put" ] || fail "живой, но не дошедший до замера WG трогать нельзя"
 publish_case Blanc_NL_AMS_1 '' ''
-grep -qF '{"name":"REJECT"}' "$T/put" || fail "не ответивший текущий WG должен замениться на REJECT"
+[ ! -s "$T/put" ] || fail "не ответивший текущий WG не трогаем - пул сам пропускает его по пингу"
 publish_case MISSING '100 n0002
 ' '2000000 n0002
 '
