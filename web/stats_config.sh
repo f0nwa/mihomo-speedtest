@@ -12,6 +12,10 @@
 #   restore         POST - то же для выбранного бэкапа (?kind=&name=)
 #   restore-working POST - найти самый свежий бэкап, проходящий mihomo -t, и применить
 #   repair          POST - починка текста (?mode=format|template), без записи
+#   import-wg       POST - импорт WireGuard/AmneziaWG .conf в текст редактора,
+#                          без записи: тело - блоки "### MST-WG <имя ноды>" с
+#                          .conf и последним "### MST-CONFIG" с текстом
+#                          редактора; ответ - новый текст, отчёт, mihomo -t
 #   log             GET  - журнал последнего применения (save/restore/
 #                          restore-working) и идёт ли оно сейчас: веб-вкладка
 #                          опрашивает его, пока ждёт ответа на применение.
@@ -40,6 +44,8 @@ CONFIG_BACKUP_KEEP=${CONFIG_BACKUP_KEEP:-20}
 CONFIG_MAX_BYTES=${CONFIG_MAX_BYTES:-1048576}
 CONFIG_TEMPLATE=${CONFIG_TEMPLATE:-$DIR/config.example.yaml}
 MIGRATE_SCRIPT=${MIGRATE_SCRIPT:-$DIR/migrate_config.sh}
+WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
+FAST_WG_AWK=${FAST_WG_AWK:-$DIR/fast_wg.awk}
 BIN=${BIN:-/opt/sbin/mihomo}
 XKEEN_BIN=${XKEEN_BIN:-/opt/sbin/xkeen}
 PIDOF_CMD=${PIDOF_CMD:-pidof}
@@ -491,6 +497,47 @@ cmd_repair() {
   reply 200 "$WORK/resp"
 }
 
+# Блок FAST_WG (между маркерами) файла $1 - для отчёта created/updated/none.
+fast_wg_block() {
+  awk '/# --- FAST_WG:BEGIN/ { f = 1; next } /# --- FAST_WG:END/ { f = 0 } f' "$1"
+}
+
+cmd_import_wg() {
+  [ -f "$WG_IMPORT_AWK" ] && [ -f "$FAST_WG_AWK" ] || fail_json 500 no_tools "wg_import.awk или fast_wg.awk не найден - переустановите проект"
+  read_body "$WORK/body"
+  mkdir "$WORK/wg" || fail_json 500 work "Не удалось подготовить каталог импорта"
+  : > "$WORK/wg/list"; : > "$WORK/report"; : > "$WORK/in.yaml"
+  # Разбор тела. Имя ноды: непустое, до 64 символов, без управляющих
+  # символов и |, без пробелов по краям; иначе - ERROR, файл пропускается.
+  if ! LC_ALL=C awk -v D="$WORK/wg" -v REPORT="$WORK/report" -v CFG="$WORK/in.yaml" '
+    function chars(s) { gsub(/[\200-\277]/, "", s); return length(s) }
+    { line = $0; sub(/\r$/, "", line) }
+    !cfg && line ~ /^### MST-WG / {
+      name = substr(line, 12); out = "/dev/null"; idx++
+      if (name == "" || name ~ /[\001-\037\177|]/ || name ~ /^[ \t]/ || name ~ /[ \t]$/ || chars(name) > 64)
+        printf "ERROR|%s|недопустимое имя ноды\n", name >> REPORT
+      else { out = D "/" idx ".conf"; printf "%s\t%s\n", out, name >> (D "/list") }
+      next
+    }
+    line == "### MST-CONFIG" { out = CFG; cfg = 1; next }
+    out != "" { print > out }
+    END { exit !cfg }' "$WORK/body"; then
+    fail_json 400 bad_body "Нет блока ### MST-CONFIG с текстом конфига"
+  fi
+  awk -v LIST="$WORK/wg/list" -v REPORT="$WORK/report" -f "$WG_IMPORT_AWK" "$WORK/in.yaml" > "$WORK/imp.yaml" \
+    || fail_json 422 import_failed "Не удалось вставить ноды в конфиг (повреждены маркеры STATIC_PROXIES?)"
+  awk -f "$FAST_WG_AWK" "$WORK/imp.yaml" > "$WORK/out.yaml" 2> "$WORK/fastwg.log" \
+    || fail_json 422 import_failed "$(head -n 1 "$WORK/fastwg.log")"
+  fast_wg_block "$WORK/in.yaml" > "$WORK/fw.before"; fast_wg_block "$WORK/out.yaml" > "$WORK/fw.after"
+  if [ ! -s "$WORK/fw.after" ] || cmp -s "$WORK/fw.before" "$WORK/fw.after"; then echo 'FASTWG|none' >> "$WORK/report"
+  elif [ -s "$WORK/fw.before" ]; then echo 'FASTWG|updated' >> "$WORK/report"
+  else echo 'FASTWG|created' >> "$WORK/report"; fi
+  rc=0; check_file "$WORK/out.yaml" || rc=$?
+  printf '{"ok":true,"text":%s,"report":%s,"check":%s}\n' \
+    "$(jstr_file "$WORK/out.yaml")" "$(lines_json "$WORK/report")" "$(check_json "$rc")" > "$WORK/resp"
+  reply 200 "$WORK/resp"
+}
+
 cmd_restore_working() {
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
@@ -569,6 +616,8 @@ case $action:$method in
     cmd_restore_working ;;
   repair:POST)
     cmd_repair ;;
+  import-wg:POST)
+    cmd_import_wg ;;
   *)
     fail_json 405 method_not_allowed "" ;;
 esac

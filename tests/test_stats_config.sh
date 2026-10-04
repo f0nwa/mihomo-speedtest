@@ -221,6 +221,50 @@ grep -q '"api/config/log": ("stats_config.sh"' "$ROOT/web/stats_httpd.py" || fai
 grep -q 'href="/config"' "$ROOT/web/stats_index.html" || fail "16: нет вкладки в меню"
 
 
+# --- 13: import-wg - .conf -> ноды в тексте, отчёт, FAST-WG; config.yaml не трогается
+cp "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/fast_wg.awk" "$DIR/"
+cp "$M/config.yaml" "$TMP/cfg-before"
+WGC='[Interface]
+PrivateKey = AAA=
+Address = 10.8.0.2/32
+[Peer]
+PublicKey = BBB=
+Endpoint = vpn.example.com:51820
+AllowedIPs = 0.0.0.0/0'
+out=$({ printf '### MST-WG nl-ams\n%s\n' "$WGC"
+        printf '### MST-WG bad\n[Interface]\nPrivateKey = AAA=\n[Peer]\nPublicKey = BBB=\n'
+        printf '### MST-WG a|b\n%s\n' "$WGC"
+        printf '### MST-CONFIG\n'; cat "$ROOT/config-tools/config.example.yaml"; } | cgi import-wg POST '')
+assert_contains 'Status: 200' "$out"
+rep=$(printf '%s' "$out" | jget '["report"]')
+assert_contains 'ADDED|nl-ams' "$rep"
+assert_contains 'ERROR|bad|нет Endpoint в [Peer]' "$rep"
+assert_contains 'ERROR|a|b|недопустимое имя ноды' "$rep"
+assert_contains 'FASTWG|created' "$rep"
+txt=$(printf '%s' "$out" | jget '["text"]')
+assert_contains '  - name: FAST-WG' "$txt"
+assert_contains "  - name: 'nl-ams'" "$txt"
+assert_not_contains "name: 'a|b'" "$txt"
+[ "$(printf '%s' "$out" | jget '["check"]["ok"]')" = True ] || fail "13: check"
+cmp -s "$M/config.yaml" "$TMP/cfg-before" || fail "13: config.yaml изменён"
+# повтор с уже импортированной нодой - REPLACED, FAST-WG не меняется
+printf '%s' "$txt" > "$TMP/imported.yaml"
+out=$({ printf '### MST-WG nl-ams\n%s\n' "$WGC"; printf '### MST-CONFIG\n'; cat "$TMP/imported.yaml"; } | cgi import-wg POST '')
+assert_contains 'REPLACED|nl-ams' "$(printf '%s' "$out" | jget '["report"]')"
+assert_contains 'FASTWG|none' "$(printf '%s' "$out" | jget '["report"]')"
+# имя: 64 символа кириллицей - можно, 65 - нельзя
+n64=$(printf 'я%.0s' $(seq 64)); n65=${n64}я
+out=$({ printf '### MST-WG %s\n%s\n' "$n64" "$WGC"; printf '### MST-WG %s\n%s\n' "$n65" "$WGC"
+        printf '### MST-CONFIG\n'; cat "$ROOT/config-tools/config.example.yaml"; } | cgi import-wg POST '')
+assert_contains "ADDED|$n64" "$(printf '%s' "$out" | jget '["report"]')"
+assert_contains "ERROR|$n65|недопустимое имя ноды" "$(printf '%s' "$out" | jget '["report"]')"
+# строка "### MST-WG" внутри текста конфига не обрезает его
+out=$({ printf '### MST-WG nl-ams\n%s\n' "$WGC"; printf '### MST-CONFIG\n'; cat "$ROOT/config-tools/config.example.yaml"; printf '### MST-WG tail\ntail-key: 1\n'; } | cgi import-wg POST '')
+assert_contains 'tail-key: 1' "$(printf '%s' "$out" | jget '["text"]')"
+# без ### MST-CONFIG - bad_body
+out=$(printf '### MST-WG x\n%s\n' "$WGC" | cgi import-wg POST '')
+assert_contains 'bad_body' "$out"
+
 # --- lib: подключение без действия
 out=$(MST_CONFIG_LIB=1 sh -c '. "$1"; type reply >/dev/null && type jstr_file >/dev/null && echo LOADED' _ "$SCRIPT")
 [ "$out" = LOADED ] || fail "lib: $out"

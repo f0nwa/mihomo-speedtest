@@ -501,6 +501,7 @@ API_ROUTES = {
     "api/config/backup": ("stats_config.sh", {"MST_CONFIG_ACTION": "backup"}),
     "api/config/check": ("stats_config.sh", {"MST_CONFIG_ACTION": "check"}),
     "api/config/repair": ("stats_config.sh", {"MST_CONFIG_ACTION": "repair", "MST_CGI_TIMEOUT": "60"}),
+    "api/config/import-wg": ("stats_config.sh", {"MST_CONFIG_ACTION": "import-wg", "MST_CGI_TIMEOUT": "60"}),
     "api/config/save": ("stats_config.sh", {"MST_CONFIG_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore-working": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
