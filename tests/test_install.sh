@@ -131,16 +131,31 @@ assert_eq "$BLOCK" 'Manual|Value'
 assert_eq "$BLOCK_SOURCE" 'введён вручную'
 unset BLOCK BLOCK_SOURCE BLOCK_COUNT
 
+# Фильтра в конфиге нет: меню минимальный / стандартный / свой.
+DEFAULT_GEO=$(default_block)
+[ -n "$DEFAULT_GEO" ] || fail "default_block should read &geofilter from config.example.yaml"
+
 BLOCK_COUNT=0
-if resolve_block <<'EOF'
-
-
+resolve_block 2>/dev/null <<'EOF'
 
 EOF
-then
-  fail "resolve_block should fail after three empty inputs"
-fi
-unset BLOCK_COUNT
+assert_eq "$BLOCK" "$MIN_BLOCK"
+assert_eq "$BLOCK_SOURCE" 'минимальный'
+unset BLOCK BLOCK_SOURCE BLOCK_COUNT
+
+BLOCK_COUNT=0
+resolve_block 2>/dev/null <<'EOF'
+2
+EOF
+assert_eq "$BLOCK" "$(normalize_block "$DEFAULT_GEO")"
+assert_eq "$BLOCK_SOURCE" 'стандартный из config.example.yaml'
+unset BLOCK BLOCK_SOURCE BLOCK_COUNT
+
+# Нет ответа вовсе (EOF, нет терминала) - минимальный, без отказа.
+BLOCK_COUNT=0
+resolve_block 2>/dev/null </dev/null || fail "EOF should fall back to minimal filter"
+assert_eq "$BLOCK_SOURCE" 'минимальный'
+unset BLOCK BLOCK_SOURCE BLOCK_COUNT
 
 BLOCK_COUNT=2
 BLOCK_1='Russia'
