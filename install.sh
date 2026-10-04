@@ -344,6 +344,7 @@ bootstrap_selfinstall() {
   bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  echo "Релиз для установки: $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)" >&2
 
   mkdir -p "$DIR" || { echo "Не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
@@ -1257,7 +1258,24 @@ print_trial_log_tail() {
   tail -5 "$DIR/speedtest.log" >&2 2>/dev/null || true
 }
 
+# Что именно ставится - для первой и последней строки установки. Файлы
+# из $DIR (после загрузки с GitHub или переустановка поверх) описывает
+# installed-manifest.txt; файлы из другого каталога (SELFDIR=... sh
+# install.sh, ручной перенос) версии не несут.
+install_release_label() {
+  if [ "$SELFDIR" = "$DIR" ] && [ -f "$INSTALLED_MANIFEST_PATH" ]; then
+    irl_tag=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG)
+    if [ -n "$irl_tag" ]; then
+      printf 'релиз %s\n' "$irl_tag"
+      return 0
+    fi
+  fi
+  printf 'файлы из %s, версия релиза неизвестна\n' "$SELFDIR"
+}
+
 main() {
+  INSTALL_LABEL=$(install_release_label)
+  echo "Устанавливается: $INSTALL_LABEL" >&2
   check_mihomo_process && check_versions || return 1
 
   if [ ! -f "$CONFIG" ]; then
@@ -1371,7 +1389,7 @@ main() {
     print_trial_log_tail
   fi
 
-  echo "Установка завершена" >&2
+  echo "Установка завершена: $INSTALL_LABEL" >&2
 }
 
 recalibrate_main() {

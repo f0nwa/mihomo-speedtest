@@ -136,6 +136,8 @@ grep -q "Скачиваю файл 1/2: greeting.txt" "$TEST_ROOT/err-empty.log"
   || fail "bootstrap_selfinstall должен показывать счётчик файлов при скачивании (1/2: greeting.txt)"
 grep -q "Скачиваю файл 2/2: runner.sh" "$TEST_ROOT/err-empty.log" \
   || fail "bootstrap_selfinstall должен показывать счётчик файлов при скачивании (2/2: runner.sh)"
+grep -q "Релиз для установки: v-test-1" "$TEST_ROOT/err-empty.log" \
+  || fail "bootstrap_selfinstall должен до скачивания назвать устанавливаемый релиз"
 
 [ -f "$DST1/greeting.txt" ] || fail "greeting.txt не скачан"
 [ -f "$DST1/runner.sh" ] || fail "runner.sh не скачан"
@@ -217,6 +219,18 @@ grep -q "Процесс mihomo не найден" "$TEST_ROOT/err-present.log" \
   || fail "install.sh должен дойти до штатной проверки процесса, минуя bootstrap (весь ALL_PROJECT_FILES уже есть в DIR, SELFDIR по умолчанию = DIR)"
 grep -q "Не удалось скачать" "$TEST_ROOT/err-present.log" \
   && fail "bootstrap не должен был запускаться - весь набор файлов уже на месте в DIR"
+grep -q "Устанавливается: файлы из $WORK3, версия релиза неизвестна" "$TEST_ROOT/err-present.log" \
+  || fail "без installed-manifest.txt установщик должен честно сказать, что версия неизвестна"
+
+# Переустановка поверх: файлы в DIR описывает installed-manifest.txt.
+mkdir -p "$WORK3/.update"
+printf 'FORMAT_VERSION=2\nRELEASE_VERSION=7\nRELEASE_TAG=1.2.4\n' > "$WORK3/.update/installed-manifest.txt"
+PATH="$FAKEBIN:$PATH" DIR="$WORK3" CONFIG="$WORK3/config.yaml" \
+  UPDATE_RELEASE_BASE="http://127.0.0.1:1/releases/latest/download" \
+  sh "$SCRIPT" 2>"$TEST_ROOT/err-label.log" || true
+grep -q "Устанавливается: релиз 1.2.4" "$TEST_ROOT/err-label.log" \
+  || fail "установщик должен показать устанавливаемый релиз из installed-manifest.txt"
+rm -rf "$WORK3/.update"
 
 echo "test_install_bootstrap.sh: часть 3 (файлы уже на месте, сеть не трогается) OK" >&2
 
