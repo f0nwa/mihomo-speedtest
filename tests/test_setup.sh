@@ -192,7 +192,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN3"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK3/"
 cat > "$WORK3/install.sh" <<'EOF'
 #!/bin/sh
@@ -230,7 +230,7 @@ cp "$WORK3/config.yaml" "$WORK3/config.yaml.before"
 # именем), повторное добавление того же URL через SUB_URLS создавало бы
 # у assign_provider_names неразрешимую коллизию имён без интерактивного
 # ввода (два источника претендуют на одно и то же доменное имя "sub1").
-if PATH="$FAKEBIN3:$PATH" DIR="$WORK3" BIN=mihomo CONFIG="$WORK3/config.yaml" \
+if UI_LOG="$WORK3/ui.log" PATH="$FAKEBIN3:$PATH" DIR="$WORK3" BIN=mihomo CONFIG="$WORK3/config.yaml" \
     TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK3" API_MAIN=127.0.0.1:9090 \
     SKIP_CONFIRM=1 sh "$WORK3/setup.sh" \
     >"$WORK3/run2.log" 2>&1 < /dev/null; then
@@ -310,7 +310,7 @@ done
 printf '200'
 EOF
 chmod +x "$FAKEBIN4"/*
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK4/"
 cat > "$WORK4/install.sh" <<'EOF'
 #!/bin/sh
@@ -401,7 +401,7 @@ chmod +x "$FAKEBIN5"/*
 # должна остановиться ДО первого же вопроса про подписки, config.yaml не
 # должен появиться, install.sh не должен запускаться.
 WORK5A=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5A/"
 cat > "$WORK5A/install.sh" <<'EOF'
 #!/bin/sh
@@ -426,7 +426,7 @@ rm -rf "$WORK5A"
 # равно задаётся - SKIP_DNS_GUARD_CHECK отключает только проверку Xkeen
 # UI, не весь вопрос целиком (для этого есть отдельный SKIP_CONFIRM).
 WORK5B=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5B/"
 cat > "$WORK5B/install.sh" <<'EOF'
 #!/bin/sh
@@ -450,7 +450,7 @@ rm -rf "$WORK5B"
 # Сценарий "подтверждение": та же активная защита, ответ "y" - установка
 # должна пройти как обычно, предупреждение должно быть показано.
 WORK5C=$(mktemp -d)
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK5C/"
 cat > "$WORK5C/install.sh" <<'EOF'
 #!/bin/sh
@@ -532,7 +532,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN6"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK6/"
 cat > "$WORK6/install.sh" <<'EOF'
 #!/bin/sh
@@ -617,7 +617,7 @@ exit 0
 EOF
 chmod +x "$FAKEBIN7"/*
 
-cp "$ROOT/installer/version_check.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
    "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK7/"
 cat > "$WORK7/install.sh" <<'EOF'
 #!/bin/sh
@@ -662,6 +662,113 @@ grep -q 'install.sh (заглушка): запущен' "$WORK7/run2.log" || { e
 [ -f "$WORK7/config.yaml" ] || { echo "FAIL: config.yaml should be written after confirmation" >&2; FAILED=1; }
 
 rm -rf "$FAKEBIN7" "$WORK7"
+
+# --- Task 9: оформление мастера (ui.sh) в plain-режиме ---
+FAKEBIN8=$(mktemp -d)
+WORK8=$(mktemp -d)
+mkdir -p "$WORK8/proxy-providers"
+cat > "$FAKEBIN8/pidof" <<'EOF'
+#!/bin/sh
+[ "$1" = "mihomo" ] && exit 0
+exit 1
+EOF
+cat > "$FAKEBIN8/xkeen" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)\n  Ядро проксирования Mihomo версии 1.19.29\n' ;;
+  -restart) echo "xkeen: перезапуск ядра (вывод для журнала)"; exit 0 ;;
+esac
+EOF
+cat > "$FAKEBIN8/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)\n  ndm.core.version: "5.1.4 (KeeneticOS)"\n'
+EOF
+cat > "$FAKEBIN8/curl" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    *9090/version) printf '{"version":"1.19.29"}'; exit 0 ;;
+  esac
+done
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -n "$out" ] && printf 'mixed-port: 7890\nproxy-groups: []\nproxies: []\n' > "$out"
+printf '200'
+EOF
+cat > "$FAKEBIN8/mihomo" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$FAKEBIN8"/*
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK8/"
+cat > "$WORK8/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): UI_CONTINUE=${UI_CONTINUE:-} FROM_TEMPLATE=${MST_CONFIG_FROM_TEMPLATE:-}" >&2
+exit 0
+EOF
+cat > "$WORK8/config.yaml" <<'EOF'
+proxy-providers:
+  provider-a:
+    type: http
+    url: "https://old1.example/AAA"
+    path: ./proxy-providers/provider-a.yaml
+
+proxies:
+  - name: 'Real Node'
+    type: hysteria2
+    server: real.proxy.io
+    password: "s3cr3t"
+EOF
+cp "$WORK8/config.yaml" "$WORK8/config.orig"
+
+run8() {
+  # $1 = лог; ответы: Enter (drop), Enter (имя), Y (перенос proxies)
+  printf '\n\nY\n' | env PATH="$FAKEBIN8:$PATH" UI=plain UI_LOG="$WORK8/ui.log" DIR="$WORK8" BIN=mihomo \
+    CONFIG="$WORK8/config.yaml" TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK8" \
+    API_MAIN=127.0.0.1:9090 SKIP_CONFIRM=1 "$@" sh "$WORK8/setup.sh"
+}
+run8 env >"$WORK8/run.log" 2>&1 || { echo "FAIL: setup (ui) run should succeed" >&2; cat "$WORK8/run.log" >&2; FAILED=1; }
+grep -q '^== MIHOMO-SPEEDTEST — Настройка нового роутера ==$' "$WORK8/run.log" || { echo "FAIL: standalone setup must show full banner with subtitle" >&2; FAILED=1; }
+# Ввод идёт из pipe без эха, поэтому строка шага может склеиться с
+# предыдущим приглашением - якоря ^ нет.
+steps=$(grep -oE ' 0[1-4]/04  ?[^ ]+' "$WORK8/run.log" | sed 's/^ *//; s/  */ /' | tr '\n' ' ')
+assert_eq "$steps" "01/04 Подписки 02/04 User-Agent 03/04 Имена 04/04 Конфиг " "шаги мастера по порядку"
+grep -q '^\[??\] .*\[Y/n\]' "$WORK8/run.log" || { echo "FAIL: вопрос о переносе proxies должен идти через [??]" >&2; FAILED=1; }
+grep -q 'Перезапуск ядра' "$WORK8/run.log" || { echo "FAIL: нет шага «Перезапуск ядра»" >&2; FAILED=1; }
+grep -q 'xkeen: перезапуск ядра' "$WORK8/run.log" && { echo "FAIL: вывод xkeen не должен попадать на экран" >&2; FAILED=1; }
+# И не в журнал: демон, запущенный xkeen, унаследовал бы дескриптор журнала
+# и писал бы в него вечно (restart_core глушит вывод в /dev/null).
+grep -q 'xkeen: перезапуск ядра' "$WORK8/ui.log" && { echo "FAIL: вывод xkeen не должен попадать в UI_LOG" >&2; FAILED=1; }
+grep -q 'UI_CONTINUE=1 FROM_TEMPLATE=1' "$WORK8/run.log" || { echo "FAIL: install.sh должен получить UI_CONTINUE=1 и MST_CONFIG_FROM_TEMPLATE=1" >&2; FAILED=1; }
+grep -q "$(printf '\033')" "$WORK8/run.log" && { echo "FAIL: в plain-выводе не должно быть ESC" >&2; FAILED=1; }
+
+# Приход из install.sh (UI_CONTINUE=1): вместо рамки - строка раздела.
+cp "$WORK8/config.orig" "$WORK8/config.yaml"
+run8 env UI_CONTINUE=1 >"$WORK8/run_c.log" 2>&1 || { echo "FAIL: setup (UI_CONTINUE) run should succeed" >&2; FAILED=1; }
+grep -q '^== Настройка нового роутера ==$' "$WORK8/run_c.log" || { echo "FAIL: при UI_CONTINUE=1 нужна строка раздела" >&2; FAILED=1; }
+grep -q 'MIHOMO-SPEEDTEST' "$WORK8/run_c.log" && { echo "FAIL: при UI_CONTINUE=1 баннер не повторяется" >&2; FAILED=1; }
+
+# mihomo -t падает: [!!] + хвост на экране, полный вывод в UI_LOG.
+cat > "$FAKEBIN8/mihomo" <<'EOF'
+#!/bin/sh
+echo "l1" >&2; echo "l2" >&2; echo "l3" >&2; echo "test: invalid config field xyz" >&2
+exit 1
+EOF
+cp "$WORK8/config.orig" "$WORK8/config.yaml"
+if run8 env >"$WORK8/run_f.log" 2>&1; then echo "FAIL: mihomo -t failure must fail the run" >&2; FAILED=1; fi
+grep -q '^ *\[!!\] ' "$WORK8/run_f.log" || { echo "FAIL: mihomo -t неудача должна дать [!!]" >&2; FAILED=1; }
+grep -q 'test: invalid config field xyz' "$WORK8/run_f.log" || { echo "FAIL: хвост вывода mihomo -t на экране" >&2; FAILED=1; }
+grep -q '^l1$' "$WORK8/ui.log" || { echo "FAIL: полный вывод mihomo -t в UI_LOG" >&2; FAILED=1; }
+grep -q 'Непринятый конфиг оставлен в' "$WORK8/run_f.log" || { echo "FAIL: сообщение о непринятом конфиге" >&2; FAILED=1; }
+rj=$(sed -n 's/^Непринятый конфиг оставлен в \(.*\) для разбора.*$/\1/p' "$WORK8/run_f.log")
+[ -z "$rj" ] || rm -f "$rj"
+rm -rf "$FAKEBIN8" "$WORK8"
 
 if [ "$FAILED" = 1 ]; then
   echo "test_setup.sh: FAILED" >&2

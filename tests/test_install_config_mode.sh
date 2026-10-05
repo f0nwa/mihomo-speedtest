@@ -9,6 +9,10 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # migrate_config.sh принимает выход только в /tmp.
 T=$(mktemp -d /tmp/install-config-mode-test.XXXXXX)
 trap 'rm -rf "$T"' EXIT INT TERM
+# Журнал UI - во временный каталог (не /opt/var/log): ui_run пишет туда
+# вывод mihomo -t и перезапуска ядра.
+UI_LOG=$T/ui.log
+export UI_LOG
 
 mkdir -p "$T/self" "$T/bin" "$T/mihomo"
 cp "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/fast_wg.awk" \
@@ -73,11 +77,19 @@ run_mode() {
   cp "$T/own.yaml" "$CONFIG"
   rm -f "$CONFIG".*.bak "$FAKE_XKEEN_LOG" "$SV"
   rc=0
-  printf '%b' "$1" | ( resolve_config_mode ) 2>"$T/err" || rc=$?
+  # Флаг MST_OWN_CONFIG живёт в подоболочке - выносим его в файл.
+  printf '%b' "$1" | ( rm_rc=0; resolve_config_mode || rm_rc=$?; echo "${MST_OWN_CONFIG:-0}" > "$T/own"; exit "$rm_rc" ) 2>"$T/err" || rc=$?
   echo "$rc" > "$T/rc"
 }
 unchanged() { cmp -s "$T/own.yaml" "$CONFIG" || fail "$1: конфиг не должен меняться"; }
-own_notice() { grep -q "быстрый пул НЕ применяется" "$T/err" || fail "$1: нет предупреждения о своём конфиге"; }
+# Свой конфиг: resolve_config_mode только ставит флаг MST_OWN_CONFIG=1, а
+# сам блок предупреждения main() печатает перед сводкой (own_config_notice).
+own_notice() {
+  [ "$(cat "$T/own")" = 1 ] || fail "$1: нет флага MST_OWN_CONFIG=1"
+  grep -q "быстрый пул НЕ применяется" "$T/err" && fail "$1: предупреждение печатается main() перед сводкой, не здесь"
+  ( own_config_notice ) 2>"$T/notice"
+  grep -q "^  | .*быстрый пул НЕ применяется" "$T/notice" || fail "$1: own_config_notice должен печатать блок: $(cat "$T/notice")"
+}
 
 # 1. Свой конфиг из окружения - без вопроса.
 CONFIG_MODE=own run_mode ''
@@ -89,19 +101,24 @@ grep -q "Введите номер" "$T/err" && fail "CONFIG_MODE=own не до�
 run_mode '\n'
 unchanged "Enter"; own_notice "Enter"
 grep -q "мигрировать конфиг к шаблону" "$T/err" || fail "вопрос о миграции не задан"
+# Меню - блоком: заголовок и пункты (с пояснениями к пункту 1) за чертой.
+grep -q '^  | В конфиге нет быстрого пула' "$T/err" || fail "вопрос о миграции должен быть блоком: $(cat "$T/err")"
+grep -q '^  |  1) мигрировать конфиг к шаблону' "$T/err" || fail "пункт 1 меню миграции не в блоке"
+grep -q '^  | .*rule-providers и правила будут из шаблона' "$T/err" || fail "пояснение к пункту 1 должно быть строкой того же блока"
+grep -q '^\[??\] Введите номер или Enter для 2: ' "$T/err" || fail "нет приглашения ввода ui_ask"
 
 # 3. Миграция с подтверждением.
 run_mode '1\ny\n'
 [ "$(cat "$T/rc")" = 0 ] || fail "миграция: rc $(cat "$T/rc"): $(cat "$T/err")"
 has_fast_group "$CONFIG" || fail "после миграции нет провайдера fast"
 grep -q PRIVATE_TOKEN "$CONFIG" || fail "миграция потеряла подписку"
-grep -q "сохранятся подписки: blancvpn" "$T/err" || fail "нет сводки миграции: $(cat "$T/err")"
+grep -q "| сохранятся подписки: blancvpn" "$T/err" || fail "нет сводки миграции блоком: $(cat "$T/err")"
 grep -q "будут заменены шаблоном:.*rules" "$T/err" || fail "сводка не предупреждает о замене правил"
 grep -q PRIVATE_TOKEN "$T/err" && fail "сводка раскрыла ссылку подписки"
 set -- "$CONFIG".*.bak
 [ -f "$1" ] && cmp -s "$1" "$T/own.yaml" || fail "нет бэкапа прежнего конфига"
 grep -q -- -restart "$FAKE_XKEEN_LOG" || fail "ядро не перезапущено"
-grep -q "быстрый пул НЕ применяется" "$T/err" && fail "после миграции не нужно предупреждение о своём конфиге"
+[ "$(cat "$T/own")" = 0 ] || fail "после миграции не нужно предупреждение о своём конфиге (MST_OWN_CONFIG)"
 [ "$(cat "$SV" 2>/dev/null)" = 4 ] || fail "миграция: схема конфига не записана"
 [ "$(stat -c %a "$SV" 2>/dev/null || stat -f %Lp "$SV")" = 600 ] || fail "миграция: режим файла схемы"
 # Без установленного манифеста (файлы перенесены вручную) схема не пишется.

@@ -20,7 +20,7 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
@@ -37,6 +37,219 @@ UPDATE_CHECK_SCRIPT=${UPDATE_CHECK_SCRIPT:-$DIR/stats_update.sh}
 # и update.sh, и uninstall.sh (читает его же для полного сноса).
 UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-$DIR/.update}
 INSTALLED_MANIFEST_PATH=${INSTALLED_MANIFEST_PATH:-$UPDATE_STATE_DIR/installed-manifest.txt}
+
+# >>> ui-bootstrap
+# Встроенная копия функций UI из installer/ui.sh. Под "curl ... | sh"
+# install.sh один на диске: до скачивания релиза (bootstrap ниже) ui.sh
+# рядом ещё нет, а баннер, шаги и прогресс загрузки нужны уже тогда. Поэтому
+# здесь лежит ДОСЛОВНАЯ копия ровно тех функций, которые вызывает путь
+# бутстрапа (вместе с их помощниками); после загрузки релиза (и в обычном
+# пути) настоящий ui.sh подключается ниже и перекрывает копию тем же кодом.
+# Лёгкие действия (--stop-web и т.п.) на старой установке без ui.sh тоже
+# обходятся этой копией. Не править функции вручную: tests/test_ui_bootstrap_sync.sh
+# сравнивает каждую с installer/ui.sh и падает при расхождении.
+#
+# Значения по умолчанию ниже - не часть библиотеки: install.sh можно
+# подключить как библиотеку (INSTALL_LIB_ONLY=1) без ui_init, и функции с
+# `set -u` не должны падать на неустановленных переменных. До ui_init - plain.
+UI_LOG=${UI_LOG:-/opt/var/log/mihomo-speedtest-install.log}
+UI_LOG_MAX=262144
+UI_MODE=${UI_MODE:-plain}
+UI_COLS=${UI_COLS:-80}
+: "${UI_C_ACC=}" "${UI_C_OK=}" "${UI_C_ERR=}" "${UI_C_WARN=}" "${UI_C_DIM=}" "${UI_C_B=}" "${UI_C_0=}"
+UI_G_OK=${UI_G_OK:-[OK]}; UI_G_ERR=${UI_G_ERR:-[!!]}; UI_G_WARN=${UI_G_WARN:-[!]}
+# Блоки (ui_note) и спиннер (ui_run) нужны и функциям, которые тесты зовут
+# в режиме библиотеки без ui_init: ensure_python3, resolve_block и т.п.
+UI_G_BAR=${UI_G_BAR:-|}; UI_SLEEP=${UI_SLEEP:-sleep 1}
+
+ui__len() {
+  printf '%s' "$1" | LC_ALL=C tr -d '\200-\277' | wc -c | tr -d ' '
+}
+
+ui__rep() {
+  _n=$1; _r=
+  while [ "$_n" -gt 0 ]; do _r="$_r$2"; _n=$((_n - 1)); done
+  printf '%s' "$_r"
+}
+
+ui_init() {
+  # Режим. Повторный вызов безопасен: всё вычисляется заново, а
+  # разделитель в лог пишется один раз на значение UI_LOG.
+  UI_MODE=plain
+  if [ -t 2 ] && [ "${TERM:-}" != dumb ] && [ -n "${TERM:-}" ] \
+     && [ -z "${NO_COLOR:-}" ] && [ "${UI:-}" != plain ]; then
+    UI_MODE=live
+  fi
+
+  UI_COLS=$(stty size 2>/dev/null </dev/tty | awk '{print $2}')
+  case $UI_COLS in ''|*[!0-9]*) UI_COLS=80 ;; esac
+  [ "$UI_COLS" -gt 0 ] || UI_COLS=80
+
+  if [ "$UI_MODE" = live ]; then
+    UI_C_ACC=$(printf '\033[36m'); UI_C_OK=$(printf '\033[32m')
+    UI_C_ERR=$(printf '\033[31m'); UI_C_WARN=$(printf '\033[33m')
+    UI_C_DIM=$(printf '\033[2m');  UI_C_B=$(printf '\033[1m')
+    UI_C_0=$(printf '\033[0m')
+    UI_G_OK=✓; UI_G_ERR=✗; UI_G_WARN='!'; UI_G_BAR='┃'
+  else
+    UI_C_ACC=; UI_C_OK=; UI_C_ERR=; UI_C_WARN=; UI_C_DIM=; UI_C_B=; UI_C_0=
+    UI_G_OK='[OK]'; UI_G_ERR='[!!]'; UI_G_WARN='[!]'; UI_G_BAR='|'
+  fi
+
+  # Короткий sleep для спиннера (Task 2): дробный sleep есть не везде.
+  if sleep 0.1 2>/dev/null; then UI_SLEEP='sleep 0.1'
+  elif command -v usleep >/dev/null 2>&1; then UI_SLEEP='usleep 100000'
+  else UI_SLEEP='sleep 1'
+  fi
+
+  ui__log_prepare
+  # Выход: вернуть курсор, убить спиннер, выполнить хуки. Ставим и в plain
+  # (хуки нужны всегда). Поэтому в тестах ui_init - только в подшеллах.
+  trap ui__exit EXIT
+  # Коды выхода по сигналу - как без ui_init: INT 130 (128+2), TERM 143
+  # (128+15). Общая ловушка на оба превращала TERM в 130.
+  trap 'ui__exit; exit 130' INT
+  trap 'ui__exit; exit 143' TERM
+  return 0
+}
+
+ui__log_prepare() {
+  [ "${UI__LOG_READY:-}" = "$UI_LOG" ] && return 0
+  if [ "$UI_LOG" != /dev/null ]; then
+    mkdir -p "$(dirname "$UI_LOG")" 2>/dev/null || :
+    if [ -f "$UI_LOG" ] && [ "$(wc -c < "$UI_LOG" 2>/dev/null || echo 0)" -gt "$UI_LOG_MAX" ]; then
+      # 2>/dev/null ставим ДО файловых редиректов: они применяются слева
+      # направо, иначе ошибка открытия файла утечёт в настоящий stderr.
+      tail -300 "$UI_LOG" 2>/dev/null > "$UI_LOG.tmp" \
+        && cat "$UI_LOG.tmp" 2>/dev/null > "$UI_LOG" || :
+      rm -f "$UI_LOG.tmp" 2>/dev/null || :
+    fi
+    if ! printf '===== %s %s =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$0" 2>/dev/null >> "$UI_LOG"; then
+      UI_LOG=/dev/null
+    fi
+  fi
+  UI__LOG_READY=$UI_LOG
+}
+
+ui_log() {
+  printf '%s %s\n' "$(date +%H:%M:%S)" "$*" 2>/dev/null >> "${UI_LOG:-/dev/null}" || :
+  return 0
+}
+
+ui_banner() {
+  if [ "${UI_CONTINUE:-}" = 1 ]; then
+    # Продолжение установки из другого скрипта: рамку уже показали.
+    if [ "$UI_MODE" = live ]; then
+      printf '\n %s%s%s\n' "$UI_C_B" "$2" "$UI_C_0" >&2
+    else
+      printf '== %s ==\n' "$2" >&2
+    fi
+    return 0
+  fi
+  if [ "$UI_MODE" != live ]; then
+    printf '== %s — %s ==\n' "$1" "$2" >&2
+    return 0
+  fi
+  _t=$(ui__len "$1"); _s=$(ui__len "$2")
+  _w=$_t; [ "$_s" -gt "$_w" ] && _w=$_s
+  _w=$((_w + 4)); [ "$_w" -ge 38 ] || _w=38   # внутренняя ширина рамки
+  _l=$(ui__rep "$_w" ─)
+  printf '\n %s╭%s╮%s\n' "$UI_C_ACC" "$_l" "$UI_C_0" >&2
+  printf ' %s│%s  %s%s%s%s%s│%s\n' "$UI_C_ACC" "$UI_C_0" "$UI_C_B" "$1" "$UI_C_0" \
+    "$(ui__rep $((_w - _t - 2)) ' ')" "$UI_C_ACC" "$UI_C_0" >&2
+  printf ' %s│%s  %s%s%s%s%s│%s\n' "$UI_C_ACC" "$UI_C_0" "$UI_C_DIM" "$2" "$UI_C_0" \
+    "$(ui__rep $((_w - _s - 2)) ' ')" "$UI_C_ACC" "$UI_C_0" >&2
+  printf ' %s╰%s╯%s\n' "$UI_C_ACC" "$_l" "$UI_C_0" >&2
+}
+
+ui_kv() {
+  # Ключ с двоеточием, выровненный до 13 символов.
+  _k="$1:"
+  _p=$((13 - $(ui__len "$_k"))); [ "$_p" -ge 0 ] || _p=0
+  printf '  %s%s%s%s  %s\n' "$UI_C_DIM" "$_k" "$UI_C_0" "$(ui__rep "$_p" ' ')" "$2" >&2
+}
+
+ui_step() {
+  UI_STEP_CUR=$(printf '%02d' "$1"); UI_STEP_TOTAL=$(printf '%02d' "$2")
+  printf ' %s%s/%s%s  %s%s%s\n' \
+    "$UI_C_ACC" "$UI_STEP_CUR" "$UI_STEP_TOTAL" "$UI_C_0" "$UI_C_B" "$3" "$UI_C_0" >&2
+}
+
+ui__sub() {
+  _sec=
+  [ -n "${4:-}" ] && _sec=" $UI_C_DIM$4 с$UI_C_0"
+  printf '    %s%s%s %s%s\n' "$1" "$2" "$UI_C_0" "$3" "$_sec" >&2
+}
+
+ui_ok()   { ui__sub "$UI_C_OK"   "$UI_G_OK"   "$@"; }
+
+ui_fail() { ui__sub "$UI_C_ERR"  "$UI_G_ERR"  "$@"; }
+
+ui_warn() { ui__sub "$UI_C_WARN" "$UI_G_WARN" "$@"; }
+
+ui__cut() {
+  printf '%s' "$1" | awk -v n="$2" '{ print substr($0, 1, n) }'
+}
+
+ui__frame() {
+  _i=$(($1 % 10))
+  set -- ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+  shift "$_i"
+  UI_FR=$1
+}
+
+ui_progress() {
+  _pc=$2; _pt=$3
+  if [ "$UI_MODE" = live ]; then
+    # Ширина строки: кадр+пробел (2), два пробела, "ТЕК/ВСЕГО", пробел,
+    # полоса ▕..▏ (12), пробел - 18 символов плюс счётчик, плюс 1 колонка
+    # запаса (печать в последнюю колонку на части терминалов переносит
+    # строку). Заголовок режем до COLS-26, подписи - что осталось; не
+    # осталось места - подпись не печатаем вовсе (иначе строка переполнит
+    # узкий терминал и \r перестанет перерисовывать её на месте).
+    _ptl=$(ui__cut "$1" $((UI_COLS - 26)))
+    _pb=$((UI_COLS - 19 - $(ui__len "$_ptl") - $(ui__len "$_pc/$_pt")))
+    _pn=
+    [ "$_pb" -gt 0 ] && _pn=$(ui__cut "${4:-}" "$_pb")
+    _pf=0; [ "$_pt" -gt 0 ] && _pf=$((_pc * 10 / _pt))
+    [ "$_pf" -le 10 ] || _pf=10
+    ui__frame "$_pc"
+    printf '\r%s%s%s %s  %s/%s %s▕%s%s▏%s %s\033[K' "$UI_C_ACC" "$UI_FR" "$UI_C_0" \
+      "$_ptl" "$_pc" "$_pt" \
+      "$UI_C_ACC" "$(ui__rep "$_pf" █)" "$(ui__rep $((10 - _pf)) ░)" "$UI_C_0" "$_pn" >&2
+    return 0
+  fi
+  if [ "$_pc" -eq 1 ] || [ "$_pc" -eq "$_pt" ] || [ $((_pc % 10)) -eq 0 ]; then
+    printf '[..] %s %s/%s%s\n' "$1" "$_pc" "$_pt" "${4:+ $4}" >&2
+  fi
+  return 0
+}
+
+ui_progress_end() {
+  [ "$UI_MODE" = live ] && printf '\n' >&2
+  return 0
+}
+
+ui_on_exit() {
+  UI_EXIT_HOOKS=${UI_EXIT_HOOKS:+$UI_EXIT_HOOKS
+}$1
+}
+
+ui__exit() {
+  [ "${UI__EXITED:-}" = 1 ] && return 0
+  UI__EXITED=1
+  # Спиннер крутится вокруг фонового процесса - не оставляем сироту.
+  if [ -n "${UI_SPIN_PID:-}" ]; then
+    kill "$UI_SPIN_PID" 2>/dev/null || :
+    UI_SPIN_PID=
+  fi
+  # Курсор скрыт спиннером; вернуть и сбросить цвет можно только в live,
+  # в plain ни одного байта ESC.
+  [ "${UI_MODE:-}" = live ] && printf '\033[?25h\033[0m' >&2
+  if [ -n "${UI_EXIT_HOOKS:-}" ]; then eval "$UI_EXIT_HOOKS" || :; fi
+  return 0
+}
+# <<< ui-bootstrap
 
 # --- Bootstrap для однострочной установки ---------------------------------
 # Позволяет ставить проект командой
@@ -148,10 +361,27 @@ bootstrap_fetch_retry() {
     bootstrap_fetch_once "$1" "$2" "$3" || bfr_rc=$?
     [ "$bfr_rc" -ne 0 ] || return 0
     bootstrap_retryable "$bfr_rc" && [ "$bfr_try" -lt "$bfr_max" ] || return "$bfr_rc"
-    echo "Сбой загрузки ($(bootstrap_curl_reason "$bfr_rc")), повтор $((bfr_try + 1)) из $bfr_max..." >&2
+    # Причину пишем только в журнал, на экране - лишь подпись у полосы
+    # прогресса ("повтор 2/3"): иначе повтор ломал бы строку прогресса.
+    ui_log "Сбой загрузки ($(bootstrap_curl_reason "$bfr_rc")), повтор $((bfr_try + 1)) из $bfr_max..."
+    [ -z "${BOOTSTRAP_PROG_TOTAL:-}" ] || ui_progress "$BOOTSTRAP_PROG_TITLE" "$BOOTSTRAP_PROG_IDX" "$BOOTSTRAP_PROG_TOTAL" "повтор $((bfr_try + 1))/$bfr_max"
     sleep $(( ${INSTALL_RETRY_DELAY:-2} * bfr_try ))
     bfr_try=$((bfr_try + 1))
   done
+}
+
+# Строка прогресса загрузки: параметры храним в переменных, чтобы
+# bootstrap_fetch_retry мог перерисовать её с подписью "повтор N/M".
+bootstrap_prog() {
+  BOOTSTRAP_PROG_TITLE=$1; BOOTSTRAP_PROG_IDX=$2; BOOTSTRAP_PROG_TOTAL=$3
+  ui_progress "$1" "$2" "$3" "${4:-}"
+}
+
+# Закончить строку прогресса перед любым другим сообщением (в live она
+# перерисовывается через \r и без перевода строки склеится с ним).
+bootstrap_prog_close() {
+  [ -z "${BOOTSTRAP_PROG_TOTAL:-}" ] || ui_progress_end
+  BOOTSTRAP_PROG_TOTAL=
 }
 
 bootstrap_download_to() {
@@ -160,7 +390,10 @@ bootstrap_download_to() {
   if [ "$bdt_rc" -ne 0 ] && [ -z "${BOOTSTRAP_PROXY:-}" ]; then
     # Напрямую не вышло - один раз пробуем через mihomo, дальше все
     # файлы качаются через тот же прокси.
-    echo "Не удалось скачать $1 напрямую: $(bootstrap_curl_reason "$bdt_rc")" >&2
+    ui_log "Не удалось скачать $1 напрямую: $(bootstrap_curl_reason "$bdt_rc")"
+    # Сообщения bootstrap_enable_proxy идут обычным echo - сначала
+    # заканчиваем строку прогресса, чтобы они не склеились с ней.
+    bootstrap_prog_close
     if bootstrap_enable_proxy; then
       bdt_rc=0
       bootstrap_fetch_retry "$1" "$2" "$3" || bdt_rc=$?
@@ -170,17 +403,20 @@ bootstrap_download_to() {
     fi
   fi
   if [ "$bdt_rc" -ne 0 ]; then
+    bootstrap_prog_close
     if [ -n "${BOOTSTRAP_PROXY:-}" ]; then
-      echo "Не удалось скачать $1 через прокси $BOOTSTRAP_PROXY: $(bootstrap_curl_reason "$bdt_rc")" >&2
+      ui_log "Не удалось скачать $1 через прокси $BOOTSTRAP_PROXY: $(bootstrap_curl_reason "$bdt_rc")"
     else
-      echo "Не удалось скачать $1: $(bootstrap_curl_reason "$bdt_rc")" >&2
+      ui_log "Не удалось скачать $1: $(bootstrap_curl_reason "$bdt_rc")"
     fi
+    ui_fail "${1##*/}: $(bootstrap_curl_reason "$bdt_rc")"
     BOOTSTRAP_FAIL_HINT=1
     return 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
   [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || {
-    echo "Пустой файл или превышен лимит загрузки: $1" >&2
+    bootstrap_prog_close
+    ui_fail "Пустой файл или превышен лимит загрузки: $1"
     return 1
   }
 }
@@ -278,14 +514,15 @@ EOF
 }
 
 bootstrap_check_download() {
-  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { echo "Неверный размер файла релиза: $1" >&2; return 1; }
-  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { echo "Неверная сумма SHA256 файла релиза: $1" >&2; return 1; }
+  [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || { bootstrap_prog_close; ui_fail "Неверный размер файла релиза: $1"; return 1; }
+  [ "$(bootstrap_sha256_of "$1")" = "$3" ] || { bootstrap_prog_close; ui_fail "Неверная сумма SHA256 файла релиза: $1"; return 1; }
 }
 
 bootstrap_awk_syntax() {
   printf 'BEGIN { exit 0 }\nEND { exit 0 }\n' > "$BOOTSTRAP_WORK/awk-guard"
   awk -f "$BOOTSTRAP_WORK/awk-guard" -f "$1" /dev/null >/dev/null 2>&1 || {
-    echo "Файл не прошёл проверку синтаксиса AWK: $1" >&2
+    bootstrap_prog_close
+    ui_fail "Файл не прошёл проверку синтаксиса AWK: $1"
     return 1
   }
 }
@@ -339,34 +576,38 @@ bootstrap_selfinstall() {
   BOOTSTRAP_WORK=$(mktemp -d "$bootstrap_tmproot/mst-install-bootstrap.XXXXXX") || return 1
   BOOTSTRAP_MANIFEST=$BOOTSTRAP_WORK/manifest.txt
 
+  ui_step 1 6 "Загрузка релиза"
   echo "Рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
 
   bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
-  echo "Релиз для установки: $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)" >&2
+  ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)"
 
   mkdir -p "$DIR" || { echo "Не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
   # Проход 1: скачать и проверить всё во временном каталоге. Ничего не
   # пишем в DIR, пока не убедимся, что весь набор цел - иначе отказ на
   # середине списка оставил бы в DIR наполовину установленный проект.
-  # Счётчик N/TOTAL печатается перед каждым файлом - иначе на медленной
+  # Полоса прогресса N/TOTAL перед каждым файлом - иначе на медленной
   # сети скачивание полного набора (см. release/components.txt) выглядит
-  # как зависший скрипт: единственная строка "скачиваю релиз..." выше не
-  # даёт никакой обратной связи до самого конца.
+  # как зависший скрипт. Одна перерисовываемая строка, а не по строке на
+  # файл: так экран не зарастает десятками "Скачиваю файл...".
   bootstrap_total=$(wc -l < "$BOOTSTRAP_WORK/files" | tr -d ' ')
   bootstrap_idx=0
+  bootstrap_t0=$(date +%s)
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
     bootstrap_idx=$((bootstrap_idx + 1))
-    echo "Скачиваю файл $bootstrap_idx/$bootstrap_total: $src" >&2
+    bootstrap_prog "Файлы релиза" "$bootstrap_idx" "$bootstrap_total" "$src"
     bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     case $check in
-      sh) sh -n "$BOOTSTRAP_WORK/$src" || { echo "Неверный синтаксис sh: $src" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
+      sh) sh -n "$BOOTSTRAP_WORK/$src" || { bootstrap_prog_close; ui_fail "Неверный синтаксис sh: $src"; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
       awk) bootstrap_awk_syntax "$BOOTSTRAP_WORK/$src" || { rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
     esac
   done < "$BOOTSTRAP_WORK/files"
+  bootstrap_prog_close
+  ui_ok "Файлы релиза ($bootstrap_total) проверены" $(($(date +%s) - bootstrap_t0))
 
   # Проход 2: весь набор проверен - переносим в DIR.
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
@@ -394,7 +635,7 @@ bootstrap_selfinstall() {
   fi
 
   rm -rf "$BOOTSTRAP_WORK"
-  echo "Файлы проекта загружены и проверены (тег $bootstrap_tag)" >&2
+  ui_ok "Файлы проекта загружены и проверены (тег $bootstrap_tag)"
   SELFDIR=$DIR
 }
 
@@ -424,11 +665,22 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && 
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
   UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
   [ -z "${INSTALL_PROXY:-}" ] || bootstrap_enable_proxy
-  # Прерывание (Ctrl+C) не должно оставить открытым временный mixed-port.
-  trap 'bootstrap_disable_proxy; exit 130' INT TERM
+  # Баннер - один раз за процесс (флаг UI_BANNER_SHOWN, его же проверяет
+  # main()). UI_STEPS_BOOT=1: бутстрап занял шаг 1 из 6, дальнейшие шаги
+  # main() нумерует с учётом этого (без бутстрапа шагов 5).
+  ui_init
+  ui_banner "MIHOMO-SPEEDTEST" "быстрый пул · статистика нод"
+  UI_BANNER_SHOWN=1
+  UI_STEPS_BOOT=1
+  # Прерывание (Ctrl+C) не должно оставить открытым временный mixed-port:
+  # хук выполнится на выходе (EXIT/INT/TERM); он идемпотентен.
+  ui_on_exit bootstrap_disable_proxy
+  # Прежний тег - до того, как бутстрап перезапишет installed-manifest.txt
+  # (для строки «Режим: Переустановка (было → станет)» в main()).
+  MST_PREV_TAG=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG 2>/dev/null) || MST_PREV_TAG=
   bootstrap_rc=0
   bootstrap_selfinstall || bootstrap_rc=$?
-  trap - INT TERM
+  bootstrap_prog_close
   bootstrap_disable_proxy
   BOOTSTRAP_PROXY=
   [ "$bootstrap_rc" -eq 0 ] || {
@@ -439,6 +691,11 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && 
 fi
 
 . "$SELFDIR/version_check.sh"
+# Настоящая библиотека перекрывает встроенную копию. Файла может не быть:
+# лёгкие действия (--stop-web и т.п.) идут мимо бутстрапа и на старой
+# установке без ui.sh обходятся встроенной копией; под set -e голый
+# `[ -f ] && .` при отсутствии файла прервал бы скрипт, поэтому if.
+if [ -f "$SELFDIR/ui.sh" ]; then . "$SELFDIR/ui.sh"; fi
 
 # Минимальный гео-фильтр, если в конфиге его нет: только российские ноды
 # (подстроки без учёта регистра, см. prep.awk).
@@ -462,6 +719,7 @@ warn_regex_block() {
     for (i = 1; i <= NF; i++) if ($i ~ /[][\\^$*+?(){}]/) printf "  %s\n", $i
   }')
   [ -n "$bad" ] || return 0
+  # Жёлтым блоком: установку не останавливает, но пропустить глазами не должно.
   {
     echo "ВНИМАНИЕ: гео-фильтр спидтеста (BLOCK) - не регулярное выражение, а список"
     echo "слов через |: нода пропускается, если её имя содержит любое из них."
@@ -470,14 +728,14 @@ warn_regex_block() {
     printf '%s\n' "$bad"
     echo "Поправьте фильтр в веб-интерфейсе (Настройки -> «Какие ноды не проверять»)"
     echo "или переустановите с BLOCK='слово1|слово2' sh install.sh."
-  } >&2
+  } | ui_note warn
 }
 
 resolve_block() {
   resolve_block_raw || return 1
   BLOCK=$(normalize_block "$BLOCK")
   if [ -z "$BLOCK" ]; then
-    echo "Пустой фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+    ui_fail "Пустой фильтр недопустим. Повторите с BLOCK='...' sh install.sh"
     return 1
   fi
   warn_regex_block "$BLOCK"
@@ -499,14 +757,17 @@ resolve_block_raw() {
   fi
 
   if [ "$count" -gt 1 ]; then
-    echo "Найдено несколько разных гео-фильтров:" >&2
+    # Пункты меню - позиционные параметры (у функции своих аргументов нет);
+    # варианта по умолчанию нет (0): Enter даёт пустой фильтр и отказ.
+    set --
     i=1
     while [ "$i" -le "$count" ]; do
       eval "val=\$BLOCK_$i"
-      echo "  $i) $val" >&2
+      set -- "$@" "$val"
       i=$((i + 1))
     done
-    printf 'Введите номер варианта или свой фильтр: ' >&2
+    ui_menu "Найдено несколько разных гео-фильтров:" 0 "$@"
+    ui_ask "Введите номер варианта или свой фильтр"
     read -r choice || choice=""
     case $choice in
       ''|*[!0-9]*)
@@ -518,13 +779,13 @@ resolve_block_raw() {
           eval "BLOCK=\$BLOCK_$choice"
           BLOCK_SOURCE="из конфига (вариант $choice)"
         else
-          echo "Номер вне диапазона" >&2
+          ui_fail "Номер вне диапазона"
           BLOCK=""
         fi
         ;;
     esac
     if [ -z "$BLOCK" ]; then
-      echo "Пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh" >&2
+      ui_fail "Пустой или неверный фильтр недопустим. Повторите с BLOCK='...' sh install.sh"
       return 1
     fi
     return 0
@@ -536,13 +797,15 @@ resolve_block_raw() {
   # пишет в новый конфиг) или свой. Enter и отсутствие ответа (нет
   # терминала) - минимальный: он всегда есть и решает главную задачу.
   default=$(default_block)
-  echo "Гео-фильтр (exclude-filter) не найден в конфиге." >&2
-  echo "Без него спидтест может выбрать российскую ноду, выигравшую замер по пингу." >&2
-  echo "  1) минимальный - только российские ноды: $MIN_BLOCK" >&2
+  # Заголовок меню - две строки (перевод строки внутри), пункт 2 - только
+  # если в config.example.yaml нашёлся якорь &geofilter.
+  set -- "минимальный - только российские ноды: $MIN_BLOCK"
   if [ -n "$default" ]; then
-    echo "  2) стандартный из config.example.yaml - Россия, ряд дальних стран, служебные группы" >&2
+    set -- "$@" "стандартный из config.example.yaml - Россия, ряд дальних стран, служебные группы"
   fi
-  printf 'Введите номер, свой фильтр (слова через |) или Enter для 1: ' >&2
+  ui_menu "Гео-фильтр (exclude-filter) не найден в конфиге.
+Без него спидтест может выбрать российскую ноду, выигравшую замер по пингу." 1 "$@"
+  ui_ask "Введите номер, свой фильтр (слова через |) или Enter для 1"
   read -r input || { input=""; echo >&2; }
   case $input in
     ''|1)
@@ -652,17 +915,18 @@ ensure_mihomo_speedtest_symlink() {
     [ -d "$bindir" ] && [ -w "$bindir" ] || continue
     link=$bindir/mihomo-speedtest
     if [ -e "$link" ] && [ ! -L "$link" ]; then
-      echo "WARN - $link уже существует и не является символической ссылкой - не трогаю, пробую следующий каталог" >&2
+      ui_warn "$link уже существует и не является символической ссылкой - не трогаю, пробую следующий каталог"
       continue
     fi
     current=$(readlink "$link" 2>/dev/null) || current=""
-    [ "$current" = "$target" ] && return 0
-    if ln -sf "$target" "$link" 2>/dev/null; then
-      echo "Команда доступна как: mihomo-speedtest (симлинк в $bindir)" >&2
+    # Ссылка уже на месте (переустановка) - тоже галочка: строка шага
+    # «Установка файлов и служб» перечисляет всё, что проверено.
+    if [ "$current" = "$target" ] || ln -sf "$target" "$link" 2>/dev/null; then
+      ui_ok "Команда доступна как: mihomo-speedtest (симлинк в $bindir)"
       return 0
     fi
   done
-  echo "WARN - не удалось создать символическую ссылку mihomo-speedtest в /opt/sbin или /opt/bin - используйте полный путь: sh $target" >&2
+  ui_warn "не удалось создать символическую ссылку mihomo-speedtest в /opt/sbin или /opt/bin - используйте полный путь: sh $target"
   return 0
 }
 
@@ -726,7 +990,8 @@ install_files() {
   mkdir -p "$INITD_DIR" 2>/dev/null || true
   atomic_install "$SELFDIR/stats_init.sh" "$INITD_SCRIPT" || return 1
   chmod +x "$INITD_SCRIPT"
-  ensure_mihomo_speedtest_symlink "$DIR/mihomo-speedtest.sh"
+  # Символическая ссылка mihomo-speedtest ставится отдельным подшагом в
+  # main() (ensure_mihomo_speedtest_symlink) - после галочки файлов.
 }
 
 format_mbit() {
@@ -869,6 +1134,18 @@ measure_channel() {
   esac
 }
 
+# Замер канала со спиннером: measure_channel печатает число в stdout,
+# поэтому запускаем её в фоне в файл и крутим спиннер (замер идёт до
+# 15 с). Результат - CHANNEL, время - UI_SEC. ui__spin, а не
+# ui_spin_until: та печатает свою галочку, а итог рисует вызывающий код.
+measure_channel_spin() {
+  mc_out=$TMPROOT/mst-install-channel.$$
+  measure_channel >"$mc_out" 2>/dev/null &
+  ui__spin "Замер канала" $!
+  CHANNEL=$(cat "$mc_out" 2>/dev/null) || CHANNEL=
+  rm -f "$mc_out" 2>/dev/null || :
+}
+
 have_python3() {
   command -v python3 >/dev/null 2>&1
 }
@@ -884,22 +1161,25 @@ ensure_python3() {
   have_python3 && return 0
 
   if ! have_opkg; then
-    echo "python3 не найден, а opkg недоступен - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    ui_warn "python3 не найден, а opkg недоступен - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart"
     return 1
   fi
 
-  echo "python3 не найден, пробую поставить через opkg install python3..." >&2
-  if ! opkg install python3 >/dev/null 2>&1; then
-    echo "opkg install python3 не удался с первого раза, обновляю список пакетов (opkg update) и пробую ещё раз..." >&2
-    opkg update >/dev/null 2>&1 || true
-    opkg install python3 >/dev/null 2>&1 || true
+  # Вывод opkg (десятки строк загрузки пакетов) - в журнал установки через
+  # ui_run, на экране - спиннер и итог. Итог решает have_python3, а не код
+  # opkg: тот бывает нулевым и без установленного пакета.
+  ui_log "python3 не найден, пробую поставить через opkg install python3..."
+  if ! ui_run "Python 3 (opkg install python3)" opkg install python3; then
+    ui_warn "opkg install python3 не удался с первого раза, обновляю список пакетов (opkg update) и пробую ещё раз..."
+    ui_run "Список пакетов (opkg update)" opkg update || true
+    ui_run "Python 3 (opkg install python3, повтор)" opkg install python3 || true
   fi
 
   if have_python3; then
-    echo "python3 успешно установлен через opkg" >&2
+    ui_ok "python3 успешно установлен через opkg"
     return 0
   else
-    echo "Не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart" >&2
+    ui_warn "Не удалось автоматически поставить python3 через opkg - веб-интерфейс не будет запущен. Поставьте python3 вручную, выполните sh $DIR/stats_auth.sh initialize и затем $INITD_SCRIPT restart"
     return 1
   fi
 }
@@ -909,10 +1189,14 @@ initialize_web_auth() {
     --state-dir "$DIR/.stats-auth" \
     --runtime-dir "${STATS_AUTH_RUNTIME_DIR:-/tmp/mihomo-speedtest-auth}") || return 1
   if [ -n "$code" ]; then
-    echo "Одноразовый код первичной настройки: $code" >&2
+    # Код нужен человеку прямо сейчас - отдельным блоком, чтобы не
+    # затерялся среди галочек.
     host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
     [ -n "$host" ] || host="<адрес роутера>"
-    echo "Откройте http://$host:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль" >&2
+    {
+      echo "Одноразовый код первичной настройки: $code"
+      echo "Откройте http://$host:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль"
+    } | ui_note info
   fi
 }
 
@@ -1013,22 +1297,24 @@ set_env_flag() {
   [ -f "$envfile" ] || { echo "$envfile не найден, сначала обычная установка" >&2; return 1; }
   tmp="$envfile.$$"
   { grep -v "^$name=" "$envfile"; printf "%s=%s\n" "$name" "$val"; } > "$tmp" \
-    && mv "$tmp" "$envfile" || { rm -f "$tmp"; echo "Не удалось записать $envfile" >&2; return 1; }
+    && mv "$tmp" "$envfile" || { rm -f "$tmp"; ui_fail "Не удалось записать $envfile"; return 1; }
 }
 
 stop_web_main() {
   set_env_flag STATS_HTTP_ENABLE 0 || return 1
   [ -x "$INITD_SCRIPT" ] && "$INITD_SCRIPT" stop >/dev/null 2>&1
-  echo "Веб-сервис статистики остановлен и отключён - при переустановке/обновлении проекта он не будет запускаться автоматически (mihomo-speedtest start-web - включить обратно)" >&2
+  ui_ok "Веб-сервис статистики остановлен и отключён - при переустановке/обновлении проекта он не будет запускаться автоматически (mihomo-speedtest start-web - включить обратно)"
   return 0
 }
 
 start_web_main() {
   set_env_flag STATS_HTTP_ENABLE 1 || return 1
   if [ -x "$INITD_SCRIPT" ] && "$INITD_SCRIPT" restart >/dev/null 2>&1; then
+    # Адрес - строка print_web_url (та же, что у --show-url, без оформления).
+    ui_ok "Веб-сервис статистики запущен"
     print_web_url
   else
-    echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
+    ui_fail "$INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную"
   fi
 }
 
@@ -1058,8 +1344,8 @@ has_fast_group() {
 }
 
 own_config_notice() {
+  # Жёлтый блок; пустые строки по краям не нужны - блок и так отделён чертой.
   {
-    echo
     echo "ВНИМАНИЕ: остаётся ваш конфиг - быстрый пул НЕ применяется."
     echo "  Спидтест будет замерять ноды и вести статистику, но лучшие ноды"
     echo "  (fast.yaml) не попадут в маршрутизацию, пока в конфиге нет провайдера fast."
@@ -1071,8 +1357,7 @@ own_config_notice() {
     echo "    и группу с use: [fast] (например, type: url-test), на которую ссылаются ваши правила."
     echo "  Или мигрируйте позже: веб-интерфейс, раздел «Починка» -> «Миграция к шаблону»,"
     echo "  либо переустановка с CONFIG_MODE=template."
-    echo
-  } >&2
+  } | ui_note warn
 }
 
 # Конфиг без быстрого пула: мигрировать к шаблону или остаться на своём.
@@ -1084,23 +1369,25 @@ choose_config_mode() {
   case "${CONFIG_MODE:-}" in
     template|own) CONFIG_MODE_CHOSEN=$CONFIG_MODE; return 0 ;;
     '') ;;
-    *) echo "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template или own) - оставляю свой конфиг" >&2; return 0 ;;
+    *) ui_warn "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template или own) - оставляю свой конфиг"; return 0 ;;
   esac
-  {
-    echo "В конфиге нет быстрого пула (провайдер fast и группы шаблона проекта)."
-    echo "  1) мигрировать конфиг к шаблону проекта: подписки, свои ноды, DNS, свои входы"
-    echo "     и локальные настройки (порты, external-controller, sniffer и т.п.) сохранятся;"
-    echo "     группы, rule-providers и правила будут из шаблона (ваши останутся только в бэкапе)"
-    echo "  2) оставить свой конфиг - только статистика, быстрый пул настраиваете сами"
-  } >&2
-  printf 'Введите номер или Enter для 2: ' >&2
+  # Пояснения к пункту 1 - продолжение того же пункта (перевод строки
+  # внутри): ui_menu печатает пункт как есть, ui_note ставит черту на
+  # каждую строку, так что они остаются в блоке меню.
+  ui_menu "В конфиге нет быстрого пула (провайдер fast и группы шаблона проекта)" 2 \
+    "мигрировать конфиг к шаблону проекта: подписки, свои ноды, DNS, свои входы
+    и локальные настройки (порты, external-controller, sniffer и т.п.) сохранятся;
+    группы, rule-providers и правила будут из шаблона (ваши останутся только в бэкапе)" \
+    "оставить свой конфиг - только статистика, быстрый пул настраиваете сами"
+  ui_ask "Введите номер или Enter для 2"
   read -r cm_input || { cm_input=""; echo >&2; }
   case $cm_input in
     1) CONFIG_MODE_CHOSEN=template ;;
   esac
 }
 
-# Сводка отчёта migrate_config.sh: только имена, без значений.
+# Сводка отчёта migrate_config.sh: только имена, без значений. Блоком
+# (ui_note info): строки идут без своего отступа, черта блока его заменяет.
 print_migration_report() {
   awk -F'|' '
     function add(k, v) { list[k] = list[k] sep[k] v; sep[k] = ", " }
@@ -1112,14 +1399,14 @@ print_migration_report() {
     $1 == "REVIEW" && $2 == "file-provider-replaced" { add("files", $3) }
     END {
       print "Миграция подготовлена:"
-      if (list["subs"] != "") print "  сохранятся подписки: " list["subs"]
-      if (list["sections"] != "") print "  сохранятся секции: " list["sections"]
-      if (list["keys"] != "") print "  сохранятся настройки: " list["keys"]
-      if (list["replaced"] != "") print "  будут заменены шаблоном: " list["replaced"]
-      if (list["dropped"] != "") print "  НЕ перенесутся (шаблон их не знает): " list["dropped"]
-      if (list["files"] != "") print "  НЕ перенесутся file-провайдеры: " list["files"]
+      if (list["subs"] != "") print "сохранятся подписки: " list["subs"]
+      if (list["sections"] != "") print "сохранятся секции: " list["sections"]
+      if (list["keys"] != "") print "сохранятся настройки: " list["keys"]
+      if (list["replaced"] != "") print "будут заменены шаблоном: " list["replaced"]
+      if (list["dropped"] != "") print "НЕ перенесутся (шаблон их не знает): " list["dropped"]
+      if (list["files"] != "") print "НЕ перенесутся file-провайдеры: " list["files"]
     }
-  ' "$1" >&2
+  ' "$1" | ui_note info
 }
 
 # xkeen -restart и ожидание API ядра (как в setup.sh). Вывод xkeen - в
@@ -1164,52 +1451,52 @@ replace_config_file() {
 # возвращён из бэкапа и ядро поднялось); 2 - ядро не поднялось даже на
 # прежнем конфиге, продолжать установку нельзя.
 migrate_to_template() {
-  mt_work=$(mktemp -d "$TMPROOT/mst-install-migrate.XXXXXX") || { echo "Не удалось создать временный каталог" >&2; return 1; }
-  mt_target=$(config_target) || { echo "Не удалось определить файл конфига" >&2; rm -rf "$mt_work"; return 1; }
+  mt_work=$(mktemp -d "$TMPROOT/mst-install-migrate.XXXXXX") || { ui_fail "Не удалось создать временный каталог"; return 1; }
+  mt_target=$(config_target) || { ui_fail "Не удалось определить файл конфига"; rm -rf "$mt_work"; return 1; }
   # migrate_config.sh не читает символические ссылки - даём ему копию.
   if ! cp "$CONFIG" "$mt_work/source.yaml"; then
-    echo "Не удалось прочитать $CONFIG" >&2; rm -rf "$mt_work"; return 1
+    ui_fail "Не удалось прочитать $CONFIG"; rm -rf "$mt_work"; return 1
   fi
   if ! sh "$SELFDIR/migrate_config.sh" --source "$mt_work/source.yaml" --template "$SELFDIR/config.example.yaml" \
       --output "$mt_work/config.yaml" --report "$mt_work/report" >"$mt_work/log" 2>&1; then
     mt_reason=$(sed -n 's/^ERROR: //p' "$mt_work/log" | head -n 1)
-    echo "Миграция невозможна: ${mt_reason:-$(tail -n 1 "$mt_work/log")}" >&2
+    ui_warn "Миграция невозможна: ${mt_reason:-$(tail -n 1 "$mt_work/log")}"
     rm -rf "$mt_work"; return 1
   fi
   print_migration_report "$mt_work/report"
-  printf 'Применить новый конфиг (старый сохранится бэкапом рядом)? [y/N] ' >&2
+  ui_ask "Применить новый конфиг (старый сохранится бэкапом рядом)? [y/N]"
   read -r mt_ans || { mt_ans=""; echo >&2; }
   case $mt_ans in
     [Yy]*) ;;
-    *) echo "Миграция отменена, конфиг не тронут" >&2; rm -rf "$mt_work"; return 1 ;;
+    *) ui_warn "Миграция отменена, конфиг не тронут"; rm -rf "$mt_work"; return 1 ;;
   esac
-  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$mt_work/config.yaml" >"$mt_work/mtest" 2>&1; then
-    echo "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут:" >&2
-    tail -n 5 "$mt_work/mtest" >&2
+  # Вывод mihomo -t - в журнал установки; ui_run при ошибке сам покажет его
+  # последние строки (раньше это делал tail -n 5).
+  if ! ui_run "Новый конфиг: mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$mt_work/config.yaml"; then
+    ui_warn "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут"
     rm -rf "$mt_work"; return 1
   fi
   mt_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
   if ! cp -p "$CONFIG" "$mt_backup"; then
-    echo "Не удалось сохранить бэкап $mt_backup, конфиг не тронут" >&2
+    ui_fail "Не удалось сохранить бэкап $mt_backup, конфиг не тронут"
     rm -rf "$mt_work"; return 1
   fi
-  echo "Старый конфиг сохранён в $mt_backup" >&2
+  ui_ok "Старый конфиг сохранён в $mt_backup"
   if ! replace_config_file "$mt_work/config.yaml" "$mt_target"; then
-    echo "Не удалось записать $mt_target, конфиг не тронут" >&2
+    ui_fail "Не удалось записать $mt_target, конфиг не тронут"
     rm -rf "$mt_work"; return 1
   fi
   rm -rf "$mt_work"
-  echo "Перезапускаю ядро с новым конфигом (xkeen -restart)..." >&2
-  if restart_core_and_wait; then
-    echo "Конфиг мигрирован к шаблону, ядро работает" >&2
+  if ui_run "Перезапускаю ядро с новым конфигом (xkeen -restart)" restart_core_and_wait; then
+    ui_ok "Конфиг мигрирован к шаблону, ядро работает"
     return 0
   fi
-  echo "mihomo не поднялся с новым конфигом - возвращаю прежний из $mt_backup" >&2
-  if replace_config_file "$mt_backup" "$mt_target" && restart_core_and_wait; then
-    echo "Ядро работает на прежнем конфиге" >&2
+  ui_warn "mihomo не поднялся с новым конфигом - возвращаю прежний из $mt_backup"
+  if replace_config_file "$mt_backup" "$mt_target" && ui_run "Перезапуск ядра на прежнем конфиге" restart_core_and_wait; then
+    ui_ok "Ядро работает на прежнем конфиге"
     return 1
   fi
-  echo "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH (бэкап: $mt_backup)" >&2
+  ui_fail "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH (бэкап: $mt_backup)"
   return 2
 }
 
@@ -1227,14 +1514,18 @@ record_config_schema() {
     return 0
   fi
   rm -f "$rcs_tmp" 2>/dev/null
-  echo "WARN: не удалось записать схему конфига в $UPDATE_STATE_DIR/config-schema-version" >&2
+  ui_warn "не удалось записать схему конфига в $UPDATE_STATE_DIR/config-schema-version"
   return 0
 }
 
 # Нет провайдера fast: спросить, что делать с конфигом. 0 - продолжать
 # установку (конфиг мигрирован или остаётся свой), 1 - остановиться.
 # MST_CONFIG_FROM_TEMPLATE=1 - конфиг только что собрал мастер setup.sh.
+# Остаётся свой конфиг - MST_OWN_CONFIG=1: само предупреждение
+# (own_config_notice) main() печатает прямо перед сводкой, а не здесь -
+# посреди шага его прокрутили бы следующие строки установки.
 resolve_config_mode() {
+  MST_OWN_CONFIG=0
   if has_fast_group "$CONFIG"; then
     [ "${MST_CONFIG_FROM_TEMPLATE:-0}" != 1 ] || record_config_schema
     return 0
@@ -1245,7 +1536,7 @@ resolve_config_mode() {
     if [ "$mtt_rc" = 0 ]; then record_config_schema; return 0; fi
     [ "$mtt_rc" = 2 ] && return 1
   fi
-  own_config_notice
+  MST_OWN_CONFIG=1
   return 0
 }
 
@@ -1258,26 +1549,45 @@ resolve_config_mode() {
 # не портит вывод при логировании в файл или по SSH с задержкой, в
 # отличие от анимации через \r.
 run_trial_with_heartbeat() {
-  trial_heartbeat_interval=${TRIAL_HEARTBEAT_INTERVAL:-8}
-  (
-    while :; do
-      sleep "$trial_heartbeat_interval"
-      echo "Пробный прогон ещё выполняется, ждите..." >&2
+  # Тик в plain-режиме печатает сам ui_spin_until раз в UI_TICK секунд.
+  UI_TICK=${TRIAL_HEARTBEAT_INTERVAL:-8}
+  # Вывод speedtest2.sh - в журнал UI_LOG, на экране только спиннер.
+  # Сбой пробного прогона установку не прерывает (как и раньше "|| true"):
+  # функция всегда возвращает 0. Но одной строки "[!!] Пробный прогон N с"
+  # мало - по ней не понять, что случилось. Поэтому при ненулевом коде
+  # показываем 3 последние строки speedtest.log (свой журнал speedtest2.sh,
+  # причина сбоя обычно там) и путь к нему - в том же виде, что ui_run.
+  "$DIR/speedtest2.sh" </dev/null >>"$UI_LOG" 2>&1 &
+  rt_rc=0
+  ui_spin_until "Пробный прогон" $! trial_status || rt_rc=$?
+  if [ "$rt_rc" -ne 0 ]; then
+    tail -3 "$DIR/speedtest.log" 2>/dev/null | while IFS= read -r rt_l; do
+      printf '      %s%s%s\n' "$UI_C_DIM" "$rt_l" "$UI_C_0" >&2
     done
-  ) &
-  trial_heartbeat_pid=$!
-  "$DIR/speedtest2.sh" || true
-  kill "$trial_heartbeat_pid" 2>/dev/null || true
-  wait "$trial_heartbeat_pid" 2>/dev/null || true
+    printf '      Подробности: %s\n' "$DIR/speedtest.log" >&2
+  fi
+  return 0
 }
 
-# Хвост журнала пробного прогона - в stderr, как и весь вывод install.sh.
-# Порядок редиректов важен: ">&2 2>/dev/null", а не наоборот. При
-# "2>/dev/null >&2" stdout копировался с уже перенаправленного в
-# /dev/null fd 2, и хвост журнала молча пропадал.
+# Подпись спиннера пробного прогона: "Проверка нод T/N" по progress.json,
+# который пишет speedtest2.sh. Зовётся каждый тик - обязана быть тихой:
+# файла ещё нет, он пустой или total=0 (прогон только готовится) -
+# "подготовка". Ошибки чтения глушим.
+trial_status() {
+  ts_prog=${STATS_PROGRESS:-$TMPROOT/mihomo-speedtest-progress.json}
+  ts_val=$(sed -n 's/.*"total":\([0-9]*\),"tested":\([0-9]*\).*/\2\/\1/p' "$ts_prog" 2>/dev/null | head -1)
+  case $ts_val in
+    '' | */0) echo "подготовка" ;;
+    *) echo "Проверка нод $ts_val" ;;
+  esac
+}
+
+# Хвост журнала пробного прогона - в журнал UI_LOG (на экране не нужен;
+# итоговую строку со статусом уже напечатал ui_spin_until, вторую
+# галочку не рисуем). Порядок редиректов важен: ">>файл 2>/dev/null".
 print_trial_log_tail() {
-  echo "Пробный запуск завершён, хвост журнала:" >&2
-  tail -5 "$DIR/speedtest.log" >&2 2>/dev/null || true
+  ui_log "Хвост журнала пробного прогона:"
+  tail -5 "$DIR/speedtest.log" 2>/dev/null >> "${UI_LOG:-/dev/null}" || true
 }
 
 # Что именно ставится - для первой и последней строки установки. Файлы
@@ -1295,10 +1605,100 @@ install_release_label() {
   printf 'файлы из %s, версия релиза неизвестна\n' "$SELFDIR"
 }
 
+# Режим для шапки установки: новая установка или переустановка поверх
+# (speedtest2.env уже есть). «Было» - тег из installed-manifest.txt до
+# загрузки релиза (бутстрап перезаписывает манифест, поэтому он сохраняет
+# прежний тег в MST_PREV_TAG заранее), «станет» - устанавливаемый релиз.
+install_mode_label() {
+  [ -f "$DIR/speedtest2.env" ] || { printf 'Новая установка\n'; return 0; }
+  if [ "${MST_PREV_TAG+set}" = set ]; then
+    iml_old=$MST_PREV_TAG
+  else
+    iml_old=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG 2>/dev/null) || iml_old=
+  fi
+  case $INSTALL_LABEL in
+    'релиз '*) iml_new=${INSTALL_LABEL#релиз } ;;
+    *) iml_new='?' ;;
+  esac
+  printf 'Переустановка (%s → %s)\n' "${iml_old:-?}" "$iml_new"
+}
+
+# Ссылка на веб-интерфейс для итоговой сводки (stdout). Тот же расчёт
+# адреса, что print_web_url, но без его текстов: print_web_url печатает
+# готовую фразу для --show-url, а сводке нужно только значение.
+install_web_url() {
+  (
+    . "$DIR/speedtest2.env" 2>/dev/null || exit 0
+    if [ "${STATS_HTTP_ENABLE:-1}" != 1 ]; then
+      echo "веб-интерфейс отключён (mihomo-speedtest start-web - включить)"
+      exit 0
+    fi
+    host=$(advertise_host "${STATS_HTTP_BIND:-0.0.0.0}")
+    [ -n "$host" ] || host="<адрес роутера>"
+    echo "http://$host:${STATS_HTTP_PORT:-8899}/stats"
+  )
+}
+
+# Обновить кэш подписки через API ядра и дождаться файла (для ui_run:
+# вывод уходит в журнал, на экране - спиннер «Подписка NAME»).
+refresh_provider_cache() {
+  curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/$1" >/dev/null 2>&1 || true
+  sleep 3
+  [ -f "$2" ]
+}
+
 main() {
+  # Баннер - один раз за процесс: при бутстрапе его уже показали. Пришли
+  # из мастера setup.sh (UI_CONTINUE=1) - вместо рамки строка раздела.
+  if [ "${UI_BANNER_SHOWN:-}" != 1 ]; then
+    ui_init
+    if [ "${UI_CONTINUE:-}" = 1 ]; then
+      ui_banner "MIHOMO-SPEEDTEST" "Установка"
+    else
+      ui_banner "MIHOMO-SPEEDTEST" "быстрый пул · статистика нод"
+    fi
+    UI_BANNER_SHOWN=1
+  fi
+  # Нумерация шагов: при бутстрапе «Загрузка релиза» был шагом 1 из 6.
+  if [ "${UI_STEPS_BOOT:-}" = 1 ]; then st_n=1; st_total=6; else st_n=0; st_total=5; fi
+
   INSTALL_LABEL=$(install_release_label)
-  echo "Устанавливается: $INSTALL_LABEL" >&2
-  check_mihomo_process && check_versions || return 1
+  printf '  Устанавливается: %s\n' "$INSTALL_LABEL" >&2
+  ui_kv "Режим" "$(install_mode_label)"
+
+  # Проверки до шапки: версии для строк «Архитектура»/«Ядро» берутся из
+  # check_versions (VC_*), а его диагностику покажем уже под шагом -
+  # копим её во временном файле. Запуск в текущей оболочке (не $(...)),
+  # иначе VC_* потерялись бы в подоболочке.
+  # Нет записи в TMPROOT - проверяем без перехвата (диагностика выйдет
+  # сразу), а не считаем проверку проваленной из-за редиректа.
+  env_err=$TMPROOT/mst-install-check.$$
+  env_ok=1
+  if : 2>/dev/null >"$env_err"; then
+    { check_mihomo_process && check_versions; } 2>"$env_err" || env_ok=0
+  else
+    env_err=/dev/null
+    { check_mihomo_process && check_versions; } || env_ok=0
+  fi
+  env_arch=$(uname -m 2>/dev/null) || env_arch=
+  ui_kv "Архитектура" "${env_arch:-?}${VC_KOS:+ · KeeneticOS $VC_KOS}"
+  if [ -n "${VC_MIHOMO:-}${VC_XKEEN:-}" ]; then
+    ui_kv "Ядро" "mihomo ${VC_MIHOMO:-?} · XKeen ${VC_XKEEN:-?}"
+  fi
+
+  st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Проверка окружения"
+  if [ "$env_ok" != 1 ]; then
+    # Каждая причина version_check - своей строкой ✗ (тексты прежние).
+    env_n=0
+    while IFS= read -r env_line; do
+      ui_fail "$env_line"; env_n=$((env_n + 1))
+    done < "$env_err"
+    [ "$env_n" -gt 0 ] || ui_fail "Процесс mihomo, версии"
+    [ "$env_err" = /dev/null ] || rm -f "$env_err" 2>/dev/null || :
+    return 1
+  fi
+  [ "$env_err" = /dev/null ] || rm -f "$env_err" 2>/dev/null || :
+  ui_ok "Процесс mihomo, версии"
 
   if [ ! -f "$CONFIG" ]; then
     # Новый роутер: config.yaml ещё нет. Вместо отказа передаём управление
@@ -1306,8 +1706,11 @@ main() {
     # ещё раз - см. setup.sh) - это второй из двух сценариев однострочной
     # установки (см. bootstrap-блок в начале файла): "конфиг уже настроен"
     # обрабатывается штатным продолжением main() ниже, "конфига нет" - тут.
-    [ -f "$SELFDIR/setup.sh" ] || { echo "$CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки" >&2; return 1; }
-    echo "$CONFIG не найден - похоже, это установка на новом роутере. Запускаю мастер настройки (setup.sh)" >&2
+    [ -f "$SELFDIR/setup.sh" ] || { ui_fail "$CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки"; return 1; }
+    ui_ok "config.yaml не найден - запускаю мастер настройки"
+    # Мастер продолжит оформление строкой раздела (без второй рамки) и
+    # пишет в тот же журнал; env переживает exec.
+    export UI_CONTINUE=1 UI_LOG
     # Интерактивные read -r в setup.sh должны читать терминал, а не тело
     # install.sh под "curl ... | sh" (см. reopen_tty()).
     reopen_tty
@@ -1316,15 +1719,17 @@ main() {
   fi
   for f in $ALL_PROJECT_FILES; do
     [ -f "$SELFDIR/$f" ] || {
-      echo "$SELFDIR/$f не найден рядом с install.sh" >&2
+      ui_fail "$SELFDIR/$f не найден рядом с install.sh"
       return 1
     }
   done
-  "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" >/dev/null 2>&1 || {
-    echo "$CONFIG не проходит mihomo -t" >&2
+  ui_ok "Файлы проекта на месте"
+  ui_run "Конфиг проходит mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" || {
+    ui_fail "$CONFIG не проходит mihomo -t"
     return 1
   }
 
+  st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Конфиг и фильтр"
   # Вопросы о конфиге и гео-фильтре должны читать терминал, а не тело
   # install.sh под "curl ... | sh" (см. reopen_tty()). Миграция - до
   # разбора провайдеров: дальше всё работает уже с итоговым конфигом
@@ -1333,7 +1738,7 @@ main() {
   resolve_config_mode || return 1
 
   if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
-    echo "providers.awk не смог разобрать $CONFIG" >&2
+    ui_fail "providers.awk не смог разобрать $CONFIG"
     return 1
   fi
   eval "$PARSED"
@@ -1341,10 +1746,8 @@ main() {
   for src in $SOURCES; do
     [ -f "$src" ] && continue
     name=$(basename "$src" .yaml)
-    curl -f -s -m 10 -X PUT "http://$API_MAIN/providers/proxies/$name" >/dev/null 2>&1 || true
-    sleep 3
-    [ -f "$src" ] || {
-      echo "Кэш $src не появился, сначала чините подписку $name" >&2
+    ui_run "Подписка $name" refresh_provider_cache "$name" "$src" || {
+      ui_fail "Кэш $src не появился, сначала чините подписку $name"
       return 1
     }
   done
@@ -1353,29 +1756,38 @@ main() {
   # install.sh под "curl ... | sh" - иначе read сразу получает EOF.
   reopen_tty
   resolve_block || return 1
-  echo "Фильтр ($BLOCK_SOURCE): $BLOCK" >&2
+  ui_ok "Фильтр ($BLOCK_SOURCE): $BLOCK"
 
-  CHANNEL=$(measure_channel)
+  st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Замер канала"
+  # Итог здесь - строка с каналом и порогом (см. measure_channel_spin).
+  measure_channel_spin
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
-    echo "Канал $(format_mbit "$CHANNEL") Мбит/с, порог $(format_mbit "$MIN_SPEED") Мбит/с" >&2
+    ui_ok "Канал $(format_mbit "$CHANNEL") Мбит/с, порог $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
   else
     # MIN_SPEED в шапке speedtest2.sh - не в кавычках (число), в отличие
     # от BLOCK; читаем тем же read_speedtest_const, что и MIN_RATIO/MIN_FLOOR.
     MIN_SPEED=$(read_speedtest_const MIN_SPEED 1048576)
-    echo "Прямой замер канала не удался, порог из дефолта: $(format_mbit "$MIN_SPEED") Мбит/с" >&2
+    ui_warn "Прямой замер канала не удался, порог из дефолта: $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
   fi
 
+  st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Установка файлов и служб"
   write_env "$DIR/speedtest2.env" || {
-    echo "Не удалось записать speedtest2.env" >&2
+    ui_fail "Не удалось записать speedtest2.env"
     return 1
   }
+  ui_ok "Настройки: speedtest2.env"
   install_files || {
-    echo "Не удалось установить файлы" >&2
+    ui_fail "Не удалось установить файлы"
     return 1
   }
+  ui_ok "Файлы установлены в $DIR"
+  # Простые вызовы, как и раньше: сбой crontab под set -e прерывает установку.
   install_cron
+  ui_ok "Cron: замер раз в 3 часа"
   install_update_check_cron
+  ui_ok "Cron: проверка обновлений"
+  ensure_mihomo_speedtest_symlink "$DIR/mihomo-speedtest.sh"
 
   # Ставим python3 (если получится) ДО запуска веб-службы: без него
   # stats_httpd.py не запустится, а резервного сервера без пароля больше
@@ -1390,55 +1802,92 @@ main() {
   # промолчала как "уже запущена" на старых настройках.
   if [ "$web_ready" = 1 ] && ! initialize_web_auth; then
     web_ready=0
-    echo "WARN - не удалось инициализировать авторизацию, веб-интерфейс не запущен" >&2
+    ui_warn "не удалось инициализировать авторизацию, веб-интерфейс не запущен"
   fi
+  # Что показать в сводке в строке «Открыть».
+  web_open="веб-интерфейс не запущен"
   if [ "$web_ready" = 1 ] && [ -x "$INITD_SCRIPT" ]; then
-    if "$INITD_SCRIPT" restart >/dev/null 2>&1; then
-      echo "Веб-сервис статистики запущен ($INITD_SCRIPT restart)" >&2
-      print_web_url
+    # Вывод init-скрипта - в журнал (ui_run); раньше он шёл в /dev/null.
+    if ui_run "Веб-интерфейс" "$INITD_SCRIPT" restart; then
+      web_open=$(install_web_url) || web_open=
     else
-      echo "WARN - $INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную" >&2
+      ui_warn "$INITD_SCRIPT restart не удался, веб-сервис статистики не поднят - проверьте вручную"
     fi
   elif [ "$web_ready" = 1 ]; then
-    echo "WARN - $INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен" >&2
+    ui_warn "$INITD_SCRIPT не найден после установки, веб-сервис статистики не запущен"
   else
     [ ! -x "$INITD_SCRIPT" ] || "$INITD_SCRIPT" stop >/dev/null 2>&1 || true
-    echo "CLI, speedtest и обновлятор установлены; веб-интерфейс отключён до установки Python 3" >&2
+    ui_warn "CLI, speedtest и обновлятор установлены; веб-интерфейс отключён до установки Python 3"
+    web_open="веб-интерфейс отключён до установки Python 3"
   fi
 
+  # Пробный прогон - оформление спиннером в отдельной задаче; пока - как было.
+  st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Пробный прогон"
   if [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
     print_trial_log_tail
+  else
+    ui_warn "Пробный прогон пропущен"
   fi
 
-  echo "Установка завершена: $INSTALL_LABEL" >&2
+  case $INSTALL_LABEL in
+    'релиз '*) done_tag="${INSTALL_LABEL#релиз } " ;;
+    *) done_tag= ;;
+  esac
+  # Свой конфиг без быстрого пула - жёлтый блок прямо перед сводкой.
+  [ "${MST_OWN_CONFIG:-0}" != 1 ] || own_config_notice
+  ui_done "mihomo-speedtest ${done_tag}установлен"
+  ui_kv "Открыть" "${web_open:-?}"
+  ui_kv "Фильтр" "$BLOCK"
+  ui_kv "Порог" "$(format_mbit "$MIN_SPEED") Мбит/с"
+  ui_kv "Диагностика" "$UI_LOG"
+}
+
+# Фатальная ошибка main() (return 1 или сбой под set -e) завершает процесс
+# раньше, чем код после вызова main успеет что-то сказать, - поэтому строка
+# «Установка остановлена на шаге NN/MM» печатается хуком выхода. Флаг
+# INSTALL_MAIN_DONE ставится только после успешного main; exec setup.sh
+# заменяет процесс, хуки тогда не выполняются вовсе.
+# ui_abort - из installer/ui.sh, во встроенной копии его нет: без ui.sh
+# рядом (неполный набор файлов) хук молчит, причина уже на экране.
+install_abort_hook() {
+  [ "${INSTALL_MAIN_DONE:-1}" = 1 ] && return 0
+  command -v ui_abort >/dev/null 2>&1 && ui_abort
+  return 0
 }
 
 recalibrate_main() {
   ENVFILE=${ENVFILE:-$DIR/speedtest2.env}
   [ -f "$ENVFILE" ] || {
-    echo "$ENVFILE не найден, сначала обычная установка" >&2
+    ui_fail "$ENVFILE не найден, сначала обычная установка"
     return 1
   }
-  CHANNEL=$(measure_channel)
+  measure_channel_spin
   if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     NEW_MIN=$(compute_min_speed "$CHANNEL")
   else
-    echo "Прямой замер канала не удался, MIN_SPEED не изменён" >&2
+    ui_fail "Прямой замер канала не удался, MIN_SPEED не изменён" "$UI_SEC"
     return 1
   fi
   recalibrate_env "$ENVFILE" "$NEW_MIN" || return 1
-  echo "Порог пересчитан: $(format_mbit "$NEW_MIN") Мбит/с" >&2
+  ui_ok "Порог пересчитан: $(format_mbit "$NEW_MIN") Мбит/с" "$UI_SEC"
 }
 
 if [ "${INSTALL_LIB_ONLY:-0}" != 1 ]; then
   case "${1:-}" in
-    --recalibrate) recalibrate_main ;;
-    --stop-web) stop_web_main ;;
-    --start-web) start_web_main ;;
+    # ui_init без баннера; --stop-web/--start-web идут мимо бутстрапа
+    # (на старой установке ui.sh может не быть) - им хватает встроенной копии.
+    --recalibrate) ui_init; recalibrate_main ;;
+    --stop-web) ui_init; stop_web_main ;;
+    --start-web) ui_init; start_web_main ;;
     --show-url) show_url_main ;;
     --version) version_main ;;
-    *) main "$@" ;;
+    *)
+      INSTALL_MAIN_DONE=0
+      ui_on_exit install_abort_hook
+      main "$@"
+      INSTALL_MAIN_DONE=1
+      ;;
   esac
   # Явный выход обязателен: под "curl ... | sh" reopen_tty() переключает
   # stdin процесса sh на /dev/tty, и без exit оболочка после main стала бы

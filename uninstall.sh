@@ -80,9 +80,39 @@ FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.a
 render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
 stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_chart.js render_progress.awk stats_init.sh
 stats_system.sh stats_config.sh stats_xkeen.sh stats_codemirror.js stats_codemirror.css
-uninstall.sh VERSIONS install.sh version_check.sh mihomo-speedtest.sh
+uninstall.sh VERSIONS install.sh version_check.sh ui.sh mihomo-speedtest.sh
 migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml
 update_transaction.sh update_prepare.sh update.sh update_plan.awk"
+
+# Общее оформление вывода (installer/ui.sh). На роутере библиотека лежит в
+# $DIR рядом с uninstall.sh; при запуске из клона репозитория - рядом со
+# скриптом; в старой установке её может не быть вовсе - тогда короткие
+# plain-заглушки: деинсталляция никогда не должна падать из-за оформления.
+# ui.sh удаляется самим uninstall.sh (remove_project_files), но функции уже
+# загружены в оболочку, так что вызовы после удаления файла работают.
+# Значения по умолчанию - чтобы функции, вызванные напрямую (тесты с
+# UNINSTALL_LIB_ONLY=1, без ui_init), не падали под `set -u`.
+UI_LOG=${UI_LOG:-/opt/var/log/mihomo-speedtest-install.log}
+UI_MODE=${UI_MODE:-plain}
+UI_COLS=${UI_COLS:-80}
+: "${UI_C_ACC=}" "${UI_C_OK=}" "${UI_C_ERR=}" "${UI_C_WARN=}" "${UI_C_DIM=}" "${UI_C_B=}" "${UI_C_0=}"
+UI_G_OK=${UI_G_OK:-[OK]}; UI_G_ERR=${UI_G_ERR:-[!!]}; UI_G_WARN=${UI_G_WARN:-[!]}
+UI_G_BAR=${UI_G_BAR:-|}; UI_SLEEP=${UI_SLEEP:-sleep 1}
+if [ -f "$DIR/ui.sh" ]; then
+  . "$DIR/ui.sh"
+elif [ -f "$(dirname "$0")/ui.sh" ]; then
+  . "$(dirname "$0")/ui.sh"
+else
+  ui_init() { :; }
+  ui_log() { :; }
+  ui_banner() { printf '== %s — %s ==\n' "$1" "$2" >&2; }
+  ui_ok() { printf '[OK] %s\n' "$1" >&2; }
+  ui_fail() { printf '[!!] %s\n' "$1" >&2; }
+  ui_warn() { printf '[!] %s\n' "$1" >&2; }
+  ui_done() { printf '[OK] %s\n' "$1" >&2; }
+  ui_ask() { printf '[??] %s: ' "$1" >&2; }
+  ui_note() { while IFS= read -r _l || [ -n "$_l" ]; do printf '| %s\n' "$_l" >&2; done; }
+fi
 
 atomic_install() {
   src=$1
@@ -104,15 +134,19 @@ pid_alive() {
 
 confirm() {
   [ "$SKIP_CONFIRM" = 1 ] && return 0
-  echo "Будут остановлена веб-служба статистики, сняты cron-записи," >&2
-  echo "удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR." >&2
-  if [ "$SKIP_CONFIG_REVERT" != 1 ] && [ -f "$CONFIG" ]; then
-    echo "Если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится." >&2
-  fi
-  if [ "$PURGE_DATA" = 1 ]; then
-    echo "PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)." >&2
-  fi
-  printf 'Продолжить? [y/N] ' >&2
+  # Перечень того, что будет сделано, - одним блоком; вопрос после него.
+  {
+    echo "Будут остановлена веб-служба статистики, сняты cron-записи,"
+    echo "удалены ВСЕ файлы проекта в $DIR (включая install.sh/uninstall.sh) и $UPDATE_STATE_DIR,"
+    echo "а также ссылка mihomo-speedtest в /opt/sbin и /opt/bin."
+    if [ "$SKIP_CONFIG_REVERT" != 1 ] && [ -f "$CONFIG" ]; then
+      echo "Если рядом с $CONFIG найден бэкап setup.sh (*.bak), config.yaml будет откачен к нему, а текущий config.yaml сохранён своим бэкапом; xkeen перезапустится."
+    fi
+    if [ "$PURGE_DATA" = 1 ]; then
+      echo "PURGE_DATA=1 - также будут удалены журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса (логин и пароль)."
+    fi
+  } | ui_note warn
+  ui_ask "Продолжить? [y/N]"
   # Под "curl ... | sh" стандартный ввод занят телом самого uninstall.sh -
   # без переоткрытия от терминала read -r ниже сразу получит EOF, и
   # деинсталляция молча отменится (безопасный отказ, но не то, чего хочет
@@ -139,13 +173,17 @@ confirm() {
   fi
   case "$ans" in
     [Yy]*) return 0 ;;
-    *) echo "Отменено, ничего не изменено" >&2; return 1 ;;
+    *) ui_warn "Отменено, ничего не изменено"; return 1 ;;
   esac
 }
 
 stop_service() {
   if [ -x "$INITD_SCRIPT" ]; then
-    "$INITD_SCRIPT" stop || echo "WARN - $INITD_SCRIPT stop не удался, продолжаю" >&2
+    if "$INITD_SCRIPT" stop >/dev/null 2>&1; then
+      ui_ok "Служба остановлена"
+    else
+      ui_warn "$INITD_SCRIPT stop не удался, продолжаю"
+    fi
     return 0
   fi
   # init-скрипт уже отсутствует (или так и не был установлен), но
@@ -161,6 +199,7 @@ stop_service() {
     kill "$(cat "$http_pidfile")" 2>/dev/null || true
   fi
   rm -f "$sup_pidfile" "$http_pidfile" "$http_pidfile.addr"
+  ui_ok "Служба остановлена"
 }
 
 remove_cron() {
@@ -170,7 +209,7 @@ remove_cron() {
   fi
   filtered=$(printf '%s\n' "$current" | grep -vF "$INSTALLED_SCRIPT" || true)
   printf '%s\n' "$filtered" | crontab -
-  echo "cron-строка для $INSTALLED_SCRIPT удалена" >&2
+  ui_log "cron-строка для $INSTALLED_SCRIPT удалена"
 }
 
 remove_update_cron() {
@@ -180,7 +219,7 @@ remove_update_cron() {
   fi
   filtered=$(printf '%s\n' "$current" | grep -vF "$UPDATE_CHECK_SCRIPT" || true)
   printf '%s\n' "$filtered" | crontab -
-  echo "cron-строка для $UPDATE_CHECK_SCRIPT удалена" >&2
+  ui_log "cron-строка для $UPDATE_CHECK_SCRIPT удалена"
 }
 
 # Отпечаток группы "fast" (proxy-providers -> fast -> path: ./fast.yaml,
@@ -215,7 +254,7 @@ revert_config() {
   if [ "$REVERT_BEFORE_FAST" = 1 ]; then
     latest=$(find_backup_before_fast)
     if [ -z "$latest" ]; then
-      echo "REVERT_BEFORE_FAST=1, но среди бэкапов $CONFIG.*.bak нет ни одного без группы fast - config.yaml оставлен как есть" >&2
+      ui_warn "REVERT_BEFORE_FAST=1, но среди бэкапов $CONFIG.*.bak нет ни одного без группы fast - config.yaml оставлен как есть"
       return 0
     fi
   else
@@ -225,29 +264,29 @@ revert_config() {
       latest=$b
     done
     if [ -z "$latest" ]; then
-      echo "Рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную" >&2
+      ui_warn "Рядом с $CONFIG нет бэкапов setup.sh (*.bak) - config.yaml оставлен как есть, providers/proxies надстройки при необходимости нужно убрать вручную"
       return 0
     fi
   fi
 
-  echo "Найден бэкап $latest, проверяю mihomo -t" >&2
+  ui_log "Найден бэкап $latest, проверяю mihomo -t"
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$latest" >/dev/null 2>&1; then
-    echo "WARN - $latest не проходит mihomo -t, config.yaml не тронут" >&2
+    ui_warn "$latest не проходит mihomo -t, config.yaml не тронут"
     return 0
   fi
 
   own_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
   if ! cp "$CONFIG" "$own_backup"; then
-    echo "WARN - не удалось сохранить $own_backup, config.yaml не тронут" >&2
+    ui_warn "не удалось сохранить $own_backup, config.yaml не тронут"
     return 0
   fi
-  echo "Текущий config.yaml сохранён в $own_backup" >&2
+  ui_log "Текущий config.yaml сохранён в $own_backup"
 
   if ! atomic_install "$latest" "$CONFIG"; then
-    echo "WARN - не удалось записать $CONFIG из $latest" >&2
+    ui_warn "не удалось записать $CONFIG из $latest"
     return 0
   fi
-  echo "config.yaml откачен к $latest" >&2
+  ui_ok "config.yaml откачен к $latest (текущий сохранён в $own_backup)"
 
   xkeen -restart
   i=0
@@ -256,7 +295,7 @@ revert_config() {
     sleep 1; i=$((i + 1))
   done
   if ! curl -s -m 2 "http://$API_MAIN/version" >/dev/null 2>&1; then
-    echo "WARN - mihomo не поднялся после xkeen -restart, проверьте $CONFIG вручную" >&2
+    ui_warn "mihomo не поднялся после xkeen -restart, проверьте $CONFIG вручную"
   fi
 }
 
@@ -304,6 +343,7 @@ remove_mihomo_speedtest_symlink() {
 
 remove_project_files() {
   remove_mihomo_speedtest_symlink
+  ui_ok "Ссылка mihomo-speedtest"
   project_files_to_remove | while IFS= read -r p; do
     [ -n "$p" ] || continue
     rm -f "$p"
@@ -325,6 +365,7 @@ remove_project_files() {
   # трогает уже открытый исполняемый файл до завершения процесса) и
   # пропускается сам собой, если файлов уже нет.
   rm -f "$DIR/install.sh" "$DIR/uninstall.sh"
+  ui_ok "Файлы проекта"
 }
 
 purge_data() {
@@ -336,18 +377,26 @@ purge_data() {
   rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$MIHOMO_DIR/fast.yaml" "$DIR/speedtest_last.txt"
   rm -rf "$STATS_HTTP_DIR"
   rm -rf "$DIR/.stats-auth"
-  echo "PURGE_DATA=1 - журналы, история замеров, веб-статика статистики и учётные данные веб-интерфейса удалены" >&2
+  ui_ok "Журналы, история замеров, веб-статика и учётные данные (PURGE_DATA=1)"
 }
 
 main() {
+  ui_init
+  ui_banner "MIHOMO-SPEEDTEST" "Удаление"
   confirm || return 1
   stop_service
   remove_cron
   remove_update_cron
+  ui_ok "Задачи cron"
   revert_config
   remove_project_files
   purge_data
-  echo "Деинсталляция завершена" >&2
+  ui_done "Деинсталляция завершена"
+  # Журнал UI удаляем самым последним (после него ничего не пишется в лог) и
+  # только при PURGE_DATA=1; /dev/null не трогаем.
+  if [ "$PURGE_DATA" = 1 ] && [ "$UI_LOG" != /dev/null ]; then
+    rm -f "$UI_LOG"
+  fi
 }
 
 if [ "${UNINSTALL_LIB_ONLY:-0}" != 1 ]; then

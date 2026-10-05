@@ -6,6 +6,8 @@ SCRIPT=$ROOT/install.sh
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/install-test.XXXXXX")
 # Не трогаем общие /tmp/mihomo-speedtest-* - там могут быть каталоги
 # настоящей установки или другого пользователя.
+# Журнал UI - во временный каталог, вывод plain (не трогаем /opt/var/log).
+export UI_LOG="$TEST_ROOT/ui.log" UI=plain
 export STATS_AUTH_RUNTIME_DIR="$TEST_ROOT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime"
 export STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/service-runtime" LIVE_LOG_DIR="$TEST_ROOT/live-log" STATS_PROGRESS="$TEST_ROOT/progress.json"
 
@@ -183,7 +185,7 @@ printf 'mixed-port: 7890\nexternal-controller: 0.0.0.0:9090\n' > "$PROXY_CFG"
   bootstrap_download_to https://example.test/manifest.txt "$TEST_ROOT/dl.txt" 100 2>"$TEST_ROOT/dl.err" \
     || fail "загрузка должна пройти через mixed-port из конфига"
   assert_eq "$BOOTSTRAP_PROXY" 'http://127.0.0.1:7890'
-  grep -q 'напрямую: соединение оборвано' "$TEST_ROOT/dl.err" || fail "нет причины отказа прямой загрузки"
+  grep -q 'напрямую: соединение оборвано' "$UI_LOG" || fail "нет причины отказа прямой загрузки в журнале UI_LOG"
   # Следующий файл сразу идёт через тот же прокси.
   bootstrap_download_to https://example.test/f2 "$TEST_ROOT/dl2.txt" 100 2>/dev/null || fail "второй файл через прокси"
 ) || exit 1
@@ -234,7 +236,7 @@ echo "test_install.sh: обход загрузки через mihomo OK" >&2
   bootstrap_download_to https://example.test/r "$TEST_ROOT/r.txt" 100 2>"$TEST_ROOT/r.err" || fail "третья попытка должна пройти"
   assert_eq "$(cat "$CNT")" '3'
   assert_eq "${BOOTSTRAP_PROXY:-}" ''
-  grep -q 'повтор 2 из 3' "$TEST_ROOT/r.err" || fail "нет сообщения о повторе"
+  grep -q 'повтор 2 из 3' "$UI_LOG" || fail "нет сообщения о повторе в журнале UI_LOG"
 ) || exit 1
 
 (
@@ -369,6 +371,32 @@ if (
   fail "recalibrate_main should fail without an existing speedtest2.env"
 fi
 
+# TUI-режимы (plain): одна строка итога с префиксом [OK]/[!!]
+(
+  PATH="$TEST_ROOT:$PATH"
+  DIR=$TEST_ROOT/recal
+  ENVFILE=$RECAL_ENV
+  recalibrate_main
+) 2>"$TEST_ROOT/recal-ui.err"
+grep -q '\[OK\] Порог пересчитан: .* Мбит/с' "$TEST_ROOT/recal-ui.err" || fail "recalibrate_main: нет [OK] Порог пересчитан ($(cat "$TEST_ROOT/recal-ui.err"))"
+(
+  DIR=$TEST_ROOT/recal-missing
+  ENVFILE=$TEST_ROOT/recal-missing/speedtest2.env
+  recalibrate_main
+) 2>"$TEST_ROOT/recal-ui2.err" || :
+grep -q '\[!!\] .*не найден, сначала обычная установка' "$TEST_ROOT/recal-ui2.err" || fail "recalibrate_main без env: нет [!!] ($(cat "$TEST_ROOT/recal-ui2.err"))"
+WORK_UI=$(mktemp -d)
+touch "$WORK_UI/speedtest2.env"
+printf '#!/bin/sh\nexit 0\n' > "$WORK_UI/initd"; chmod +x "$WORK_UI/initd"
+( DIR=$WORK_UI; INITD_SCRIPT=$WORK_UI/initd; stop_web_main ) 2>"$WORK_UI/e1"
+grep -q '\[OK\] Веб-сервис статистики остановлен и отключён' "$WORK_UI/e1" || fail "stop_web_main: нет [OK] ($(cat "$WORK_UI/e1"))"
+( DIR=$WORK_UI; INITD_SCRIPT=$WORK_UI/initd; start_web_main ) 2>"$WORK_UI/e2"
+grep -q '\[OK\]' "$WORK_UI/e2" || fail "start_web_main: нет [OK] ($(cat "$WORK_UI/e2"))"
+printf '#!/bin/sh\nexit 1\n' > "$WORK_UI/initd"
+( DIR=$WORK_UI; INITD_SCRIPT=$WORK_UI/initd; start_web_main ) 2>"$WORK_UI/e3" || :
+grep -q '\[!!\] .*restart не удался' "$WORK_UI/e3" || fail "start_web_main при сбое: нет [!!] ($(cat "$WORK_UI/e3"))"
+rm -rf "$WORK_UI"
+
 # main() должен звать проверку процесса mihomo/версий раньше любой другой
 # логики: если pidof не находит mihomo, main обязан прерваться с
 # диагностикой version_check.sh, не доходя до проверки CONFIG и т.д.
@@ -379,16 +407,21 @@ exit 1
 EOF
 chmod +x "$MISSING_PIDOF/pidof"
 WORK=$(mktemp -d)
-if PATH="$MISSING_PIDOF:$PATH" DIR="$WORK" CONFIG="$WORK/config.yaml" \
-   sh "$SCRIPT" 2>"$WORK/err.log"; then
+# Review Focus 4: stdin не терминал, stderr - файл, переменной UI нет вовсе
+# (как у обновлятора) - режим plain выбирается сам, ни одного байта ESC.
+if (unset UI; PATH="$MISSING_PIDOF:$PATH" DIR="$WORK" CONFIG="$WORK/config.yaml" \
+   sh "$SCRIPT" </dev/null 2>"$WORK/err.log"); then
   fail "main should abort when mihomo process is missing"
 fi
 grep -q "Процесс mihomo не найден" "$WORK/err.log" || fail "missing process diagnostic"
+grep -q "$(printf '\033')" "$WORK/err.log" && fail "без терминала в stderr не должно быть ESC: $(cat "$WORK/err.log")"
+grep -q '^ 01/05  Проверка окружения' "$WORK/err.log" || fail "нет шага «Проверка окружения»: $(cat "$WORK/err.log")"
+grep -q 'Установка остановлена на шаге 01/05' "$WORK/err.log" || fail "фатальная ошибка main должна завершаться ui_abort: $(cat "$WORK/err.log")"
 rm -rf "$MISSING_PIDOF" "$WORK"
 
 FIXDIR=$TEST_ROOT/install-fixture
 mkdir -p "$FIXDIR/proxy-providers" "$FIXDIR/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR/"
 
 # Порция 3 (независимая служба): реальный STATS_HTTPD_PY/STATS_HTTPD_CMD
 # ни к чему - main() ниже теперь сам вызывает "$INITD_SCRIPT restart" не
@@ -471,7 +504,20 @@ chmod +x "$FIXDIR/bin/crontab"
   unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
   INSTALL_LIB_ONLY=1 . "$SCRIPT"
   main
-)
+) 2>"$TEST_ROOT/main1.err"
+
+# Шаги установки по порядку (без бутстрапа - 01..05 из 05), сводка, plain.
+MAIN1_STEPS=$(grep '^ [0-9][0-9]/[0-9][0-9]  ' "$TEST_ROOT/main1.err" | tr '\n' '#')
+assert_eq "$MAIN1_STEPS" ' 01/05  Проверка окружения# 02/05  Конфиг и фильтр# 03/05  Замер канала# 04/05  Установка файлов и служб# 05/05  Пробный прогон#'
+grep -q '\[!\] Пробный прогон пропущен' "$TEST_ROOT/main1.err" || fail "SKIP_TRIAL=1: шаг прогона должен быть отмечен [!]: $(cat "$TEST_ROOT/main1.err")"
+grep -q 'Режим: *Новая установка' "$TEST_ROOT/main1.err" || fail "нет строки «Режим: Новая установка»"
+grep -q '\[OK\] Канал 41.9 Мбит/с, порог' "$TEST_ROOT/main1.err" || fail "нет итога замера канала: $(cat "$TEST_ROOT/main1.err")"
+grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main1.err" || fail "нет итоговой строки ui_done"
+grep -q 'Диагностика: *'"$UI_LOG" "$TEST_ROOT/main1.err" || fail "итог должен содержать путь к журналу (Диагностика:)"
+grep -q 'Порог: *[0-9.]* Мбит/с' "$TEST_ROOT/main1.err" || fail "итог должен содержать порог"
+grep -q 'Фильтр: *forced-for-this-test' "$TEST_ROOT/main1.err" || fail "итог должен содержать фильтр"
+grep -q 'Открыть: *http://' "$TEST_ROOT/main1.err" || fail "итог должен содержать ссылку на веб-интерфейс: $(cat "$TEST_ROOT/main1.err")"
+grep -q "$(printf '\033')" "$TEST_ROOT/main1.err" && fail "в plain-режиме не должно быть ESC"
 
 [ -f "$FIXDIR/speedtest2.env" ] || fail "speedtest2.env was not written"
 grep -qF "SOURCES='$FIXDIR/config.yaml $FIXDIR/proxy-providers/demo.yaml'" "$FIXDIR/speedtest2.env" \
@@ -537,7 +583,7 @@ fi
 
 FIXDIR2=$TEST_ROOT/install-fixture-curlfail
 mkdir -p "$FIXDIR2/proxy-providers" "$FIXDIR2/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR2/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR2/"
 
 FAKE_HTTPD2=$FIXDIR2/fake_httpd.sh
 cat > "$FAKE_HTTPD2" <<'EOF'
@@ -546,6 +592,8 @@ while :; do sleep 1; done
 EOF
 chmod +x "$FAKE_HTTPD2"
 
+# Заодно - свой конфиг без провайдера fast (CONFIG_MODE=own ниже):
+# предупреждение own_config_notice должно стоять прямо перед сводкой.
 cat > "$FIXDIR2/config.yaml" <<'EOF'
 proxy-providers:
   demo:
@@ -554,9 +602,6 @@ proxy-providers:
     path: ./proxy-providers/demo.yaml
     exclude-type: trojan|ss
     exclude-filter: 'Russia|RU'
-  fast:
-    type: file
-    path: ./fast.yaml
 EOF
 printf 'proxies:\n  - name: n\n    type: vless\n    server: 1.2.3.4\n    port: 443\n' \
   > "$FIXDIR2/proxy-providers/demo.yaml"
@@ -608,9 +653,20 @@ DEFAULT_MIN_SPEED=$(awk -F= '/^MIN_SPEED=/{split($2,a," "); print a[1]; exit}' "
   export STATS_HTTPD_PY="$FAKE_HTTPD2"
   export STATS_HTTPD_CMD="sh $FAKE_HTTPD2"
   unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
+  CONFIG_MODE=own
   INSTALL_LIB_ONLY=1 . "$SCRIPT"
   main
-) || fail "main must not abort install.sh when curl fails (set -e regression)"
+) 2>"$TEST_ROOT/main-own.err" || fail "main must not abort install.sh when curl fails (set -e regression)"
+# Свой конфиг: жёлтый блок - после шага «Пробный прогон», прямо перед итогом.
+OWN_NOTICE_LINE=$(grep -n '^  | .*быстрый пул НЕ применяется' "$TEST_ROOT/main-own.err" | head -n 1 | cut -d: -f1)
+TRIAL_STEP_LINE=$(grep -n '^ [0-9][0-9]/[0-9][0-9]  Пробный прогон' "$TEST_ROOT/main-own.err" | cut -d: -f1)
+DONE_LINE=$(grep -n '\[OK\] mihomo-speedtest' "$TEST_ROOT/main-own.err" | cut -d: -f1)
+[ -n "$OWN_NOTICE_LINE" ] && [ -n "$TRIAL_STEP_LINE" ] && [ -n "$DONE_LINE" ] \
+  || fail "свой конфиг: нет блока предупреждения, шага прогона или итога: $(cat "$TEST_ROOT/main-own.err")"
+[ "$TRIAL_STEP_LINE" -lt "$OWN_NOTICE_LINE" ] && [ "$OWN_NOTICE_LINE" -lt "$DONE_LINE" ] \
+  || fail "own_config_notice должен идти перед сводкой, после всех шагов: $(cat "$TEST_ROOT/main-own.err")"
+sed -n "$((OWN_NOTICE_LINE + 1)),$((DONE_LINE - 1))p" "$TEST_ROOT/main-own.err" | grep -qv '^  | ' \
+  && fail "между блоком own_config_notice и итогом не должно быть других строк: $(cat "$TEST_ROOT/main-own.err")"
 
 (
   STATS_SERVICE_RUNTIME_DIR=$FIXDIR2/runtime
@@ -717,7 +773,7 @@ printf '%s' "$OUT" | grep -q "Не удалось автоматически п�
 # реальном роутере ломало бы пробный запуск mihomo (там нет geo-баз).
 FIXDIR3=$TEST_ROOT/install-fixture-mihomo-dir-arg
 mkdir -p "$FIXDIR3/proxy-providers" "$FIXDIR3/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR3/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR3/"
 
 cat > "$FIXDIR3/config.yaml" <<'EOF'
 proxy-providers:
@@ -1011,7 +1067,9 @@ rm -f "$FIXDIR/runtime/supervisor.pid"
   unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
   INSTALL_LIB_ONLY=1 . "$SCRIPT"
   main
-)
+) 2>"$TEST_ROOT/main-reinstall.err"
+grep -q 'Режим: *Переустановка' "$TEST_ROOT/main-reinstall.err" || fail "повторная установка должна показывать «Режим: Переустановка»: $(cat "$TEST_ROOT/main-reinstall.err")"
+grep -q 'Открыть: .*отключ' "$TEST_ROOT/main-reinstall.err" || fail "после stop-web итог должен сообщать, что веб-интерфейс отключён"
 [ ! -f "$FIXDIR/runtime/supervisor.pid" ] \
   || fail "install.sh поднял веб-сервис повторно, хотя STATS_HTTP_ENABLE=0 (stop-web) сохранён в speedtest2.env"
 echo "test_install.sh: stop-web persists across reinstall (regression) OK"

@@ -27,6 +27,8 @@ assert_contains "COMPONENT|updater|" "$OUT" "компонент updater объя
 assert_contains "COMPONENT|web|" "$OUT" "компонент web объявлен"
 assert_contains "DEPENDS|web|speedtest-runtime" "$OUT" "web зависит от speedtest-runtime"
 assert_contains "FILE|updater|update.sh|/opt/etc/mihomo-speedtest/update.sh|" "$OUT" "update.sh в манифесте"
+assert_contains "FILE|installer|ui.sh|/opt/etc/mihomo-speedtest/ui.sh|" "$OUT" "ui.sh в манифесте компонента installer"
+assert_contains "DEPENDS|config-tools|installer" "$OUT" "setup.sh (config-tools) подключает ui.sh из installer"
 
 echo "test_generate_manifest.sh: часть 1 (реальная декларация) OK" >&2
 

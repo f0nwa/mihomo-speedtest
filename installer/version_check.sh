@@ -85,22 +85,28 @@ xkeen_ui_dns_protection_active() {
   return 0
 }
 
+# Найденные версии остаются в VC_XKEEN / VC_MIHOMO / VC_KOS (пусто - не
+# найдено): install.sh показывает их в шапке установки, не вызывая
+# xkeen -v и ndmc второй раз.
 check_versions() {
   ok=1
 
   found=$(xkeen_version)
+  VC_XKEEN=$found
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_XKEEN_VERSION"; then
     echo "version_check: Версия XKeen ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_XKEEN_VERSION" >&2
     ok=0
   fi
 
   found=$(mihomo_version)
+  VC_MIHOMO=$found
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_MIHOMO_VERSION"; then
     echo "version_check: Версия ядра Mihomo ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_MIHOMO_VERSION" >&2
     ok=0
   fi
 
   found=$(keeneticos_version)
+  VC_KOS=$found
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_KEENETICOS_VERSION"; then
     echo "version_check: Версия KeeneticOS ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_KEENETICOS_VERSION" >&2
     ok=0

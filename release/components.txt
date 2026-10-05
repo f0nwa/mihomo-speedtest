@@ -18,6 +18,7 @@ NOTE|installer|Инструменты для следующей установк
 NOTE|config-tools|Новый шаблон и инструменты; рабочий config.yaml не изменяется
 
 DEPENDS|web|speedtest-runtime
+DEPENDS|config-tools|installer
 
 FILE|updater|updater/update_transaction.sh|/opt/etc/mihomo-speedtest/update_transaction.sh|0755|sh
 FILE|updater|updater/update_prepare.sh|/opt/etc/mihomo-speedtest/update_prepare.sh|0755|sh
@@ -58,6 +59,7 @@ FILE|web|web/stats_init.sh|/opt/etc/init.d/S80speedtest-stats|0755|sh
 FILE|installer|uninstall.sh|/opt/etc/mihomo-speedtest/uninstall.sh|0755|sh
 FILE|installer|install.sh|/opt/etc/mihomo-speedtest/install.sh|0755|sh
 FILE|installer|installer/version_check.sh|/opt/etc/mihomo-speedtest/version_check.sh|0755|sh
+FILE|installer|installer/ui.sh|/opt/etc/mihomo-speedtest/ui.sh|0755|sh
 FILE|installer|mihomo-speedtest.sh|/opt/etc/mihomo-speedtest/mihomo-speedtest.sh|0755|sh
 
 FILE|config-tools|config-tools/migrate_config.sh|/opt/etc/mihomo-speedtest/migrate_config.sh|0755|sh

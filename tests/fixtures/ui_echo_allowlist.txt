@@ -1,0 +1,61 @@
+# Белый список голых `echo/printf ... >&2` для tests/test_ui_no_raw_echo.sh.
+# Формат: `файл:фрагмент строки` (фрагмент ищется как есть, без номеров строк,
+# чтобы список не ломался при сдвигах). Над записью - причина.
+# Блок ui-bootstrap в install.sh и installer/ui.sh в проверку не входят.
+
+# Бутстрап: код выполняется до загрузки релиза и ui.sh (под `curl | sh`),
+# ui_* там недоступны или ещё не инициализированы; ошибки печатаются как есть.
+install.sh:Для установки нужен curl с поддержкой HTTPS
+install.sh:Пробую через прокси из INSTALL_PROXY
+install.sh:Пробую через mihomo ($bep_key
+install.sh:Пробую через mihomo: временно открыт mixed-port
+install.sh:Не удалось закрыть временный mixed-port
+install.sh:Манифест релиза не прошёл проверку
+install.sh:Для установки нужен источник вида
+install.sh:Не найден инструмент SHA256
+install.sh:Не удалось создать $DIR"
+install.sh:Не удалось записать $DIR/$src
+install.sh:Не удалось задать режим
+install.sh:Автоматическая установка не удалась
+
+# То же (бутстрап), и точный текст грепает тест (test_install.sh /
+# test_install_bootstrap.sh).
+install.sh:Обойти через mihomo не вышло
+install.sh:Рядом нет файлов проекта - скачиваю релиз
+
+# Перевод строки после Ctrl+D/EOF в read: не сообщение, а курсор.
+install.sh:{ input=""; echo >&2; }
+install.sh:{ cm_input=""; echo >&2; }
+install.sh:{ mt_ans=""; echo >&2; }
+
+# Вывод CLI-подкоманд mihomo-speedtest (--show-url, --version и т.п.) для
+# человека и скриптов, не шаги установки.
+install.sh:не найден - сначала выполните установку
+install.sh:Веб-сервис статистики отключён
+install.sh:Веб-интерфейс статистики: http://
+
+# CLI-подкоманды, точный текст грепают тесты (test_install.sh,
+# test_install_bootstrap.sh, test_install_trial_heartbeat.sh).
+install.sh:не найден, сначала обычная установка
+install.sh:Версия релиза: ${installed_tag
+install.sh:Установленный релиз не отслеживается
+
+# Шапка «Устанавливается: ...» - тест test_install_bootstrap.sh проверяет её.
+install.sh:Устанавливается: %s
+
+# setup.sh: тест test_setup.sh грепает это сообщение.
+config-tools/setup.sh:Непринятый конфиг оставлен в
+
+# uninstall.sh: запасные заглушки ui_* на случай, когда ui.sh рядом нет
+# (запуск из «голой» копии); сами реализуют plain-формат.
+uninstall.sh:ui_banner() { printf
+uninstall.sh:ui_ok() { printf
+uninstall.sh:ui_fail() { printf
+uninstall.sh:ui_warn() { printf
+uninstall.sh:ui_done() { printf
+uninstall.sh:ui_ask() { printf
+
+# Хвост speedtest.log при сбое пробного прогона (run_trial_with_heartbeat):
+# тот же вид, что у ui_run после ui_fail - отступ 6, dim, «Подробности:».
+install.sh:"$UI_C_DIM" "$rt_l" "$UI_C_0" >&2
+install.sh:Подробности: %s\n' "$DIR/speedtest.log" >&2

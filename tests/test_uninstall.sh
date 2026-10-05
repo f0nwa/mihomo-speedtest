@@ -16,6 +16,9 @@ TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/uninstall-test.XXXXXX")
 export STATS_AUTH_RUNTIME_DIR="$TEST_ROOT/auth-runtime" STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime"
 export STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/service-runtime" LIVE_LOG_DIR="$TEST_ROOT/live-log" STATS_PROGRESS="$TEST_ROOT/progress.json"
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
+# Журнал UI - во временный файл (иначе ui_init полез бы в /opt/var/log);
+# UI=plain - вывод без ESC, как под ssh без tty.
+export UI_LOG="$TEST_ROOT/ui.log" UI=plain
 
 FAILED=0
 fail() {
@@ -88,6 +91,7 @@ new_dir() {
   mkdir -p "$d/stats_www"
   echo "<html></html>" > "$d/stats_www/stats.html"
   echo "stub stats_init.sh" > "$d/stats_init.sh"
+  cp "$ROOT/installer/ui.sh" "$d/ui.sh"   # настоящая библиотека: uninstall.sh её подключает
   printf 'fast: stub\n' > "$d/fast.yaml"
   printf 'stub last\n' > "$d/speedtest_last.txt"
   printf '%s' "$d"
@@ -153,6 +157,7 @@ if [ -n "$own_baks" ]; then
 fi
 [ -f "$W1/speedtest.log" ] || fail "сценарий 1: без PURGE_DATA журнал speedtest.log не должен удаляться"
 [ -d "$W1/stats_www" ] || fail "сценарий 1: без PURGE_DATA stats_www не должен удаляться"
+[ -f "$W1/ui.sh" ] && fail "сценарий 1: ui.sh (библиотека TUI) должен удаляться без манифеста по запасному списку"
 [ -f "$W1/stats_init.sh" ] && fail "сценарий 1: stats_init.sh - оставшийся исходник bootstrap, а не данные, должен удаляться всегда"
 [ -f "$W1/fast.yaml" ] || fail "сценарий 1: без PURGE_DATA fast.yaml не должен удаляться"
 [ -f "$W1/speedtest_last.txt" ] || fail "сценарий 1: без PURGE_DATA speedtest_last.txt не должен удаляться"
@@ -493,6 +498,64 @@ ln -s "/something/else/entirely" "$WORK_LINK3/opt-bin/mihomo-speedtest"
 ) || fail "посторонняя ссылка в ПОСЛЕДНЕМ каталоге (opt-bin) обрывает remove_mihomo_speedtest_symlink() целиком (set -e) вместо тихого пропуска"
 [ -L "$WORK_LINK3/opt-bin/mihomo-speedtest" ] || fail "посторонняя ссылка в opt-bin была удалена по ошибке (сценарий 3)"
 rm -rf "$WORK_LINK3"
+
+# =====================================================================
+# Сценарий 9 (Task 10): вывод в общем оформлении (plain) - баннер, блок
+# "| " с перечнем, [??] подтверждения, подшаги [OK], итог; PURGE_DATA=1
+# убирает ещё и журнал UI последним шагом.
+# =====================================================================
+W9=$(new_dir w9)
+INIT9=$TEST_ROOT/init9.sh
+printf '#!/bin/sh\nexit 0\n' > "$INIT9"
+chmod +x "$INIT9"
+CRON9=$TEST_ROOT/cron9.txt
+CRONBIN9=$TEST_ROOT/cronbin9
+mk_fake_crontab "$CRON9" "$CRONBIN9"
+: > "$CRON9"
+UILOG9=$TEST_ROOT/ui9.log
+if ! printf 'y\n' | env PATH="$FAKEBIN:$CRONBIN9:$PATH" DIR="$W9" BIN=mihomo MIHOMO_DIR="$W9" \
+    CONFIG="$W9/does-not-exist.yaml" INSTALLED_SCRIPT="$W9/speedtest2.sh" \
+    STATS_SERVICE_DEST="$W9/stats_service.sh" INITD_SCRIPT="$INIT9" \
+    STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/runtime9" STATS_HTTP_DIR="$W9/stats_www" \
+    STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime9" \
+    UI_LOG="$UILOG9" PURGE_DATA=1 \
+    sh "$UNINSTALL" >"$W9.out" 2>"$W9.err"; then
+  fail "сценарий 9: завершился с ошибкой ($(cat "$W9.err"))"
+fi
+grep -qF '== MIHOMO-SPEEDTEST — Удаление ==' "$W9.err" || fail "сценарий 9: нет баннера"
+grep -q '^  | ' "$W9.err" || fail "сценарий 9: нет блока перечня с '| '"
+grep -q 'журналы' "$W9.err" || fail "сценарий 9: при PURGE_DATA=1 в перечне нет журналов"
+grep -qF '[??] Продолжить? [y/N]' "$W9.err" || fail "сценарий 9: нет вопроса [??]"
+for t in 'Служба остановлена' 'Задачи cron' 'Файлы проекта' 'Ссылка mihomo-speedtest' 'Деинсталляция завершена'; do
+  grep -qF "[OK] $t" "$W9.err" || fail "сценарий 9: нет строки [OK] $t"
+done
+if LC_ALL=C grep -q "$(printf '\033')" "$W9.err"; then fail "сценарий 9: в plain-выводе есть ESC"; fi
+[ ! -s "$W9.out" ] || fail "сценарий 9: stdout должен быть пуст"
+[ -e "$UILOG9" ] && fail "сценарий 9: PURGE_DATA=1 должен был удалить журнал UI"
+
+# =====================================================================
+# Сценарий 10 (Task 10): ui.sh нет ни в $DIR, ни рядом со скриптом
+# (старая установка) - удаление проходит с plain-заглушками, rc 0.
+# =====================================================================
+W10=$(new_dir w10)
+rm -f "$W10/ui.sh"
+INIT10=$TEST_ROOT/init10.sh
+printf '#!/bin/sh\nexit 0\n' > "$INIT10"
+chmod +x "$INIT10"
+CRON10=$TEST_ROOT/cron10.txt
+CRONBIN10=$TEST_ROOT/cronbin10
+mk_fake_crontab "$CRON10" "$CRONBIN10"
+: > "$CRON10"
+if ! env PATH="$FAKEBIN:$CRONBIN10:$PATH" DIR="$W10" BIN=mihomo MIHOMO_DIR="$W10" \
+    CONFIG="$W10/does-not-exist.yaml" INSTALLED_SCRIPT="$W10/speedtest2.sh" \
+    STATS_SERVICE_DEST="$W10/stats_service.sh" INITD_SCRIPT="$INIT10" \
+    STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/runtime10" STATS_HTTP_DIR="$W10/stats_www" \
+    STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime10" SKIP_CONFIRM=1 \
+    sh "$UNINSTALL" >"$W10.out" 2>"$W10.err"; then
+  fail "сценарий 10: без ui.sh удаление упало ($(cat "$W10.err"))"
+fi
+grep -qF 'Деинсталляция завершена' "$W10.err" || fail "сценарий 10: нет итога без ui.sh"
+[ -f "$W10/speedtest2.sh" ] && fail "сценарий 10: файлы не удалены без ui.sh"
 
 echo "test_uninstall.sh: mihomo-speedtest symlink removal OK"
 

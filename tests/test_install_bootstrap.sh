@@ -11,7 +11,7 @@ component_of() {
     update_transaction.sh|update_prepare.sh|update.sh|update_plan.awk) echo updater ;;
     speedtest2.sh|prep.awk|providers.awk|node_stats_update.awk|sub_convert.awk) echo speedtest-runtime ;;
     render_stats.awk|stats_cgi.sh|stats_run.sh|stats_update.sh|stats_config.sh|stats_xkeen.sh|stats_httpd.py|stats_auth.py|stats_auth.sh|stats_index.html|stats_style.css|stats_app.js|stats_app_core.js|stats_app_stats.js|stats_app_settings.js|stats_app_updates.js|stats_app_log.js|stats_app_config.js|stats_app_xkeen.js|stats_codemirror.js|stats_codemirror.css|render_progress.awk|stats_service.sh|stats_init.sh) echo web ;;
-    version_check.sh) echo installer ;;
+    version_check.sh|ui.sh) echo installer ;;
     migrate_config.sh|migrate_config.awk|config_diff.awk|setup.sh|detect_ua.sh|render_config.awk|fast_wg.awk|wg_import.awk|existing_config.awk|config.example.yaml) echo config-tools ;;
     *) echo . ;;
   esac
@@ -21,6 +21,10 @@ component_of() {
 INSTALL_PROXY_FALLBACK=0
 export INSTALL_PROXY_FALLBACK
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/install-bootstrap-test.XXXXXX")
+# Журнал UI - во временный каталог (не /opt/var/log), вывод - plain.
+UI_LOG=$TEST_ROOT/ui.log
+UI=plain
+export UI_LOG UI
 
 CLEANUP_PIDS=""
 cleanup_test() {
@@ -132,12 +136,16 @@ mkdir -p "$DST1"
   bootstrap_selfinstall
 ) 2>"$TEST_ROOT/err-empty.log" || fail "bootstrap_selfinstall должен успешно скачать и проверить файлы в пустой каталог"
 
-grep -q "Скачиваю файл 1/2: greeting.txt" "$TEST_ROOT/err-empty.log" \
-  || fail "bootstrap_selfinstall должен показывать счётчик файлов при скачивании (1/2: greeting.txt)"
-grep -q "Скачиваю файл 2/2: runner.sh" "$TEST_ROOT/err-empty.log" \
-  || fail "bootstrap_selfinstall должен показывать счётчик файлов при скачивании (2/2: runner.sh)"
-grep -q "Релиз для установки: v-test-1" "$TEST_ROOT/err-empty.log" \
-  || fail "bootstrap_selfinstall должен до скачивания назвать устанавливаемый релиз"
+# Вид вывода (plain, stderr в файл): подробности по файлам - не отдельными
+# строками "Скачиваю файл N/M", а полосой прогресса одного шага.
+grep -q "Скачиваю файл [0-9]*/[0-9]*:" "$TEST_ROOT/err-empty.log" \
+  && fail "строк 'Скачиваю файл N/M:' на каждый файл быть не должно - вместо них прогресс"
+grep -q '^\[\.\.\] Файлы релиза 1/' "$TEST_ROOT/err-empty.log" \
+  || fail "нет строки прогресса '[..] Файлы релиза 1/'"
+grep -q '\[OK\] Файлы релиза' "$TEST_ROOT/err-empty.log" \
+  || fail "нет итоговой строки '[OK] Файлы релиза'"
+grep -q '\[OK\] Манифест v-test-1' "$TEST_ROOT/err-empty.log" \
+  || fail "нет строки '[OK] Манифест v-test-1' (релиз должен быть назван до скачивания файлов)"
 
 [ -f "$DST1/greeting.txt" ] || fail "greeting.txt не скачан"
 [ -f "$DST1/runner.sh" ] || fail "runner.sh не скачан"
@@ -151,6 +159,38 @@ grep -q '^RELEASE_TAG=v-test-1$' "$MANIFEST_DST1" || fail "installed-manifest.tx
 grep -q '^FILE|installer|greeting.txt|' "$MANIFEST_DST1" || fail "installed-manifest.txt: нет строки FILE для greeting.txt"
 
 echo "test_install_bootstrap.sh: часть 1 (пустой каталог, installed-manifest.txt сохранён) OK" >&2
+
+# --- 1b: обрыв соединения (curl 35) на первой попытке - повтор тихий: на
+# экране нет "Сбой загрузки", подробности только в журнале UI_LOG, а
+# на экране - подпись прогресса "повтор 2/3".
+DST1B=$TEST_ROOT/dst-retry
+mkdir -p "$DST1B"
+: > "$UI_LOG"
+(
+  DIR=$DST1B
+  TMPROOT=$TEST_ROOT
+  UPDATE_RELEASE_BASE=$BASE_URL
+  UPDATE_STATE_DIR=$DST1B/.update
+  INSTALLED_MANIFEST_PATH=$DST1B/.update/installed-manifest.txt
+  INSTALL_RETRY_DELAY=0
+  RETRY_CNT=$TEST_ROOT/retry1b.cnt; echo 0 > "$RETRY_CNT"
+  bootstrap_http_get() {
+    case $1 in
+      */greeting.txt)
+        n=$(($(cat "$RETRY_CNT") + 1)); echo "$n" > "$RETRY_CNT"
+        [ "$n" -ge 2 ] || return 35 ;;
+    esac
+    curl -fsS --max-time 10 "$1"
+  }
+  bootstrap_selfinstall
+) 2>"$TEST_ROOT/err-retry.log" || fail "повтор после обрыва (35) должен завершиться успехом"
+grep -q "Сбой загрузки" "$TEST_ROOT/err-retry.log" \
+  && fail "'Сбой загрузки' не должен попадать на экран (только в журнал)"
+grep -q "повтор 2 из" "$UI_LOG" || fail "в UI_LOG нет 'повтор 2 из'"
+grep -q "повтор 2/3" "$TEST_ROOT/err-retry.log" || fail "на экране нет подписи прогресса 'повтор 2/3'"
+[ -f "$DST1B/greeting.txt" ] || fail "после повтора файл должен быть скачан"
+
+echo "test_install_bootstrap.sh: часть 1b (тихий повтор, журнал) OK" >&2
 
 # --- 2: повреждённая сумма - чистый отказ, ничего не записано ---
 SRV_BAD=$TEST_ROOT/srv-bad
