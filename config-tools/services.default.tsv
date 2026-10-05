@@ -1,0 +1,184 @@
+# services.default.tsv - встроенные сервисы шаблона config.example.yaml.
+# Из этой таблицы render_services.awk собирает участки шаблона между
+# маркерами SERVICE_GROUPS, SERVICE_PROVIDERS и SERVICE_RULES. После
+# правки пересоберите шаблон (см. AGENTS.md); формат - в шапке
+# render_services.awk. Поля - через одну табуляцию, порядок строк значим.
+section	media	Видео и медиа
+section	social	Соцсети и мессенджеры
+section	platforms	Платформы и сервисы
+section	games	Игры и устройства
+section	infra	Инфраструктура и диагностика
+section	other	Прочее
+svc	youtube	YouTube	media
+icon	youtube	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+svc	twitch	Twitch	media
+icon	twitch	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png
+svc	tmdb	TMDB	media
+svc	spotify	Spotify	media
+icon	spotify	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png
+svc	kinopub	KinoPub	media
+icon	kinopub	https://d5l07j6ktywkt.cloudfront.net/sdpreview/0/3af9d99e/1440378196-55da6d54e3d54/preview.png
+svc	adult	18+	media
+icon	adult	https://www.svgrepo.com/show/530357/peach.svg
+svc	torrents	Torrents	media
+icon	torrents	https://www.svgrepo.com/show/443524/brand-utorrent.svg
+svc	discord	Discord	social
+icon	discord	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+svc	telegram	Telegram	social
+icon	telegram	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+svc	reddit	Reddit	social
+icon	reddit	https://www.redditstatic.com/shreddit/assets/favicon/192x192.png
+svc	twitter	Twitter	social
+icon	twitter	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png
+svc	meta	Meta	social
+icon	meta	https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
+svc	ai	AI	platforms
+icon	ai	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+svc	apple	Apple	platforms
+icon	apple	https://www.svgrepo.com/show/494227/apple-rounded-border.svg
+svc	google	Google	platforms
+icon	google	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png
+svc	microsoft	Microsoft	platforms
+icon	microsoft	https://www.svgrepo.com/show/452062/microsoft.svg
+svc	steam	Steam	platforms
+icon	steam	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png
+svc	zoom	Zoom	platforms
+icon	zoom	https://www.svgrepo.com/show/452140/zoom.svg
+svc	playstation	PlayStation	games
+icon	playstation	https://www.svgrepo.com/show/452087/playstation.svg
+svc	bambulab	BambuLab	games
+icon	bambulab	https://www.svgrepo.com/show/487246/cube.svg
+svc	dell	Dell	games
+icon	dell	https://www.svgrepo.com/show/303445/dell-2-logo.svg
+svc	intel	intel	games
+icon	intel	https://www.svgrepo.com/show/349412/intel.svg
+svc	cdn	CDN	infra
+icon	cdn	https://www.svgrepo.com/show/396567/globe-with-meridians.svg
+gkey	cdn	proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]
+svc	speedtest	Speedtest	infra
+icon	speedtest	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png
+gkey	speedtest	include-all: true
+svc	ipdetect	IP Detect	infra
+icon	ipdetect	https://www.svgrepo.com/show/502437/educate.svg
+svc	other	other	other
+icon	other	https://www.svgrepo.com/show/12922/growth.svg
+prov	-	adlist@domain: { <<: *domain, url: "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs" }
+prov	cdn	akamai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs" }
+prov	cdn	akamai@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs" }
+prov	cdn	amazon@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs" }
+prov	cdn	amazon@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs" }
+prov	apple	apple@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs" }
+prov	ai	category-ai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
+prov	cdn	cdn77@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs" }
+prov	-	category-ru@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs" }
+prov	cdn	cloudflare@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs" }
+prov	cdn	cloudflare@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs" }
+prov	dell	dell@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/dell.mrs" }
+prov	cdn	digitalocean@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs" }
+prov	cdn	digitalocean@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs" }
+prov	discord	discord@classical: { <<: *classical, url: "https://github.com/zxc-rv/assets/raw/main/rules/discord.list" }
+prov	cdn	fastly@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs" }
+prov	cdn	fastly@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs" }
+prov	cdn	gcore@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs" }
+prov	google	google@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs" }
+prov	google	google@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs" }
+prov	cdn	hetzner@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs" }
+prov	cdn	hetzner@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs" }
+prov	intel	intel@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs" }
+prov	meta	meta@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs" }
+prov	meta	meta@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs" }
+prov	microsoft	microsoft@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs" }
+prov	cdn	oracle@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs" }
+prov	cdn	oracle@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs" }
+prov	cdn	ovh@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs" }
+prov	playstation	playstation@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs" }
+prov	reddit	reddit@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs" }
+prov	-	refilter@domain: { <<: *domain, url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs" }
+prov	cdn	scaleway@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs" }
+prov	spotify	spotify@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs" }
+prov	steam	steam@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs" }
+prov	speedtest	speedtest@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs" }
+prov	telegram	telegram@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs" }
+prov	telegram	telegram@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs" }
+prov	tmdb	tmdb@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tmdb.mrs" }
+prov	twitch	twitch@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs" }
+prov	twitter	twitter@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs" }
+prov	cdn	vodafone@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs" }
+prov	cdn	vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
+prov	youtube	youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
+prov	-	quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
+rule	kinopub	GEOSITE,kinopub,KinoPub
+rule	kinopub	DOMAIN-SUFFIX,firebase-settings.crashlytics.com,KinoPub
+rule	kinopub	DOMAIN-SUFFIX,firebaseinstallations.googleapis.com,KinoPub
+rule	kinopub	DOMAIN-SUFFIX,firebaseremoteconfigrealtime.googleapis.com,KinoPub
+rule	kinopub	DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,KinoPub
+rule	kinopub	DOMAIN-SUFFIX,pkr.ovh,KinoPub
+rule	adult	GEOSITE,category-porn,18+
+rule	apple	IP-ASN,714,Apple
+rule	apple	RULE-SET,apple@domain,Apple
+rule	zoom	GEOSITE,zoom,Zoom
+rule	zoom	DOMAIN-SUFFIX,zoom.us,Zoom
+rule	zoom	DOMAIN-SUFFIX,zoom.com,Zoom
+rule	zoom	DOMAIN-SUFFIX,zoomgov.com,Zoom
+rule	zoom	DOMAIN-SUFFIX,zoomcdn.com,Zoom
+rule	ipdetect	GEOSITE,category-ip-geo-detect,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,browserleaks.com,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,ip138.com,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,whatismyip.host,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,ipwho.is,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,ipx.ac,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,trackip.net,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,wimi5.com,IP Detect
+rule	ipdetect	DOMAIN-SUFFIX,test-ipv6.com,IP Detect
+rule	microsoft	RULE-SET,microsoft@domain,Microsoft
+rule	other	DOMAIN-SUFFIX,onlyfans.com,other
+rule	other	DOMAIN-SUFFIX,fansly.com,other
+rule	other	DOMAIN-SUFFIX,patreon.com,other
+rule	other	DOMAIN-SUFFIX,provider-c.pro,other
+rule	other	DOMAIN-SUFFIX,provider-c.info,other
+rule	torrents	GEOSITE,rutracker,Torrents
+rule	torrents	DOMAIN-SUFFIX,rutor.info,Torrents
+rule	torrents	DOMAIN-SUFFIX,lostfilm.tv,Torrents
+rule	torrents	DOMAIN-SUFFIX,nnmclub.to,Torrents
+rule	torrents	DOMAIN-SUFFIX,kinozal.tv,Torrents
+rule	torrents	DOMAIN-SUFFIX,fast-torrent.ru,Torrents
+rule	torrents	DOMAIN-SUFFIX,tapochek.net,Torrents
+rule	torrents	DOMAIN-SUFFIX,rgfootball.net,Torrents
+rule	torrents	DOMAIN-SUFFIX,thepiratebay.org,Torrents
+rule	torrents	DOMAIN-SUFFIX,rarbg.to,Torrents
+rule	playstation	RULE-SET,playstation@domain,PlayStation
+rule	dell	RULE-SET,dell@domain,Dell
+rule	bambulab	DOMAIN-SUFFIX,bambulab.com,BambuLab
+rule	intel	RULE-SET,intel@domain,intel
+rule	-	OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # Разблокировка высокого качества на Twitch.tv
+rule	ai	DOMAIN-SUFFIX,opencode.ai,AI # OpenCode Zen передаёт upstream-провайдерам геозаголовки клиента
+rule	ai	DOMAIN-SUFFIX,gamma.app,AI # Не входит в category-ai 
+rule	ai	RULE-SET,category-ai@domain,AI
+rule	steam	RULE-SET,steam@domain,Steam
+rule	spotify	RULE-SET,spotify@domain,Spotify
+rule	reddit	RULE-SET,reddit@domain,Reddit
+rule	youtube	RULE-SET,youtube@domain,YouTube
+rule	twitch	RULE-SET,twitch@domain,Twitch
+rule	tmdb	RULE-SET,tmdb@domain,TMDB
+rule	twitter	RULE-SET,twitter@domain,Twitter
+rule	discord	RULE-SET,discord@classical,Discord
+rule	speedtest	RULE-SET,speedtest@domain,Speedtest
+rule	meta	OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
+rule	telegram	OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram
+rule	-	OR,((RULE-SET,refilter@domain),(RULE-SET,user@classical)),⚙️Manual
+rule	google	OR,((RULE-SET,google@domain),(RULE-SET,google@ipcidr)),Google
+rule	-	RULE-SET,category-ru@domain,DIRECT
+rule	cdn	OR,((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,fastly@domain),(RULE-SET,fastly@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,oracle@domain),(RULE-SET,oracle@ipcidr)),CDN
+rule	cdn	OR,((RULE-SET,hetzner@domain),(RULE-SET,hetzner@ipcidr)),CDN
+rule	cdn	RULE-SET,scaleway@ipcidr,CDN
+rule	cdn	RULE-SET,ovh@ipcidr,CDN
+rule	cdn	RULE-SET,vultr@ipcidr,CDN
+rule	cdn	RULE-SET,vodafone@ipcidr,CDN
+rule	cdn	RULE-SET,gcore@ipcidr,CDN
+rule	cdn	RULE-SET,cdn77@ipcidr,CDN

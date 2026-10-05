@@ -169,7 +169,6 @@ proxy-groups:
     type: select
     proxies: ['⚡ Самые быстрые + Fallback', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
 
-  # --- SERVICE_GROUPS:BEGIN --- (собирается из services.default.tsv, см. render_services.awk)
   # --- Видео и медиа ---
   - name: YouTube
     <<: *select-default
@@ -281,7 +280,6 @@ proxy-groups:
     <<: *select-default
     icon: https://www.svgrepo.com/show/12922/growth.svg
 
-  # --- SERVICE_GROUPS:END ---
   # Служебная группа mihomo-speedtest: через неё и вход mst-speedtest ниже
   # спидтест проверяет WireGuard/AmneziaWG-ноды на уже работающем экземпляре
   # ноды в этом ядре (второй клиент с тем же ключом ломает соединение). Рабочий
@@ -313,7 +311,6 @@ geox-url:
 
 # --- Провайдеры правил ---
 rule-providers:
-  # --- SERVICE_PROVIDERS:BEGIN --- (собирается из services.default.tsv)
   adlist@domain: { <<: *domain, url: "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs" }
   akamai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs" }
   akamai@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs" }
@@ -359,7 +356,6 @@ rule-providers:
   vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
   youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
   quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
-  # --- SERVICE_PROVIDERS:END ---
   user@classical:
     type: inline
     behavior: classical
@@ -369,7 +365,6 @@ rule-providers:
 rules:
   - RULE-SET,adlist@domain,REJECT # Блокировка рекламы
   - RULE-SET,quic@inline,REJECT # Блокировка QUIC
-  # --- SERVICE_RULES:BEGIN --- (собирается из services.default.tsv)
 
   # --- KinoPub ---
   - GEOSITE,kinopub,KinoPub
@@ -408,7 +403,7 @@ rules:
   # --- Microsoft ---
   - RULE-SET,microsoft@domain,Microsoft
 
-  # --- other ---
+  # --- Необходимые сервисы с выбором ---
   - DOMAIN-SUFFIX,onlyfans.com,other
   - DOMAIN-SUFFIX,fansly.com,other
   - DOMAIN-SUFFIX,patreon.com,other
@@ -439,57 +434,24 @@ rules:
   # --- intel ---
   - RULE-SET,intel@domain,intel
 
-  # --- Особые правила ---
   - OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # Разблокировка высокого качества на Twitch.tv
-
-  # --- AI ---
   - DOMAIN-SUFFIX,opencode.ai,AI # OpenCode Zen передаёт upstream-провайдерам геозаголовки клиента
   - DOMAIN-SUFFIX,gamma.app,AI # Не входит в category-ai 
   - RULE-SET,category-ai@domain,AI
-
-  # --- Steam ---
   - RULE-SET,steam@domain,Steam
-
-  # --- Spotify ---
   - RULE-SET,spotify@domain,Spotify
-
-  # --- Reddit ---
   - RULE-SET,reddit@domain,Reddit
-
-  # --- YouTube ---
   - RULE-SET,youtube@domain,YouTube
-
-  # --- Twitch ---
   - RULE-SET,twitch@domain,Twitch
-
-  # --- TMDB ---
   - RULE-SET,tmdb@domain,TMDB
-
-  # --- Twitter ---
   - RULE-SET,twitter@domain,Twitter
-
-  # --- Discord ---
   - RULE-SET,discord@classical,Discord
-
-  # --- Speedtest ---
   - RULE-SET,speedtest@domain,Speedtest
-
-  # --- Meta ---
   - OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
-
-  # --- Telegram ---
   - OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram
-
-  # --- Особые правила ---
   - OR,((RULE-SET,refilter@domain),(RULE-SET,user@classical)),⚙️Manual
-
-  # --- Google ---
   - OR,((RULE-SET,google@domain),(RULE-SET,google@ipcidr)),Google
-
-  # --- Особые правила ---
   - RULE-SET,category-ru@domain,DIRECT
-
-  # --- CDN ---
   - OR,((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr)),CDN
   - OR,((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr)),CDN
   - OR,((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr)),CDN
@@ -503,5 +465,4 @@ rules:
   - RULE-SET,vodafone@ipcidr,CDN
   - RULE-SET,gcore@ipcidr,CDN
   - RULE-SET,cdn77@ipcidr,CDN
-  # --- SERVICE_RULES:END ---
   - MATCH,DIRECT
