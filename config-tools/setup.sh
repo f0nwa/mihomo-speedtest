@@ -445,7 +445,7 @@ main() {
   fi
 
   echo "Конфиг применён, запускаю install.sh" >&2
-  exec sh "$SELFDIR/install.sh"
+  MST_CONFIG_FROM_TEMPLATE=1 exec sh "$SELFDIR/install.sh"
 }
 
 if [ "${SETUP_LIB_ONLY:-0}" != 1 ]; then

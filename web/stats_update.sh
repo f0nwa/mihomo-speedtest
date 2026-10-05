@@ -39,6 +39,12 @@ export UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-} UPDATE_STATE_DIR=${UPDATE_ST
 # аналогично UPDATE_HTTP_CMD у update.sh.
 UPDATE_NOTES_API_BASE=${UPDATE_NOTES_API_BASE:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases/tags}
 UPDATE_NOTES_HTTP_CMD=${UPDATE_NOTES_HTTP_CMD:-}
+# config_schema в status: схема конфига установленного релиза
+# (installed-manifest.txt) против применённой к config.yaml
+# (config-schema-version) - веб показывает отдельную карточку «Доступно
+# обновление конфига» (спецификация 2026-10-05-config-update-card).
+MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
+CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 
 json_error() {
   echo "Content-Type: application/json; charset=utf-8"
@@ -273,9 +279,33 @@ except Exception:
 ' "$1"
 }
 
+# Конфиг сделан по шаблону проекта (есть провайдер fast). Копия
+# has_fast_group() из install.sh/uninstall.sh (то же дублирование, что и там).
+has_fast_group() {
+  grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
+}
+
+# {"applied":N,"available":M|null,"template":true|false}; нет файла схемы
+# или в нём не число - applied=1 (как в update_prepare.sh), нет
+# установленного манифеста - available=null.
+config_schema_json() {
+  csj_state=${UPDATE_STATE_DIR:-$DIR/.update}
+  csj_applied=$(cat "$csj_state/config-schema-version" 2>/dev/null | head -n 1) || csj_applied=
+  case $csj_applied in ''|*[!0-9]*) csj_applied=1 ;; esac
+  csj_available=$(sed -n 's/^CONFIG_SCHEMA_VERSION=\([0-9][0-9]*\)$/\1/p' "$csj_state/installed-manifest.txt" 2>/dev/null | head -n 1) || csj_available=
+  [ -n "$csj_available" ] || csj_available=null
+  # Ведущие нули недопустимы в числах JSON: "03" -> 3.
+  csj_applied=$(printf '%s' "$csj_applied" | sed 's/^0*\([0-9]\)/\1/')
+  csj_available=$(printf '%s' "$csj_available" | sed 's/^0*\([0-9]\)/\1/')
+  csj_template=false
+  has_fast_group "$CONFIG" && csj_template=true
+  printf '{"applied":%s,"available":%s,"template":%s}' "$csj_applied" "$csj_available" "$csj_template"
+}
+
 cmd_status() {
-  printf '{"last_check":%s,"job":%s,"log":%s}\n' \
-    "$(read_json_or_null "$LAST_CHECK_FILE")" "$(read_json_or_null "$JOB_FILE")" "$(read_job_log_json "$JOB_LOG")"
+  printf '{"last_check":%s,"job":%s,"log":%s,"config_schema":%s}\n' \
+    "$(read_json_or_null "$LAST_CHECK_FILE")" "$(read_json_or_null "$JOB_FILE")" "$(read_job_log_json "$JOB_LOG")" \
+    "$(config_schema_json)"
 }
 
 # --- prepare/discard: фоновый воркер и экран подтверждения (задача 3) ---

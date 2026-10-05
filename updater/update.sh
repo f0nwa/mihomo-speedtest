@@ -6,7 +6,7 @@ export LC_ALL
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
-UPDATER_VERSION=7
+UPDATER_VERSION=8
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 # Канал обновлений: stable (releases/latest) или dev (наибольший тег x.y.z
@@ -414,6 +414,7 @@ usage() {
   update.sh --check
   update.sh --plan [--components=id1,id2,...] [--format=text|json]
   update.sh --prepare [--components=id1,id2,...] [--format=text|json]
+      (миграция config.yaml к шаблону - только явно: --components=config-tools,active-config)
   update.sh --verify-plan <plan-id> [--confirm-local] [--confirm-config] [--format=text|json]
   update.sh --show-config-diff <plan-id> [--full-config-diff] [--format=text|json]
   update.sh --discard-plan <plan-id>
@@ -449,6 +450,22 @@ done
 case $cmd in
   verify-plan|discard-plan|show-config-diff|apply|rollback-last|recover) [ -z "$components" ] || die 'Выбор компонентов уже закреплён в plan-id' ;;
 esac
+# Миграция рабочего конфига (виртуальный active-config) - только по явному
+# выбору: рост CONFIG_SCHEMA_VERSION сам её больше не добавляет, веб-интерфейс
+# показывает отдельное обновление конфига через редактор (спецификация
+# 2026-10-05-config-update-card). active-config не объявлен в манифесте:
+# убираем его из списка, а update_plan.awk добавит компонент сам при
+# MIGRATE_CONFIG=1. Вызывается и при чтении request.txt подготовленного плана.
+split_config_request() {
+  config_requested=0
+  case ,$components, in
+    *,active-config,*)
+      config_requested=1
+      components=$(printf '%s\n' "$components" | awk -F, '{for (i = 1; i <= NF; i++) if ($i != "active-config" && $i != "") printf "%s%s", (n++ ? "," : ""), $i}')
+      [ -n "$components" ] || components=config-tools ;;
+  esac
+}
+split_config_request
 if [ "$confirm_local" = 1 ] && [ "$cmd" != verify-plan ] && [ "$cmd" != apply ]; then die '--confirm-local применяется только при --verify-plan/--apply'; fi
 if [ "$confirm_config" = 1 ] && [ "$cmd" != verify-plan ] && [ "$cmd" != apply ]; then die '--confirm-config применяется только при --verify-plan/--apply'; fi
 if [ "$full_config_diff" = 1 ] && [ "$format" = json ]; then die 'Полный diff допускается только в текстовом формате'; fi
@@ -555,7 +572,9 @@ if [ "$cmd" = prepare ]; then
     # --format=json ничего не попадает.
     echo 'Подготовка обновления: загрузка файлов релиза...' >&2
     # Передаём только фиксированные, уже разобранные CLI-аргументы.
-    bootstrap_prepare --prepare "--components=$components" "--format=$format"
+    request_components=$components
+    [ "$config_requested" != 1 ] || request_components="${components:+$components,}active-config"
+    bootstrap_prepare --prepare "--components=$request_components" "--format=$format"
     exit 0
   fi
   # Не подключаем helper, пока его сумма не сверена с закреплённым манифестом.

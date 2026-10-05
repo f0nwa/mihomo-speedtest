@@ -31,7 +31,11 @@ RELEASE_VERSION остаётся целым счётчиком для сравн
 `releases/latest/download/manifest.txt` (самый новый стабильный) и
 манифеста наибольшего dev-тега x.y.z (нечётный minor), если такой есть,
 + 1; MIN_UPDATER_VERSION/CONFIG_SCHEMA_VERSION берутся из манифеста с
-большим RELEASE_VERSION (явные флаги cut_release.sh важнее). dev-релиз публикуется как pre-release, поэтому
+большим RELEASE_VERSION (явные флаги cut_release.sh важнее). Если sha256
+config.example.yaml, migrate_config.awk или fast_wg.awk в строках FILE этого
+манифеста отличаются от текущих файлов (или строки нет), cut_release.sh сам
+поднимает CONFIG_SCHEMA_VERSION на 1 и пишет об этом; `--dry-run` печатает
+`CONFIG_SCHEMA_BUMPED=0|1`. Нет ни одной из трёх строк - схема прежняя с WARN. dev-релиз публикуется как pre-release, поэтому
 `releases/latest` всегда указывает на стабильный релиз.
 
 Канал роутера задаёт `UPDATE_CHANNEL=stable|dev` (окружение или
@@ -312,10 +316,17 @@ REVIEW требует внимания перед будущим примене�
 
 ## Кандидат в плане обновления: часть 3.2
 
-При CONFIG_SCHEMA_VERSION выше установленной схемы (без метаданных - 1)
-план автоматически включает виртуальный active-config с зависимостью
-config-tools. Манифест не может объявить active-config или config.yaml как
-FILE. При равной схеме миграция не запускается. Подготовка появилась в CLI
+С UPDATER_VERSION 8 рост CONFIG_SCHEMA_VERSION сам миграцию не включает:
+проект обновляется, config.yaml и config-schema-version не меняются, а
+установленный манифест несёт новую схему. Веб-интерфейс сравнивает её с
+config-schema-version и показывает отдельную карточку «Доступно обновление
+конфига», которая ведёт в редактор («Миграция к шаблону», затем
+«Сохранить и применить»; успешное применение записывает схему). Виртуальный
+active-config с зависимостью config-tools остаётся для SSH и включается
+только явным выбором `--components=config-tools,active-config` при схеме
+релиза выше установленной (без метаданных - 1); без роста схемы такой выбор
+отклоняется («Обновление конфига не требуется»). Манифест не может объявить
+active-config или config.yaml как FILE. Подготовка появилась в CLI
 версии 5; применение требует версии 6.
 
 --prepare скачивает инструменты и шаблон точного релиза, проверяет размер,
@@ -327,7 +338,7 @@ config-diff.json и config-info.txt. Поэтому при миграции ис
 diff и mihomo -t, проверяет исходный снимок и все сохранённые результаты.
 
 ```sh
-sh /opt/etc/mihomo-speedtest/update.sh --prepare --components=config-tools --format=json
+sh /opt/etc/mihomo-speedtest/update.sh --prepare --components=config-tools,active-config --format=json
 # plan_id берётся из результата подготовки:
 sh /opt/etc/mihomo-speedtest/update.sh --show-config-diff "$plan_id" --format=json
 sh /opt/etc/mihomo-speedtest/update.sh --show-config-diff "$plan_id" --full-config-diff

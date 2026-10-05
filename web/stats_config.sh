@@ -11,7 +11,8 @@
 #   save            POST - проверить, сохранить бэкап, заменить, перезапустить
 #   restore         POST - то же для выбранного бэкапа (?kind=&name=)
 #   restore-working POST - найти самый свежий бэкап, проходящий mihomo -t, и применить
-#   repair          POST - починка текста (?mode=format|template), без записи
+#   repair          POST - починка текста (?mode=format|template), без записи;
+#                          для template в ответе schema - схема установленного релиза
 #   import-wg       POST - импорт WireGuard/AmneziaWG .conf в текст редактора,
 #                          без записи: тело - блоки "### MST-WG <имя ноды>" с
 #                          .conf и последним "### MST-CONFIG" с текстом
@@ -22,6 +23,8 @@
 # MST_CONFIG_LIB=1 - подключение как библиотеки: функции и переменные
 # определяются, действие не выполняется (см. stats_xkeen.sh).
 #
+# save принимает ?schema=N (текст из "Миграции к шаблону"): после успешного
+# применения N пишется в $UPDATE_STATE_DIR/config-schema-version.
 # save/restore/restore-working принимают ?base=<отпечаток из read>: если
 # config.yaml успели поменять с момента открытия редактора - 409 conflict.
 #
@@ -46,6 +49,11 @@ CONFIG_TEMPLATE=${CONFIG_TEMPLATE:-$DIR/config.example.yaml}
 MIGRATE_SCRIPT=${MIGRATE_SCRIPT:-$DIR/migrate_config.sh}
 WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
 FAST_WG_AWK=${FAST_WG_AWK:-$DIR/fast_wg.awk}
+# Схема конфига: доступная - CONFIG_SCHEMA_VERSION установленного релиза,
+# применённая - config-schema-version (её пишет save мигрированного текста,
+# см. record_schema()); по ним вкладка «Обновления» показывает карточку
+# «Доступно обновление конфига».
+UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-$DIR/.update}
 BIN=${BIN:-/opt/sbin/mihomo}
 XKEEN_BIN=${XKEEN_BIN:-/opt/sbin/xkeen}
 PIDOF_CMD=${PIDOF_CMD:-pidof}
@@ -346,6 +354,33 @@ restart_mihomo() {
   return "$hrc"
 }
 
+# Схема конфига установленного релиза (число) или пусто.
+available_schema() {
+  sed -n 's/^CONFIG_SCHEMA_VERSION=\([0-9][0-9]*\)$/\1/p' "$UPDATE_STATE_DIR/installed-manifest.txt" 2>/dev/null | head -n 1 | sed 's/^0*\([0-9]\)/\1/'
+}
+
+# После успешного применения (в том числе "не изменился") записывает
+# ?schema=N в config-schema-version: редактор передаёт N, только если текст
+# получен "Миграцией к шаблону". N - целое не больше доступной схемы, иначе
+# игнорируется. Ошибка записи - WARN в журнал, не ошибка сохранения.
+record_schema() {
+  rs_n=$(query_param schema)
+  case $rs_n in ''|*[!0-9]*) return 0 ;; esac
+  rs_n=$(printf '%s' "$rs_n" | sed 's/^0*\([0-9]\)/\1/')
+  rs_avail=$(available_schema)
+  [ -n "$rs_avail" ] || return 0
+  # Сравнение длинных целых без арифметики sh: по длине, затем по строке.
+  awk -v n="$rs_n" -v a="$rs_avail" 'BEGIN { if (length(n) != length(a)) exit !(length(n) < length(a)); exit !(n "x" <= a "x") }' || return 0
+  rs_tmp=$UPDATE_STATE_DIR/.config-schema-version.$$
+  if mkdir -p "$UPDATE_STATE_DIR" 2>/dev/null && printf '%s\n' "$rs_n" > "$rs_tmp" 2>/dev/null &&
+      chmod 0600 "$rs_tmp" 2>/dev/null && mv "$rs_tmp" "$UPDATE_STATE_DIR/config-schema-version" 2>/dev/null; then
+    alog "Схема конфига: $rs_n"
+  else
+    rm -f "$rs_tmp" 2>/dev/null
+    alog "WARN: не удалось записать схему конфига ($UPDATE_STATE_DIR/config-schema-version)"
+  fi
+}
+
 # Применение кандидата $1 (уже в $WORK). Проверяет base, mihomo -t,
 # делает бэкап, заменяет config.yaml, перезапускает ядро; при провале
 # перезапуска - откат. Пишет JSON-ответ и завершает скрипт.
@@ -369,6 +404,7 @@ apply_candidate() {
   alog "Проверка пройдена"
   if [ -f "$target" ] && cmp -s "$cand" "$target"; then
     alog "Конфиг не изменился - запись и перезапуск не нужны"
+    record_schema
     printf '{"ok":true,"unchanged":true,"base":"%s"}\n' "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -383,12 +419,14 @@ apply_candidate() {
   rrc=0; restart_mihomo || rrc=$?
   if [ "$rrc" = 0 ]; then
     alog "ГОТОВО: конфиг применён, ядро перезапущено"
+    record_schema
     printf '{"ok":true,"backup":%s,"restarted":true,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   if [ "$rrc" = 2 ]; then
     # xkeen не найден: конфиг записан, перезапуск - вручную.
     alog "ГОТОВО: конфиг записан, ядро не перезапускалось"
+    record_schema
     printf '{"ok":true,"backup":%s,"restarted":false,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -491,9 +529,11 @@ cmd_repair() {
     *) fail_json 400 bad_mode "Неизвестный режим починки" ;;
   esac
   rc=0; check_file "$out" || rc=$?
-  printf '{"ok":true,"mode":"%s","text":%s,"fixes":%s,"report":%s,"check":%s}\n' \
+  schema=null
+  if [ "$mode" = template ]; then schema=$(available_schema); [ -n "$schema" ] || schema=null; fi
+  printf '{"ok":true,"mode":"%s","text":%s,"fixes":%s,"report":%s,"check":%s,"schema":%s}\n' \
     "${mode:-format}" "$(jstr_file "$out")" "$(lines_json "$WORK/fixes")" \
-    "$(lines_json "$WORK/report")" "$(check_json "$rc")" > "$WORK/resp"
+    "$(lines_json "$WORK/report")" "$(check_json "$rc")" "$schema" > "$WORK/resp"
   reply 200 "$WORK/resp"
 }
 

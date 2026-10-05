@@ -17,6 +17,12 @@ export function configDirty() { return !!(configView && configView.dirty); }
 
 // Вызывается при уходе с вкладки (render() в app.js).
 export function leaveConfig() { configView = null; }
+
+// Карточка «Доступно обновление конфига» (вкладка «Обновления») просит
+// сразу после открытия вкладки запустить «Миграцию к шаблону» - без
+// повторного подтверждения, всё объяснено в карточке.
+var pendingMigration = false;
+export function requestTemplateMigration() { pendingMigration = true; }
 var codeMirrorPromise = null;
 
 function loadCodeMirror() {
@@ -309,6 +315,11 @@ export function renderConfig() {
     clearApp();
     view.base = data.base;
     view.saved = data.text || '';
+    // Схема шаблона, если текст в редакторе получен «Миграцией к шаблону»:
+    // передаётся в save (?schema=N) и после успешного применения
+    // записывается как применённая - карточка на «Обновлениях» исчезает.
+    // Любая другая замена текста (загрузка, бэкап, импорт, отмена) сбрасывает.
+    var migrationSchema = null;
 
     var main = card('Конфиг Mihomo');
     main.appendChild(el('p', 'hint', data.path + ' - перед применением конфиг проверяется mihomo -t, ' +
@@ -362,7 +373,8 @@ export function renderConfig() {
       'проверьте результат и нажмите «Сохранить и применить». Откат к рабочему бэкапу сразу применяет ' +
       'самый свежий бэкап, который проходит mihomo -t. Импорт WireGuard добавляет ноды из файлов .conf ' +
       '(WireGuard и AmneziaWG) в proxies: и в группы 🚀 Авто по пингу, 🛡️Fallback-Stable, ⚙️Manual, а для ⚡ Быстрый пул - в свою группу FAST-WG <нода>; ' +
-      'новые строки отмечаются зелёной полосой слева, изменённые - жёлтой.'));
+      'новые строки отмечаются зелёной полосой слева, изменённые - жёлтой. После применения миграции ' +
+      'карточка «Доступно обновление конфига» на вкладке «Обновления» исчезнет.'));
     repairCard.appendChild(row2);
     var wgInput = el('input');
     wgInput.type = 'file'; wgInput.accept = '.conf'; wgInput.multiple = true; wgInput.hidden = true;
@@ -480,7 +492,7 @@ export function renderConfig() {
     function reload(okText, kind, keepEditor) {
       fetchConfigJson('/api/config', 'text').then(function (d) {
         view.base = d.base; view.saved = d.text || '';
-        if (!keepEditor) { view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); }
+        if (!keepEditor) { migrationSchema = null; view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); }
         setDirty();
         if (okText) { msg(okText, kind || 'ok'); }
         loadBackups();
@@ -546,7 +558,7 @@ export function renderConfig() {
           });
           act('В редактор', function () {
             withBackup(function (bd) {
-              view.editor.setValue(bd.text || ''); setDirty();
+              migrationSchema = null; view.editor.setValue(bd.text || ''); setDirty();
               msg('Бэкап ' + fmtBackupName(b.name) + ' загружен в редактор. Проверьте и нажмите «Сохранить и применить».', 'ok');
             });
           });
@@ -571,6 +583,7 @@ export function renderConfig() {
       view.editor = ed;
       ed.refresh();
       loadBackups();
+      if (pendingMigration) { pendingMigration = false; repair('template'); }
     });
 
     checkBtn.addEventListener('click', function () {
@@ -581,19 +594,21 @@ export function renderConfig() {
     });
     saveBtn.addEventListener('click', function () {
       clearOutput(); msg('Проверка, сохранение и перезапуск ядра...', '');
-      applyRequest('/api/config/save?base=' + encodeURIComponent(view.base), view.editor.getValue(), 'Конфиг сохранён.');
+      applyRequest('/api/config/save?base=' + encodeURIComponent(view.base) +
+        (migrationSchema !== null ? '&schema=' + migrationSchema : ''), view.editor.getValue(), 'Конфиг сохранён.');
     });
     diffBtn.addEventListener('click', function () {
       renderDiff(output, view.saved, view.editor.getValue(), 'сохранённый', 'редактор');
     });
     resetBtn.addEventListener('click', function () {
       if (view.dirty && !window.confirm('Отменить все несохранённые правки?')) { return; }
-      view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); setDirty(); msg('', ''); clearOutput();
+      migrationSchema = null; view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); setDirty(); msg('', ''); clearOutput();
     });
     function repair(mode) {
       busy(true); clearOutput(); msg('Починка...', '');
       var before = view.editor.getValue();
       postText('/api/config/repair?mode=' + mode, before).then(function (r) {
+        migrationSchema = (mode === 'template' && typeof r.schema === 'number') ? r.schema : null;
         view.editor.setValue(r.text || ''); setDirty();
         var lines = (r.fixes || []).map(function (f) {
           var p = f.split('|'); return (REPAIR_FIX_LABELS[p[0]] || p[0]) + ' (строк: ' + p[1] + ')';
@@ -735,7 +750,7 @@ export function renderConfig() {
     function applyImport(r) {
       var before = view.editor.getValue();
       view.editor.clearImport();
-      view.editor.setValue(r.text || '');
+      migrationSchema = null; view.editor.setValue(r.text || '');
       var marks = importLineMarks(before, r.text || '');
       if (marks) { view.editor.markImport(marks); }
       setDirty();
@@ -764,7 +779,7 @@ export function renderConfig() {
       var undoBtn = btn(undoRow, 'Отменить импорт', true);
       box.appendChild(undoRow);
       undoBtn.addEventListener('click', function () {
-        view.editor.clearImport(); view.editor.setValue(before); view.editor.markLine(0); setDirty();
+        migrationSchema = null; view.editor.clearImport(); view.editor.setValue(before); view.editor.markLine(0); setDirty();
         clearOutput(); msg('Импорт отменён - текст в редакторе как до импорта.', '');
       });
     }
@@ -788,6 +803,7 @@ export function renderConfig() {
         .then(function () { busy(false); return stopApplyLog(); });
     });
   })['catch'](function (err) {
+    pendingMigration = false;   // миграцию с карточки «Обновлений» не откладываем до следующего открытия
     if (!alive()) { return; }
     var d = err.data || {};
     showError('Не удалось загрузить конфиг: ', d.message ? new Error(d.message) : err);

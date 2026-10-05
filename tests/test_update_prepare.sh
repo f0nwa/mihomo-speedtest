@@ -36,7 +36,7 @@ sys.stdout.buffer.write(p.read_bytes())
   for name in ['update.sh','update_plan.awk','update_prepare.sh','update_transaction.sh']:
    p=ROOT/'updater'/name
    data=p.read_bytes() if p.is_file() else b'# helper not implemented\n'
-   if name=='update.sh':data=data.replace(b'UPDATER_VERSION=7',b'UPDATER_VERSION=7\nprintf fresh >> "$BOOT_LOG"')
+   if name=='update.sh':data=data.replace(b'UPDATER_VERSION=8',b'UPDATER_VERSION=8\nprintf fresh >> "$BOOT_LOG"')
    self.add('updater',name,data, '0755' if name.endswith('.sh') else '0644', 'sh' if name.endswith('.sh') else 'awk')
   self.add('a','a.sh',b'#!/bin/sh\nexit 0\n','0755','sh')
   self.add('b','b.txt',b'hello\n','0644','none')
@@ -83,9 +83,9 @@ sys.stdout.buffer.write(p.read_bytes())
   d,p=self.prepare('a,b');self.assertEqual(d1['plan_id'],d['plan_id'])
  def test_newer_bootstrap_also_verifies_plan(self):
   row=self.entries[0]
-  data=(self.server/'update.sh').read_bytes().replace(b'UPDATER_VERSION=7',b'UPDATER_VERSION=8')
+  data=(self.server/'update.sh').read_bytes().replace(b'UPDATER_VERSION=8',b'UPDATER_VERSION=9')
   (self.server/'update.sh').write_bytes(data);row[3]=str(len(data));row[4]=hashlib.sha256(data).hexdigest()
-  self.release(minimum=8)
+  self.release(minimum=9)
   d,p=self.prepare();self.cli('--verify-plan',d['plan_id'])
  def test_external_http_disguised_as_localhost_rejected(self):
   self.env['UPDATE_RELEASE_BASE']='http://localhost:password@example.com/demo/releases/latest/download'
@@ -187,13 +187,19 @@ sys.stdout.buffer.write(p.read_bytes())
   self.cli('--verify-plan',d['plan_id'],'--confirm-local')
  def test_bootstrap_independent_of_installed_helpers(self):
   local=self.root/'old';local.mkdir()
-  (local/'update.sh').write_bytes((ROOT/'updater'/'update.sh').read_bytes().replace(b'UPDATER_VERSION=7',b'UPDATER_VERSION=2'))
+  (local/'update.sh').write_bytes((ROOT/'updater'/'update.sh').read_bytes().replace(b'UPDATER_VERSION=8',b'UPDATER_VERSION=2'))
   r=subprocess.run(['/bin/sh',str(local/'update.sh'),'--prepare','--components=a','--format=json'],env=self.env,capture_output=True,text=True)
   self.assertEqual(r.returncode,0,r.stdout+r.stderr)
   self.assertTrue(json.loads(r.stdout)['prepared'])
  def test_state_schema_metadata_blocks_migration(self):
+  # Явная миграция при росте схемы требует config-tools, которого нет в релизе.
   self.state.mkdir();(self.state/'config-schema-version').write_text('0\n')
-  self.cli('--prepare','--components=a',ok=False)
+  self.cli('--prepare','--components=a,active-config',ok=False)
+ def test_schema_upgrade_without_request_applies_tools_only(self):
+  # Рост схемы без явного active-config: проект обновляется, конфиг и
+  # config-schema-version не трогаются, установленный манифест - новая схема.
+  self.release(schema=2);d,p=self.prepare()
+  self.assertNotIn('active-config',[c['id'] for c in d['components']])
  def test_prepare_huge_body_and_python_syntax_cleanup(self):
   # Хэш описывает маленький файл, транспорт отдаёт слишком много.
   (self.server/'a.sh').write_bytes(b'x'*600000)
@@ -203,7 +209,7 @@ sys.stdout.buffer.write(p.read_bytes())
   self.cli('--prepare','--components=a',ok=False);self.clean()
   self.assertEqual(list(self.work.rglob('__pycache__')),[])
  def test_schema_and_downgrade_blocked(self):
-  self.release(schema=2);self.cli('--prepare','--components=a',ok=False)
+  self.release(schema=2);self.cli('--prepare','--components=a,active-config',ok=False)
   self.state.mkdir();self.release(schema=1,version=10)
   (self.state/'installed-manifest.txt').write_bytes((self.server/'manifest.txt').read_bytes())
   self.release(version=9);self.cli('--prepare','--components=a',ok=False)

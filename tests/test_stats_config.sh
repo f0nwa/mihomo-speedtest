@@ -162,6 +162,34 @@ out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
 assert_contains 'proxy-groups' "$(printf '%s' "$out" | jget '["text"]')"
 assert_contains 'managed-section-replaced' "$(printf '%s' "$out" | jget '["report"]')"
 
+# --- 11b: схема конфига - repair template отдаёт схему установленного
+#     релиза, save с ?schema=N после успеха пишет config-schema-version
+export UPDATE_STATE_DIR=$TMP/ustate
+out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
+[ "$(printf '%s' "$out" | jget '["schema"]')" = None ] || fail "11b: schema без манифеста"
+mkdir -p "$UPDATE_STATE_DIR"
+printf 'FORMAT_VERSION=2\nRELEASE_VERSION=9\nMIN_UPDATER_VERSION=1\nCONFIG_SCHEMA_VERSION=4\nRELEASE_TAG=v9\n' > "$UPDATE_STATE_DIR/installed-manifest.txt"
+out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
+[ "$(printf '%s' "$out" | jget '["schema"]')" = 4 ] || fail "11b: schema из манифеста"
+SV=$UPDATE_STATE_DIR/config-schema-version
+schema_save() { b=$(cgi read GET '' </dev/null | jget '["base"]'); printf '%s\n' "$1" | cgi save POST "base=$b$2"; }
+schema_save 'mig: 1' '&schema=4' > /dev/null
+[ "$(cat "$SV" 2>/dev/null)" = 4 ] || fail "11b: схема не записана после save"
+[ "$(stat -c %a "$SV" 2>/dev/null || stat -f %Lp "$SV")" = 600 ] || fail "11b: режим файла схемы"
+assert_contains 'Схема конфига: 4' "$(jlog)"
+rm -f "$SV"; schema_save 'mig: 1' '&schema=4' > /dev/null
+[ "$(cat "$SV" 2>/dev/null)" = 4 ] || fail "11b: unchanged тоже записывает схему"
+rm -f "$SV"; schema_save 'KILLCORE: 1' '&schema=4' > /dev/null
+[ ! -e "$SV" ] || fail "11b: схема записана при откате"
+rm -f "$SV"; schema_save 'BROKEN' '&schema=4' > /dev/null
+[ ! -e "$SV" ] || fail "11b: схема записана при ошибке проверки"
+printf '3\n' > "$SV"
+schema_save 'mig: 2' '&schema=5' > /dev/null; [ "$(cat "$SV")" = 3 ] || fail "11b: схема больше доступной"
+schema_save 'mig: 3' '&schema=x' > /dev/null; [ "$(cat "$SV")" = 3 ] || fail "11b: нечисловая схема"
+schema_save 'mig: 4' '' > /dev/null; [ "$(cat "$SV")" = 3 ] || fail "11b: save без schema"
+unset UPDATE_STATE_DIR
+echo up > "$TMP/state"
+
 # --- 12: занятая блокировка живым процессом - 409 busy
 mkdir "$TMP/lock"; echo $$ > "$TMP/lock/pid"
 out=$(printf 'a: 1\n' | cgi save POST '')

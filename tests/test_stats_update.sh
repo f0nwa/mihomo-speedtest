@@ -220,6 +220,30 @@ assert_contains '"job":{"schema_version":1,"state":"running"}' "$OUT_FILLED" "st
 OUT_BAD=$(STATS_UPDATE_RUNTIME_DIR="$RUNDIR2" MST_UPDATE_ACTION=status REQUEST_METHOD=POST DIR="$W" "$W/stats_update.sh")
 assert_contains '"error":"unknown_action"' "$OUT_BAD" "status: POST не поддерживается"
 
+# --- status: config_schema - применённая схема конфига против схемы
+# установленного релиза (отдельная карточка «Доступно обновление конфига») ---
+CS=$TEST_ROOT/cs
+mkdir -p "$CS/state" "$CS/mihomo"
+cs_status() { STATS_UPDATE_RUNTIME_DIR="$RUNDIR2" UPDATE_STATE_DIR="$CS/state" CONFIG="$CS/mihomo/config.yaml" \
+  MST_UPDATE_ACTION=status REQUEST_METHOD=GET DIR="$W" "$W/stats_update.sh"; }
+OUT_CS=$(cs_status)
+assert_contains '"config_schema":{"applied":1,"available":null,"template":false}' "$OUT_CS" "config_schema: нет манифеста и конфига"
+printf 'FORMAT_VERSION=2\nRELEASE_VERSION=9\nMIN_UPDATER_VERSION=1\nCONFIG_SCHEMA_VERSION=4\nRELEASE_TAG=v9\n' > "$CS/state/installed-manifest.txt"
+printf '3\n' > "$CS/state/config-schema-version"
+printf 'proxy-providers:\n  fast:\n    type: file\n    path: ./fast.yaml\n' > "$CS/mihomo/real.yaml"
+ln -s real.yaml "$CS/mihomo/config.yaml"
+OUT_CS=$(cs_status)
+assert_contains '"config_schema":{"applied":3,"available":4,"template":true}' "$OUT_CS" "config_schema: устарел, конфиг-ссылка по шаблону"
+printf '03\n' > "$CS/state/config-schema-version"
+OUT_CS=$(cs_status)
+assert_contains '"applied":3,' "$OUT_CS" "config_schema: ведущий ноль"
+printf 'abc\n' > "$CS/state/config-schema-version"
+OUT_CS=$(cs_status)
+assert_contains '"config_schema":{"applied":1,"available":4,"template":true}' "$OUT_CS" "config_schema: мусор в файле схемы"
+printf 'proxies: []\n' > "$CS/mihomo/real.yaml"
+OUT_CS=$(cs_status)
+assert_contains '"template":false' "$OUT_CS" "config_schema: свой конфиг без fast"
+
 # --- prepare/discard: реальный фоновый --prepare (задача 3) ---
 # Отдельный локальный httpd со своей файловой раскладкой релиза - pinned_base()
 # в update.sh требует, чтобы UPDATE_RELEASE_BASE оканчивался буквально на

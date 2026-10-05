@@ -1213,14 +1213,36 @@ migrate_to_template() {
   return 2
 }
 
+# Конфиг приведён к шаблону установленного релиза (миграция или мастер
+# setup.sh): схема из installed-manifest.txt пишется в config-schema-version,
+# иначе веб-интерфейс показал бы лишнюю карточку «Доступно обновление
+# конфига». Нет манифеста (файлы перенесены вручную) - ничего не делаем.
+# Ошибка записи установку не останавливает.
+record_config_schema() {
+  rcs_n=$(sed -n 's/^CONFIG_SCHEMA_VERSION=\([0-9][0-9]*\)$/\1/p' "$INSTALLED_MANIFEST_PATH" 2>/dev/null | head -n 1)
+  [ -n "$rcs_n" ] || return 0
+  rcs_tmp=$UPDATE_STATE_DIR/.config-schema-version.$$
+  if mkdir -p "$UPDATE_STATE_DIR" 2>/dev/null && printf '%s\n' "$rcs_n" > "$rcs_tmp" 2>/dev/null &&
+      chmod 0600 "$rcs_tmp" 2>/dev/null && mv "$rcs_tmp" "$UPDATE_STATE_DIR/config-schema-version" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$rcs_tmp" 2>/dev/null
+  echo "WARN: не удалось записать схему конфига в $UPDATE_STATE_DIR/config-schema-version" >&2
+  return 0
+}
+
 # Нет провайдера fast: спросить, что делать с конфигом. 0 - продолжать
 # установку (конфиг мигрирован или остаётся свой), 1 - остановиться.
+# MST_CONFIG_FROM_TEMPLATE=1 - конфиг только что собрал мастер setup.sh.
 resolve_config_mode() {
-  has_fast_group "$CONFIG" && return 0
+  if has_fast_group "$CONFIG"; then
+    [ "${MST_CONFIG_FROM_TEMPLATE:-0}" != 1 ] || record_config_schema
+    return 0
+  fi
   choose_config_mode
   if [ "$CONFIG_MODE_CHOSEN" = template ]; then
     mtt_rc=0; migrate_to_template || mtt_rc=$?
-    [ "$mtt_rc" = 0 ] && return 0
+    if [ "$mtt_rc" = 0 ]; then record_config_schema; return 0; fi
     [ "$mtt_rc" = 2 ] && return 1
   fi
   own_config_notice

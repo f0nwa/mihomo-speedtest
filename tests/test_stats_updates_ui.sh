@@ -74,6 +74,24 @@ grep -q "function startUpdateJobPolling(onUpdate, onError)" "$FILE" || fail "о�
 grep -q "'Последнее обновление применено'" "$FILE" || fail "раздел не показывает итог последнего применения"
 grep -q "'Последнее обновление не применено'" "$FILE" || fail "раздел не показывает ошибку последнего применения"
 
+# Отдельное обновление конфига (спецификация 2026-10-05-config-update-card):
+# карточка, пока схема установленного релиза выше применённой к конфигу,
+# и кнопка, запускающая «Миграцию к шаблону» в редакторе.
+CFG="$ROOT/web/stats_app_config.js"
+grep -q "card('Доступно обновление конфига')" "$FILE" || fail "нет карточки «Доступно обновление конфига»"
+grep -q "cs.template && cs.available !== null && cs.available > cs.applied" "$FILE" || fail "карточка конфига не зависит от config_schema"
+grep -q "import { requestTemplateMigration } from './app-config.js';" "$FILE" || fail "раздел обновлений не импортирует requestTemplateMigration"
+grep -q "'Обновить конфиг'" "$FILE" || fail "нет кнопки «Обновить конфиг»"
+grep -q "setAttribute('href', '/config')" "$FILE" || fail "кнопка «Обновить конфиг» не ведёт на /config"
+grep -q "setAttribute('data-link', '')" "$FILE" || fail "кнопка «Обновить конфиг» не использует общую навигацию data-link"
+grep -q "export function requestTemplateMigration" "$CFG" || fail "редактор не экспортирует requestTemplateMigration"
+grep -q "pendingMigration" "$CFG" || fail "редактор не запускает отложенную миграцию"
+grep -q "'&schema=' + migrationSchema" "$CFG" || fail "save не передаёт схему мигрированного текста"
+grep -q "migrationSchema = null" "$CFG" || fail "схема мигрированного текста не сбрасывается"
+if command -v node >/dev/null 2>&1; then
+  node --input-type=module --check < "$CFG"
+fi
+
 if command -v node >/dev/null 2>&1; then
   node --input-type=module --check < "$FILE"
 fi

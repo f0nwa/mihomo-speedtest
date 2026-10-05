@@ -103,7 +103,11 @@ build_snapshot() {
   inspect_file "$UPDATE_STATE_DIR/config-schema-version" config-schema >> "$WORK/snapshot.tsv"
   inspect_file "$UPDATE_STATE_DIR/config-sha256" config-sha256 >> "$WORK/snapshot.tsv"
   components=$(awk -F'|' '$1=="COMPONENT"&&$3=="selected"{printf "%s%s",(n++?",":""),$2}' "$WORK/records")
-  printf '%s\n' "$components" > "$WORK/request.txt"
+  if [ "${config_requested:-0}" = 1 ]; then
+    printf '%s\n' "${components:+$components,}active-config" > "$WORK/request.txt"
+  else
+    printf '%s\n' "$components" > "$WORK/request.txt"
+  fi
   {
     printf 'ENGINE=%s\nMANIFEST=%s\nSOURCE=%s\nROOT=%s\n' "$UPDATER_VERSION" "$(sha256_of "$MANIFEST_TMP")" "$UPDATE_RELEASE_BASE" "$TARGET_ROOT"
     printf 'STATE_PATH=%s\nINSTALLED_PATH=%s\n' "$UPDATE_STATE_DIR" "$INSTALLED_MANIFEST_PATH"
@@ -250,6 +254,7 @@ verify_plan() {
   download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144
   [ "$(sha256_of "$MANIFEST_TMP")" = "$stored_manifest" ] || die 'Релиз изменился; запустите обновление заново'
   components=$(cat "$saved/request.txt")
+  split_config_request
   awk -v MANIFEST="$MANIFEST_TMP" -v VALIDATE_ONLY=1 -v SELECTED="$components" -v UPDATER_VERSION="$UPDATER_VERSION" -f "$PLAN_AWK"
   build_snapshot
   if [ "$migration_required" != 1 ]; then
@@ -294,7 +299,12 @@ detect_config_schema() {
   [ "$schema_relation" != downgrade ] || die 'Понижение схемы конфига запрещено'
   migration_required=0
   config_confirm_required=0
-  if [ "$schema_relation" = upgrade ]; then migration_required=1; config_confirm_required=1; fi
+  # Рост схемы сам миграцию не включает (её видно отдельным обновлением
+  # конфига в веб-интерфейсе); active-config - только по явному выбору.
+  if [ "${config_requested:-0}" = 1 ]; then
+    [ "$schema_relation" = upgrade ] || die 'Обновление конфига не требуется: схема конфига не выросла'
+    migration_required=1; config_confirm_required=1
+  fi
 }
 config_tools() {
   mkdir "$WORK/migration-tools" || die 'Не удалось подготовить инструменты миграции'

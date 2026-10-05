@@ -4,6 +4,7 @@ import { app, card, clearApp, el, fetchJson, setLoading, showError, showFormMess
 import { stopProgressPolling } from './app-stats.js';
 import { stopLogPolling } from './app-log.js';
 import { buildField } from './app-settings.js';
+import { requestTemplateMigration } from './app-config.js';
 
 // ----- раздел "Обновления" (/api/updates/*) -----
 
@@ -215,6 +216,31 @@ function buildUpdateSettingsCard(values) {
   return form;
 }
 
+// Отдельное обновление конфига: обновление проекта config.yaml не трогает,
+// а если шаблон в установленном релизе новее (схема выросла), карточка
+// висит, пока конфиг не мигрирован. Кнопка ведёт на вкладку «Конфиг» и
+// запускает там «Миграцию к шаблону»; применение - обычным «Сохранить и
+// применить», оно и записывает новую схему (stats_config.sh save?schema=N).
+// Своему конфигу без провайдера fast (template=false) карточка не нужна.
+function buildConfigSchemaCard(cs) {
+  if (!(cs && cs.template && cs.available !== null && cs.available > cs.applied)) { return null; }
+  var c = card('Доступно обновление конфига');
+  c.appendChild(el('p', 'hint', 'Шаблон конфига обновился (схема ' + cs.applied + ' → ' + cs.available + '). ' +
+    'Группы, правила и служебные настройки из нового шаблона попадут в ваш конфиг; подписки, свои ноды, ' +
+    'DNS и локальные настройки сохранятся. Перед применением вы увидите все изменения в редакторе, ' +
+    'бэкап создаётся автоматически.'));
+  var row = el('div', 'btn-row');
+  var go = el('a', 'submit', 'Обновить конфиг');
+  go.setAttribute('href', '/config');
+  go.setAttribute('data-link', '');
+  // Навигацию делает общий обработчик data-link (app.js); флаг ставится
+  // раньше - слушатель на самой ссылке срабатывает до всплытия к document.
+  go.addEventListener('click', function () { requestTemplateMigration(); });
+  row.appendChild(go);
+  c.appendChild(row);
+  return c;
+}
+
 export function renderUpdates() {
   stopProgressPolling();
   stopUpdateJobPolling();
@@ -307,6 +333,8 @@ export function renderUpdates() {
     row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }
     summary.appendChild(row);
     app.appendChild(summary);
+    var configCard = buildConfigSchemaCard(data.config_schema);
+    if (configCard) { app.appendChild(configCard); }
     if (settings && settings.values) { app.appendChild(buildUpdateSettingsCard(settings.values)); }
     // Вместо полного списка файлов - текст последнего релиза "что
     // нового" (п.4 задачи редизайна). lc.notes заполняет cmd_check() на

@@ -59,11 +59,19 @@ CORE_WAIT=1
 PATH="$T/bin:$PATH"
 FAKE_XKEEN_LOG=$T/xkeen.log
 export PATH FAKE_XKEEN_LOG
+# Схема конфига: после миграции к шаблону (или конфига от мастера setup.sh)
+# установщик пишет схему установленного релиза в config-schema-version.
+UPDATE_STATE_DIR=$T/state
+INSTALLED_MANIFEST_PATH=$T/state/installed-manifest.txt
+SV=$T/state/config-schema-version
+mkdir -p "$T/state"
+printf 'FORMAT_VERSION=2\nRELEASE_VERSION=9\nMIN_UPDATER_VERSION=1\nCONFIG_SCHEMA_VERSION=4\nRELEASE_TAG=v9\n' > "$INSTALLED_MANIFEST_PATH"
+no_schema() { [ ! -e "$SV" ] || fail "$1: схема конфига не должна записываться"; }
 
 # $1 - ответы на stdin; результат: $T/rc, $T/err
 run_mode() {
   cp "$T/own.yaml" "$CONFIG"
-  rm -f "$CONFIG".*.bak "$FAKE_XKEEN_LOG"
+  rm -f "$CONFIG".*.bak "$FAKE_XKEEN_LOG" "$SV"
   rc=0
   printf '%b' "$1" | ( resolve_config_mode ) 2>"$T/err" || rc=$?
   echo "$rc" > "$T/rc"
@@ -74,7 +82,7 @@ own_notice() { grep -q "быстрый пул НЕ применяется" "$T/e
 # 1. Свой конфиг из окружения - без вопроса.
 CONFIG_MODE=own run_mode ''
 [ "$(cat "$T/rc")" = 0 ] || fail "CONFIG_MODE=own: rc"
-unchanged "CONFIG_MODE=own"; own_notice "CONFIG_MODE=own"
+unchanged "CONFIG_MODE=own"; own_notice "CONFIG_MODE=own"; no_schema "CONFIG_MODE=own"
 grep -q "Введите номер" "$T/err" && fail "CONFIG_MODE=own не должен спрашивать"
 
 # 2. Enter (и отсутствие терминала) - свой конфиг.
@@ -94,10 +102,18 @@ set -- "$CONFIG".*.bak
 [ -f "$1" ] && cmp -s "$1" "$T/own.yaml" || fail "нет бэкапа прежнего конфига"
 grep -q -- -restart "$FAKE_XKEEN_LOG" || fail "ядро не перезапущено"
 grep -q "быстрый пул НЕ применяется" "$T/err" && fail "после миграции не нужно предупреждение о своём конфиге"
+[ "$(cat "$SV" 2>/dev/null)" = 4 ] || fail "миграция: схема конфига не записана"
+[ "$(stat -c %a "$SV" 2>/dev/null || stat -f %Lp "$SV")" = 600 ] || fail "миграция: режим файла схемы"
+# Без установленного манифеста (файлы перенесены вручную) схема не пишется.
+mv "$INSTALLED_MANIFEST_PATH" "$T/manifest.saved"
+run_mode '1\ny\n'
+[ "$(cat "$T/rc")" = 0 ] || fail "миграция без манифеста: rc"
+no_schema "миграция без манифеста"
+mv "$T/manifest.saved" "$INSTALLED_MANIFEST_PATH"
 
 # 4. Отказ на подтверждении.
 run_mode '1\nn\n'
-unchanged "отказ"; own_notice "отказ"
+unchanged "отказ"; own_notice "отказ"; no_schema "отказ"
 [ -f "$FAKE_XKEEN_LOG" ] && fail "отказ: ядро не должно перезапускаться"
 
 # 5. Кандидат не прошёл mihomo -t.
@@ -108,7 +124,7 @@ grep -q "не прошёл mihomo -t" "$T/err" || fail "нет сообщени�
 # 6. Ядро не поднялось ни на новом, ни на прежнем конфиге: откат и стоп.
 FAKE_CURL_RC=7 run_mode '1\ny\n'
 [ "$(cat "$T/rc")" = 1 ] || fail "ядро не поднялось: установка должна остановиться"
-unchanged "откат"
+unchanged "откат"; no_schema "откат"
 grep -q "возвращаю прежний" "$T/err" || fail "нет сообщения об откате"
 
 # 7. Миграция невозможна - причина и свой конфиг.
@@ -146,6 +162,11 @@ rm -f "$CONFIG" "$CONFIG".*.bak; rm -rf "$T/mihomo/profiles"
 cp "$ROOT/config-tools/config.example.yaml" "$T/own.yaml"
 run_mode ''
 [ "$(cat "$T/rc")" = 0 ] && [ ! -s "$T/err" ] || fail "с провайдером fast вопросов быть не должно: $(cat "$T/err")"
-unchanged "есть fast"
+unchanged "есть fast"; no_schema "есть fast"
+# Конфиг только что создал мастер setup.sh (MST_CONFIG_FROM_TEMPLATE=1).
+MST_CONFIG_FROM_TEMPLATE=1 run_mode ''
+[ "$(cat "$T/rc")" = 0 ] || fail "после setup.sh: rc"
+[ "$(cat "$SV" 2>/dev/null)" = 4 ] || fail "после setup.sh: схема конфига не записана"
+grep -q 'MST_CONFIG_FROM_TEMPLATE=1 exec sh "$SELFDIR/install.sh"' "$ROOT/config-tools/setup.sh" || fail "setup.sh не помечает конфиг из шаблона"
 
 echo "test_install_config_mode.sh: OK"

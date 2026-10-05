@@ -70,6 +70,13 @@ class Transaction(unittest.TestCase):
   self.assertIn('FILE|a|a.sh|',installed);self.assertNotIn('FILE|b|',installed)
   self.assertFalse((self.state/'transaction.txt').exists())
   self.assertEqual(json.loads(r.stdout)['status'],'applied')
+ def test_schema_upgrade_applies_without_touching_config_schema(self):
+  # Рост схемы без явного active-config: файлы проекта ставятся, а
+  # config-schema-version не пишется - веб покажет отдельное обновление конфига.
+  self.release(schema=2);d,p,r=self.apply()
+  self.assertEqual(json.loads(r.stdout)['status'],'applied')
+  self.assertIn('CONFIG_SCHEMA_VERSION=2\n',(self.state/'installed-manifest.txt').read_text())
+  self.assertFalse((self.state/'config-schema-version').exists())
  def test_rollback_restores_replaced_file_and_manifest_offline(self):
   path=self.old();old_manifest=(self.state/'installed-manifest.txt').read_bytes()
   self.apply();self.env['UPDATE_HTTP_CMD']='/missing/transport'

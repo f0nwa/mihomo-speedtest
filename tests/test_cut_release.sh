@@ -114,6 +114,49 @@ if grep -q '/releases/download/' "$CURL_LOG"; then fail "без dev-тегов �
 printf '1.0.0\n1.1.0\n1.1.1\nv26\n' > "$GH_TAGS"
 printf 'RELEASE_VERSION=30\nMIN_UPDATER_VERSION=3\nCONFIG_SCHEMA_VERSION=1\n' > "$MANIFEST_LATEST"
 
+# --- Схема конфига растёт сама, если в прошлом релизе другие sha256 файлов
+# шаблона (config.example.yaml, migrate_config.awk, fast_wg.awk).
+sum256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+SUM_EX=$(sum256 "$ROOT/config-tools/config.example.yaml")
+SUM_MIG=$(sum256 "$ROOT/config-tools/migrate_config.awk")
+SUM_WG=$(sum256 "$ROOT/config-tools/fast_wg.awk")
+ZERO=0000000000000000000000000000000000000000000000000000000000000000
+# schema_manifest EX MIG WG: манифест (latest новее dev) с FILE-строками; "-" - строки нет.
+schema_manifest() {
+  printf 'RELEASE_VERSION=50\nMIN_UPDATER_VERSION=5\nCONFIG_SCHEMA_VERSION=3\n'
+  [ "$1" = - ] || printf 'FILE|config-tools|config.example.yaml|/opt/etc/mihomo-speedtest/config.example.yaml|1|%s|0644|none\n' "$1"
+  [ "$2" = - ] || printf 'FILE|config-tools|migrate_config.awk|/opt/etc/mihomo-speedtest/migrate_config.awk|1|%s|0644|awk\n' "$2"
+  [ "$3" = - ] || printf 'FILE|config-tools|fast_wg.awk|/opt/etc/mihomo-speedtest/fast_wg.awk|1|%s|0644|awk\n' "$3"
+}
+
+schema_manifest "$SUM_EX" "$SUM_MIG" "$SUM_WG" > "$MANIFEST_LATEST"
+out=$(run --channel dev --dry-run 2>/dev/null) || fail "schema-same: dry-run завершился с ошибкой"
+assert_contains "CONFIG_SCHEMA_VERSION=3" "$out" schema-same
+assert_contains "CONFIG_SCHEMA_BUMPED=0" "$out" schema-same
+
+schema_manifest "$SUM_EX" "$SUM_MIG" "$ZERO" > "$MANIFEST_LATEST"
+out=$(run --channel dev --dry-run 2>"$TMP/err") || fail "schema-bump: dry-run завершился с ошибкой"
+assert_contains "CONFIG_SCHEMA_VERSION=4" "$out" schema-bump
+assert_contains "CONFIG_SCHEMA_BUMPED=1" "$out" schema-bump
+assert_contains "шаблон конфига изменился (fast_wg.awk) - схема 3 -> 4" "$(cat "$TMP/err")" schema-bump-msg
+
+out=$(run --channel dev --config-schema 7 --dry-run 2>/dev/null) || fail "schema-explicit: dry-run завершился с ошибкой"
+assert_contains "CONFIG_SCHEMA_VERSION=7" "$out" schema-explicit
+assert_contains "CONFIG_SCHEMA_BUMPED=0" "$out" schema-explicit
+
+schema_manifest - "$SUM_MIG" "$SUM_WG" > "$MANIFEST_LATEST"
+out=$(run --channel dev --dry-run 2>/dev/null) || fail "schema-missing-file: dry-run завершился с ошибкой"
+assert_contains "CONFIG_SCHEMA_VERSION=4" "$out" schema-missing-file
+assert_contains "CONFIG_SCHEMA_BUMPED=1" "$out" schema-missing-file
+
+schema_manifest - - - > "$MANIFEST_LATEST"
+out=$(run --channel dev --dry-run 2>"$TMP/err") || fail "schema-no-files: dry-run завершился с ошибкой"
+assert_contains "CONFIG_SCHEMA_VERSION=3" "$out" schema-no-files
+assert_contains "CONFIG_SCHEMA_BUMPED=0" "$out" schema-no-files
+assert_contains "WARN" "$(cat "$TMP/err")" schema-no-files-warn
+assert_contains "не с чем сравнить шаблон" "$(cat "$TMP/err")" schema-no-files-warn
+printf 'RELEASE_VERSION=30\nMIN_UPDATER_VERSION=3\nCONFIG_SCHEMA_VERSION=1\n' > "$MANIFEST_LATEST"
+
 if run --channel beta --dry-run >/dev/null 2>&1; then
   fail "неизвестный канал должен давать ненулевой код"
 fi

@@ -82,7 +82,7 @@ details.card[open]>summary{margin-bottom:8px}
 .settings-overview ol{margin:4px 0 0;padding-left:20px;font-size:13px;line-height:1.6}
 .row-checkbox{display:flex;align-items:center;gap:6px;margin-top:12px}
 .row-checkbox label{margin:0}
-button.submit{margin-top:16px;padding:8px 16px;border:0;border-radius:0;background:var(--accent);color:#12181a;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
+button.submit,a.submit{display:inline-block;text-decoration:none;margin-top:16px;padding:8px 16px;border:0;border-radius:0;background:var(--accent);color:#12181a;font-size:14px;cursor:pointer;box-shadow:var(--shadow)}
 button.submit:disabled{opacity:.6;cursor:default}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 button.submit.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent);box-shadow:none}
