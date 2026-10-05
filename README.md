@@ -102,6 +102,16 @@ curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install
 что-то пошло не так. Нужен простой текст без цветов (например, для записи
 вывода) - запустите с `NO_COLOR=1` или `UI=plain`: `NO_COLOR=1 sh install.sh`.
 
+В начале установщик спрашивает канал обновлений: стабильный (по умолчанию)
+или разработка (dev) - новые функции раньше, но возможны ошибки. Выбрать
+dev сразу, без вопроса:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install.sh | UPDATE_CHANNEL=dev sh
+```
+
+Канал потом меняется в веб-интерфейсе, вкладка «Обновления».
+
 Установка без интернета на роутере, ручной перенос файлов и обновление -
 в [руководстве](docs/guide.md#установка-с-нуля). Удалить всё (службу,
 cron, при желании откатить `config.yaml`):

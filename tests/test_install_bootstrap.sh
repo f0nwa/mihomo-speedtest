@@ -364,4 +364,86 @@ case "$out7" in *"не отслеживается"*) ;; *) fail "install.sh --ve
 
 echo "test_install_bootstrap.sh: часть 7 (--version без installed-manifest.txt) OK" >&2
 
+# --- 8: выбор канала при установке с нуля (bootstrap_choose_channel) ---
+# Ответ читается из INSTALL_TTY (в бою /dev/tty); без tty - stable.
+ch() {
+  ( set +e; INSTALL_TTY=$1; shift
+    for kv in "$@"; do export "$kv"; done
+    DIR=$TEST_ROOT/no-such-dir
+    bootstrap_choose_channel; printf '%s\n' "$INSTALL_CHANNEL" ) 2>"$TEST_ROOT/err-ch.log"
+}
+printf '2\n' > "$TEST_ROOT/tty-2"
+printf '\n' > "$TEST_ROOT/tty-enter"
+printf '7\n' > "$TEST_ROOT/tty-bad"
+[ "$(ch "$TEST_ROOT/tty-2")" = dev ] || fail "ответ 2 должен выбрать канал dev"
+grep -q "Канал обновлений" "$TEST_ROOT/err-ch.log" || fail "меню канала не показано: $(cat "$TEST_ROOT/err-ch.log")"
+grep -q "(по умолчанию)" "$TEST_ROOT/err-ch.log" || fail "в меню канала не отмечен вариант по умолчанию"
+[ "$(ch "$TEST_ROOT/tty-enter")" = stable ] || fail "Enter должен оставить stable"
+[ "$(ch "$TEST_ROOT/tty-bad")" = stable ] || fail "неверный номер должен оставить stable"
+[ "$(ch "$TEST_ROOT/no-tty")" = stable ] || fail "без терминала должен быть stable"
+grep -q "Канал обновлений" "$TEST_ROOT/err-ch.log" && fail "без терминала меню канала не должно показываться"
+[ "$(ch "$TEST_ROOT/tty-enter" UPDATE_CHANNEL=dev)" = dev ] || fail "UPDATE_CHANNEL=dev должен выбрать dev без вопроса"
+grep -q "Канал обновлений" "$TEST_ROOT/err-ch.log" && fail "при UPDATE_CHANNEL меню канала не должно показываться"
+[ "$(ch "$TEST_ROOT/tty-2" UPDATE_CHANNEL=stable)" = stable ] || fail "UPDATE_CHANNEL=stable должен выбрать stable без вопроса"
+[ "$(ch "$TEST_ROOT/tty-enter" UPDATE_CHANNEL=beta)" = stable ] || fail "неизвестный UPDATE_CHANNEL - stable"
+grep -q "beta" "$TEST_ROOT/err-ch.log" || fail "неизвестный UPDATE_CHANNEL должен дать предупреждение"
+# Сохранённый dev в speedtest2.env (незавершённая установка) - вариант по умолчанию.
+mkdir -p "$TEST_ROOT/ch-saved"
+printf "UPDATE_CHANNEL='dev'\n" > "$TEST_ROOT/ch-saved/speedtest2.env"
+saved=$( ( set +e; INSTALL_TTY=$TEST_ROOT/tty-enter; DIR=$TEST_ROOT/ch-saved
+  bootstrap_choose_channel; printf '%s\n' "$INSTALL_CHANNEL" ) 2>/dev/null )
+[ "$saved" = dev ] || fail "сохранённый канал dev должен быть вариантом по умолчанию (получено: $saved)"
+echo "test_install_bootstrap.sh: часть 8 (выбор канала) OK" >&2
+
+# --- 9: канал dev - наибольший тег x.y.z из списка релизов GitHub ---
+DEVTAG=1.5.0
+mkdir -p "$SRV/releases/download/$DEVTAG" "$SRV/api"
+cp "$SRV/releases/download/$TAG/greeting.txt" "$SRV/releases/download/$TAG/runner.sh" "$SRV/releases/download/$DEVTAG/"
+sed "s/^RELEASE_TAG=.*/RELEASE_TAG=$DEVTAG/" "$SRV/releases/latest/download/manifest.txt" > "$SRV/releases/download/$DEVTAG/manifest.txt"
+# Стабильный hotfix 1.4.2 вышел позже dev 1.5.0, старые теги v26.x - мимо.
+printf '[{"tag_name": "1.4.2", "prerelease": false},{"tag_name":"%s","prerelease":true},{"tag_name":"v26.10.3.4"},{"tag_name":"1.3.9"}]\n' "$DEVTAG" > "$SRV/api/releases.json"
+DST9=$TEST_ROOT/dst-dev
+mkdir -p "$DST9"
+(
+  DIR=$DST9; TMPROOT=$TEST_ROOT; UPDATE_RELEASE_BASE=$BASE_URL
+  UPDATE_RELEASES_API="http://127.0.0.1:$PORT/api/releases.json"
+  UPDATE_STATE_DIR=$DST9/.update; INSTALLED_MANIFEST_PATH=$DST9/.update/installed-manifest.txt
+  INSTALL_CHANNEL=dev
+  bootstrap_selfinstall
+) 2>"$TEST_ROOT/err-dev.log" || fail "канал dev: установка должна пройти: $(cat "$TEST_ROOT/err-dev.log")"
+grep -qx "RELEASE_TAG=$DEVTAG" "$DST9/.update/installed-manifest.txt" || fail "канал dev должен поставить релиз $DEVTAG"
+[ -f "$DST9/greeting.txt" ] || fail "канал dev: файлы не скачаны"
+grep -q "Манифест $DEVTAG (dev)" "$TEST_ROOT/err-dev.log" || fail "канал dev должен быть виден в строке манифеста: $(cat "$TEST_ROOT/err-dev.log")"
+
+# Манифест dev-тега с чужим RELEASE_TAG - отказ.
+DEVTAG2=1.7.0
+mkdir -p "$SRV/releases/download/$DEVTAG2"
+cp "$SRV/releases/download/$DEVTAG/manifest.txt" "$SRV/releases/download/$DEVTAG2/manifest.txt"
+printf '[{"tag_name":"%s"}]\n' "$DEVTAG2" > "$SRV/api/releases2.json"
+DST9B=$TEST_ROOT/dst-dev-bad
+mkdir -p "$DST9B"
+if (
+  DIR=$DST9B; TMPROOT=$TEST_ROOT; UPDATE_RELEASE_BASE=$BASE_URL
+  UPDATE_RELEASES_API="http://127.0.0.1:$PORT/api/releases2.json"
+  UPDATE_STATE_DIR=$DST9B/.update; INSTALLED_MANIFEST_PATH=$DST9B/.update/installed-manifest.txt
+  INSTALL_CHANNEL=dev
+  bootstrap_selfinstall
+) 2>"$TEST_ROOT/err-dev-bad.log"; then fail "манифест с чужим RELEASE_TAG должен отклоняться"; fi
+grep -q "не соответствует" "$TEST_ROOT/err-dev-bad.log" || fail "нет понятной причины отказа: $(cat "$TEST_ROOT/err-dev-bad.log")"
+[ ! -f "$DST9B/greeting.txt" ] || fail "при отказе файлы не должны попадать в DIR"
+
+# Список релизов недоступен - понятная ошибка, без тихого перехода на stable.
+DST9C=$TEST_ROOT/dst-dev-noapi
+mkdir -p "$DST9C"
+if (
+  DIR=$DST9C; TMPROOT=$TEST_ROOT; UPDATE_RELEASE_BASE=$BASE_URL
+  UPDATE_RELEASES_API="http://127.0.0.1:$PORT/api/missing.json"
+  UPDATE_STATE_DIR=$DST9C/.update; INSTALLED_MANIFEST_PATH=$DST9C/.update/installed-manifest.txt
+  INSTALL_CHANNEL=dev INSTALL_RETRIES=1
+  bootstrap_selfinstall
+) 2>"$TEST_ROOT/err-dev-noapi.log"; then fail "без списка релизов канал dev не должен ставиться"; fi
+grep -q "список релизов" "$TEST_ROOT/err-dev-noapi.log" || fail "нет понятной ошибки про список релизов: $(cat "$TEST_ROOT/err-dev-noapi.log")"
+[ ! -f "$DST9C/greeting.txt" ] || fail "без списка релизов не должен ставиться stable"
+echo "test_install_bootstrap.sh: часть 9 (канал dev) OK" >&2
+
 echo "test_install_bootstrap.sh: OK"

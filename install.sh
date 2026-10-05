@@ -249,6 +249,34 @@ ui__exit() {
   if [ -n "${UI_EXIT_HOOKS:-}" ]; then eval "$UI_EXIT_HOOKS" || :; fi
   return 0
 }
+ui_note() {
+  _c=$UI_C_ACC; [ "${1:-}" = warn ] && _c=$UI_C_WARN
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    printf '  %s%s%s %s\n' "$_c" "$UI_G_BAR" "$UI_C_0" "$_line" >&2
+  done
+}
+
+ui_menu() {
+  _mt=$1; _md=$2; shift 2
+  _mn=1
+  {
+    printf '%s\n' "$_mt"
+    for _mi in "$@"; do
+      _ms=
+      [ "$_mn" = "$_md" ] && _ms="  $UI_C_DIM(по умолчанию)$UI_C_0"
+      printf ' %s) %s%s\n' "$_mn" "$_mi" "$_ms"
+      _mn=$((_mn + 1))
+    done
+  } | ui_note info
+}
+
+ui_ask() {
+  if [ "$UI_MODE" = live ]; then
+    printf '  %s›%s %s: ' "$UI_C_ACC" "$UI_C_0" "$1" >&2
+  else
+    printf '[??] %s: ' "$1" >&2
+  fi
+}
 # <<< ui-bootstrap
 
 # --- Bootstrap для однострочной установки ---------------------------------
@@ -562,9 +590,90 @@ bootstrap_header() {
 bootstrap_pinned_base() {
   case $UPDATE_RELEASE_BASE in
     */releases/latest/download)
+      if [ -n "${BOOTSTRAP_DEV_TAG:-}" ]; then
+        # Канал dev: манифест скачан по тегу из списка релизов - он обязан
+        # описывать именно этот релиз (та же проверка, что в update.sh).
+        [ "$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)" = "$BOOTSTRAP_DEV_TAG" ] || {
+          ui_fail "Манифест не соответствует выбранному релизу $BOOTSTRAP_DEV_TAG"
+          return 1
+        }
+      fi
       BOOTSTRAP_PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG) ;;
     *) echo "Для установки нужен источник вида .../releases/latest/download" >&2; return 1 ;;
   esac
+}
+
+# --- Канал обновлений при установке с нуля --------------------------------
+# Спрашиваем только здесь, в бутстрапе: при переустановке поверх файлы уже
+# на роутере, и смена канала ничего бы не скачала (канал меняется в
+# веб-интерфейсе, вкладка «Обновления»). Результат - INSTALL_CHANNEL
+# (stable|dev); его экспортируют, чтобы он пережил exec в setup.sh и
+# обратно, а write_env записал его в speedtest2.env как UPDATE_CHANNEL.
+# UPDATE_CHANNEL в окружении - ответ без вопроса. Ответ читаем прямо из
+# терминала (INSTALL_TTY, по умолчанию /dev/tty): под "curl | sh" stdin -
+# тело скрипта, а reopen_tty объявлена ниже. Нет терминала - stable.
+bootstrap_choose_channel() {
+  case ${UPDATE_CHANNEL:-} in
+    dev|stable) INSTALL_CHANNEL=$UPDATE_CHANNEL; return 0 ;;
+    '') ;;
+    *) ui_warn "Неизвестный UPDATE_CHANNEL=$UPDATE_CHANNEL (ждали stable или dev) - ставлю стабильный"
+       INSTALL_CHANNEL=stable; return 0 ;;
+  esac
+  # По умолчанию - канал, уже сохранённый в speedtest2.env (незавершённая
+  # прошлая установка), иначе stable.
+  bcc_def=1
+  case $(sed -n "s/^UPDATE_CHANNEL=['\"]*\([a-z]*\).*/\1/p" "$DIR/speedtest2.env" 2>/dev/null | tail -n 1) in
+    dev) bcc_def=2 ;;
+  esac
+  INSTALL_CHANNEL=stable
+  [ "$bcc_def" = 2 ] && INSTALL_CHANNEL=dev
+  bcc_tty=${INSTALL_TTY:-/dev/tty}
+  # Терминал должен реально открываться на чтение (не просто существовать).
+  # Проба в подоболочке: ошибка перенаправления у спецкоманды ":" завершила
+  # бы под POSIX sh весь скрипт, а не только эту проверку.
+  ( : < "$bcc_tty" ) 2>/dev/null || return 0
+  ui_menu "Канал обновлений" "$bcc_def" "стабильный" "разработка (dev) - новые функции раньше, возможны ошибки"
+  ui_ask "Номер или Enter"
+  bcc_ans=
+  { read -r bcc_ans < "$bcc_tty"; } 2>/dev/null || { bcc_ans=; printf '\n' >&2; }
+  case $bcc_ans in
+    1) INSTALL_CHANNEL=stable ;;
+    2) INSTALL_CHANNEL=dev ;;
+  esac
+  return 0
+}
+
+# Канал dev: наибольший тег x.y.z среди последних релизов GitHub (включая
+# pre-release). Не первый по дате: стабильный hotfix (1.4.2), вышедший
+# после dev 1.5.0, не должен откатывать канал. Тот же алгоритм, что
+# update.sh:resolve_channel_base - установка и обновления dev берут один и
+# тот же релиз. Нет списка - установка останавливается: тихо поставить
+# stable вместо выбранного dev было бы обманом.
+bootstrap_resolve_dev() {
+  bootstrap_download_to "${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10}" \
+      "$BOOTSTRAP_WORK/releases.json" 1048576 || {
+    ui_fail "Не удалось получить список релизов для канала dev"
+    return 1
+  }
+  BOOTSTRAP_DEV_TAG=$(awk '
+    function newer(a, b,   x, y, i) {
+      split(a, x, "."); split(b, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 > y[i] + 0
+      return 0
+    }
+    {
+      s = $0
+      while (match(s, /"tag_name"[ \t]*:[ \t]*"[^"]*"/)) {
+        t = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        sub(/^"tag_name"[ \t]*:[ \t]*"/, "", t); sub(/"$/, "", t)
+        if (t ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ && (best == "" || newer(t, best))) best = t
+      }
+    }
+    END { if (best != "") print best }' "$BOOTSTRAP_WORK/releases.json")
+  [ -n "$BOOTSTRAP_DEV_TAG" ] || {
+    ui_fail "В списке релизов нет тега вида x.y.z для канала dev"
+    return 1
+  }
 }
 
 bootstrap_selfinstall() {
@@ -579,10 +688,24 @@ bootstrap_selfinstall() {
   ui_step 1 6 "Загрузка релиза"
   echo "Рядом нет файлов проекта - скачиваю релиз с GitHub ($UPDATE_RELEASE_BASE)" >&2
 
-  bootstrap_download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  # Канал dev: манифест берём не из releases/latest (там всегда
+  # стабильный), а из наибольшего тега списка релизов.
+  BOOTSTRAP_DEV_TAG=
+  bootstrap_manifest_url=$UPDATE_RELEASE_BASE/manifest.txt
+  bootstrap_channel_note=
+  if [ "${INSTALL_CHANNEL:-stable}" = dev ]; then
+    case $UPDATE_RELEASE_BASE in
+      */releases/latest/download) ;;
+      *) echo "Для установки нужен источник вида .../releases/latest/download" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1 ;;
+    esac
+    bootstrap_resolve_dev || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    bootstrap_manifest_url=${UPDATE_RELEASE_BASE%/latest/download}/download/$BOOTSTRAP_DEV_TAG/manifest.txt
+    bootstrap_channel_note=" (dev)"
+  fi
+  bootstrap_download_to "$bootstrap_manifest_url" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
   bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
-  ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)"
+  ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)$bootstrap_channel_note"
 
   mkdir -p "$DIR" || { echo "Не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
@@ -678,6 +801,9 @@ if [ "${INSTALL_LIB_ONLY:-0}" != 1 ] && ! bootstrap_skip_for_action "${1:-}" && 
   # Прежний тег - до того, как бутстрап перезапишет installed-manifest.txt
   # (для строки «Режим: Переустановка (было → станет)» в main()).
   MST_PREV_TAG=$(bootstrap_manifest_field "$INSTALLED_MANIFEST_PATH" RELEASE_TAG 2>/dev/null) || MST_PREV_TAG=
+  # Канал обновлений - до загрузки: от него зависит, какой релиз качать.
+  bootstrap_choose_channel
+  export INSTALL_CHANNEL
   bootstrap_rc=0
   bootstrap_selfinstall || bootstrap_rc=$?
   bootstrap_prog_close
@@ -1037,9 +1163,15 @@ write_env() {
     # явный, чтобы удалённые из проекта настройки (например MAX_PING_MS)
     # по-прежнему вычищались переустановкой.
     for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR STABILITY_WINDOW STABILITY_DROP_AFTER \
-        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS UPDATE_CHANNEL; do
+        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS; do
       sed -n "/^$keep_key=/p" "$dst" 2>/dev/null | tail -1
     done
+    # Канал обновлений: выбранный при установке с нуля (INSTALL_CHANNEL из
+    # бутстрапа) важнее прежнего; иначе сохраняем канал из веб-настроек.
+    case ${INSTALL_CHANNEL:-} in
+      dev|stable) printf "UPDATE_CHANNEL='%s'\n" "$INSTALL_CHANNEL" ;;
+      *) sed -n "/^UPDATE_CHANNEL=/p" "$dst" 2>/dev/null | tail -1 ;;
+    esac
     # STATS_HTTP_ENABLE - персистентный флаг stop-web/start-web (см.
     # docs/superpowers/specs/2026-09-26-mihomo-speedtest-cli-design.md,
     # раздел 4): фиксированный дефолт '1', а не число из read_speedtest_const -
@@ -1665,6 +1797,12 @@ main() {
   INSTALL_LABEL=$(install_release_label)
   printf '  Устанавливается: %s\n' "$INSTALL_LABEL" >&2
   ui_kv "Режим" "$(install_mode_label)"
+  # Канал обновлений: выбранный при установке с нуля или уже сохранённый.
+  im_ch=${INSTALL_CHANNEL:-$(sed -n "s/^UPDATE_CHANNEL=['\"]*\([a-z]*\).*/\1/p" "$DIR/speedtest2.env" 2>/dev/null | tail -n 1)}
+  case $im_ch in
+    dev) ui_kv "Обновления" "разработка (dev)" ;;
+    *) ui_kv "Обновления" "стабильный" ;;
+  esac
 
   # Проверки до шапки: версии для строк «Архитектура»/«Ядро» берутся из
   # check_versions (VC_*), а его диагностику покажем уже под шагом -

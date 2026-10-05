@@ -27,6 +27,7 @@ install.sh:Рядом нет файлов проекта - скачиваю ре
 install.sh:{ input=""; echo >&2; }
 install.sh:{ cm_input=""; echo >&2; }
 install.sh:{ mt_ans=""; echo >&2; }
+install.sh:{ bcc_ans=; printf '\n' >&2; }
 
 # Вывод CLI-подкоманд mihomo-speedtest (--show-url, --version и т.п.) для
 # человека и скриптов, не шаги установки.

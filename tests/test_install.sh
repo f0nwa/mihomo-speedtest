@@ -481,6 +481,8 @@ chmod +x "$FIXDIR/bin/crontab"
   MIHOMO_DIR=$FIXDIR
   TMPROOT=$FIXDIR
   SKIP_TRIAL=1
+  # Канал, выбранный в бутстрапе (здесь - без бутстрапа, через окружение).
+  INSTALL_CHANNEL=dev
   BLOCK='forced-for-this-test'
   # Порция 3: INITD_DIR/INITD_SCRIPT по умолчанию смотрят в реальный
   # /opt/etc/init.d - переопределяем на путь внутри фикстуры, иначе
@@ -511,6 +513,8 @@ MAIN1_STEPS=$(grep '^ [0-9][0-9]/[0-9][0-9]  ' "$TEST_ROOT/main1.err" | tr '\n' 
 assert_eq "$MAIN1_STEPS" ' 01/05  Проверка окружения# 02/05  Конфиг и фильтр# 03/05  Замер канала# 04/05  Установка файлов и служб# 05/05  Пробный прогон#'
 grep -q '\[!\] Пробный прогон пропущен' "$TEST_ROOT/main1.err" || fail "SKIP_TRIAL=1: шаг прогона должен быть отмечен [!]: $(cat "$TEST_ROOT/main1.err")"
 grep -q 'Режим: *Новая установка' "$TEST_ROOT/main1.err" || fail "нет строки «Режим: Новая установка»"
+grep -q 'Обновления: *разработка (dev)' "$TEST_ROOT/main1.err" || fail "в шапке нет канала обновлений: $(cat "$TEST_ROOT/main1.err")"
+grep -qxF "UPDATE_CHANNEL='dev'" "$FIXDIR/speedtest2.env" || fail "канал установки не записан в speedtest2.env"
 grep -q '\[OK\] Канал 41.9 Мбит/с, порог' "$TEST_ROOT/main1.err" || fail "нет итога замера канала: $(cat "$TEST_ROOT/main1.err")"
 grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main1.err" || fail "нет итоговой строки ui_done"
 grep -q 'Диагностика: *'"$UI_LOG" "$TEST_ROOT/main1.err" || fail "итог должен содержать путь к журналу (Диагностика:)"
@@ -951,6 +955,20 @@ printf "SOURCES='old'\nBLOCK='old'\nMIN_SPEED='1'\nUPDATE_CHANNEL='dev'\n" > "$W
 grep -qxF "UPDATE_CHANNEL='dev'" "$WORK_ENV_CH/speedtest2.env" \
   || { echo "FAIL: write_env потерял UPDATE_CHANNEL='dev' при переустановке" >&2; exit 1; }
 rm -rf "$WORK_ENV_CH"
+
+# Канал, выбранный при установке с нуля (INSTALL_CHANNEL из бутстрапа),
+# записывается в speedtest2.env вместо прежнего UPDATE_CHANNEL.
+WORK_ENV_IC=$(mktemp -d)
+printf "SOURCES='old'\nBLOCK='old'\nMIN_SPEED='1'\nUPDATE_CHANNEL='stable'\n" > "$WORK_ENV_IC/speedtest2.env"
+(
+  INSTALL_LIB_ONLY=1 SELFDIR="$ROOT/installer" . "$SCRIPT"
+  INSTALL_CHANNEL=dev SOURCES=new BLOCK=new MIN_SPEED=1 BLOCK_SOURCE=test write_env "$WORK_ENV_IC/speedtest2.env"
+)
+grep -qxF "UPDATE_CHANNEL='dev'" "$WORK_ENV_IC/speedtest2.env" \
+  || { echo "FAIL: write_env не записал канал установки INSTALL_CHANNEL=dev" >&2; exit 1; }
+[ "$(grep -c '^UPDATE_CHANNEL=' "$WORK_ENV_IC/speedtest2.env")" = 1 ] \
+  || { echo "FAIL: write_env записал UPDATE_CHANNEL дважды" >&2; exit 1; }
+rm -rf "$WORK_ENV_IC"
 
 WORK_ENV2=$(mktemp -d)
 (
