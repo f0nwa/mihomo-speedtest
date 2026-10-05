@@ -48,10 +48,10 @@ class Migration(unittest.TestCase):
   self.old.write_text(self.old.read_text().replace('  # --- STATIC_PROXIES:END ---','  - name: My AWG\n    type: wireguard\n    server: 10.0.0.1\n  # --- STATIC_PROXIES:END ---'))
  def test_fast_wg_only_with_wg_nodes(self):
   self.run_cli();t=self.out.read_text()
-  self.assertNotIn('name: FAST-WG',t);self.assertNotIn('[FAST-WG]',t);self.assertNotIn('MST-FAST-WG',t)
+  self.assertNotIn('name: FAST-WG',t);self.assertNotIn("'FAST-WG",t);self.assertNotIn('MST-FAST-WG',t)
   self.add_wg();self.run_cli();t=self.out.read_text()
-  self.assertIn("  - name: FAST-WG\n    type: select\n    proxies: [REJECT, 'My AWG']\n    url: \"https://www.gstatic.com/generate_204\"\n    interval: 300\n    lazy: false\n    hidden: true\n",t)
-  self.assertIn('    proxies: [FAST-WG]\n',t)
+  self.assertIn("  - name: 'FAST-WG My AWG'\n    type: select\n    proxies: [REJECT, 'My AWG']\n    url: \"https://www.gstatic.com/generate_204\"\n    interval: 300\n    lazy: false\n    hidden: true\n",t)
+  self.assertIn("    proxies: ['FAST-WG My AWG']\n",t)
  def test_repeat_migration_with_wg_is_stable(self):
   self.add_wg();self.run_cli();first=self.out.read_bytes();self.old.write_bytes(first);self.run_cli()
   self.assertEqual(self.out.read_bytes(),first)

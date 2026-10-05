@@ -93,11 +93,11 @@ wg_select 'Blanc "NL"' || fail "wg_select failed"
 grep -qx 'http://127.0.0.1:9090/proxies/MST-SPEEDTEST' "$T/select_args" || fail "wg_select: неверный URL группы"
 grep -qxF '{"name":"Blanc \"NL\""}' "$T/select_args" || fail "wg_select: неверное тело"
 
-# --- wg_publish_fast: лучший WG выше порога -> FAST-WG, иначе REJECT
-#     только если текущий выбор замерен ниже порога ---
+# --- wg_publish_fast: у каждой WG-ноды свой пропуск "FAST-WG <имя>";
+#     выше порога -> нода, замерена ниже порога -> REJECT, иначе не трогаем ---
 printf 'n0002\tBlanc_NL_AMS_1\nn0003\tOther WG\n' > "$WORK/wg_ok.txt"
-publish_case() {  # $1 now, $2 alive.txt, $3 res.txt
-  printf '%s' "$2" > "$WORK/alive.txt"; printf '%s' "$3" > "$WORK/res.txt"; : > "$T/put"; : > "$RUN_LOG"
+publish_case() {  # $1 now (MISSING - группы нет), $2 res.txt
+  printf '%s' "$2" > "$WORK/res.txt"; : > "$T/put"; : > "$RUN_LOG"
   PUB_NOW=$1
   curl() {
     case "$*" in
@@ -107,30 +107,24 @@ publish_case() {  # $1 now, $2 alive.txt, $3 res.txt
   }
   wg_publish_fast 1000000
 }
-publish_case REJECT '100 n0002
-90 n0003
-' '2000000 n0002
+publish_case REJECT '2000000 n0002
 3000000 n0003
 '
-grep -q 'FAST-WG' "$T/put" && grep -qF '{"name":"Other WG"}' "$T/put" || fail "лучший WG выше порога не выбран в FAST-WG"
-publish_case 'Other WG' '90 n0003
-' '3000000 n0003
+grep -qF 'proxies/FAST-WG%20Blanc_NL_AMS_1' "$T/put" && grep -qF '{"name":"Blanc_NL_AMS_1"}' "$T/put" || fail "первый WG выше порога не выбран в своём пропуске"
+grep -qF 'proxies/FAST-WG%20Other%20WG' "$T/put" && grep -qF '{"name":"Other WG"}' "$T/put" || fail "второй WG выше порога не выбран в своём пропуске"
+publish_case 'Other WG' '3000000 n0003
 '
-[ ! -s "$T/put" ] || fail "выбор уже совпадает - PUT не нужен"
-publish_case Blanc_NL_AMS_1 '100 n0002
-' '500000 n0002
+[ "$(grep -c PUT "$T/put")" = 0 ] || fail "Other WG уже выбран, а Blanc не замерен - PUT не нужен"
+publish_case Blanc_NL_AMS_1 '500000 n0002
 '
-grep -qF '{"name":"REJECT"}' "$T/put" || fail "текущий WG ниже порога должен замениться на REJECT"
-publish_case Blanc_NL_AMS_1 '100 n0002
-' ''
-[ ! -s "$T/put" ] || fail "живой, но не дошедший до замера WG трогать нельзя"
-publish_case Blanc_NL_AMS_1 '' ''
-[ ! -s "$T/put" ] || fail "не ответивший текущий WG не трогаем - пул сам пропускает его по пингу"
-publish_case MISSING '100 n0002
-' '2000000 n0002
+grep -qF 'proxies/FAST-WG%20Blanc_NL_AMS_1' "$T/put" && grep -qF '{"name":"REJECT"}' "$T/put" || fail "WG ниже порога должен получить REJECT"
+grep -q 'Other%20WG' "$T/put" && fail "не замеренный WG трогать нельзя"
+publish_case Blanc_NL_AMS_1 ''
+[ ! -s "$T/put" ] || fail "не ответивший или не замеренный WG не трогаем - пул сам пропускает его по пингу"
+publish_case MISSING '2000000 n0002
 '
-[ ! -s "$T/put" ] || fail "без группы FAST-WG выбирать нечего"
-grep -q 'Группы FAST-WG нет' "$RUN_LOG" || fail "нет причины про отсутствие FAST-WG"
+[ ! -s "$T/put" ] || fail "без групп-пропусков выбирать нечего"
+grep -q 'нет групп FAST-WG <имя>' "$RUN_LOG" || fail "нет причины про отсутствие пропусков"
 unset -f curl
 
 # --- main(): пул только из WG - второе ядро не запускается, замер через
@@ -179,7 +173,7 @@ grep -q 'Лучший результат: 8.0 Мбит/с' "$E/speedtest.log" ||
 grep -q 'МБ/с' "$E/speedtest.log" && fail "в журнале остались МБ/с"
 [ "$(awk -F '\t' '$1 == "Blanc_NL_AMS_1" { print $10 }' "$E/stability.tsv")" = "A" ] || fail "окно стабильности WG-ноды не A"
 
-# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул через FAST-WG ---
+# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул через свой пропуск ---
 E=$T/e2e_win; mkdir -p "$E/www"
 cat > "$E/sources.yaml" <<'YAML'
 proxies:
@@ -213,7 +207,7 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
   }
   main
 ) > "$E/out.txt" 2>&1 || true
-grep -q -- '-X PUT.*FAST-WG' "$E/curl.log" || fail "WG-победитель не выбран в FAST-WG"
+grep -q -- '-X PUT.*FAST-WG%20Blanc_NL_AMS_1' "$E/curl.log" || fail "WG выше порога не выбран в своём пропуске"
 grep -q "WG: Blanc_NL_AMS_1 -> '⚡ Быстрый пул'" "$E/speedtest.log" || fail "нет строки о WG-победителе в пуле"
 [ ! -e "$E/fast.yaml" ] || fail "WG-победитель записан в fast.yaml"
 

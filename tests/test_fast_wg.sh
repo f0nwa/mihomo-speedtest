@@ -1,7 +1,7 @@
 #!/bin/sh
-# fast_wg.awk: служебная группа FAST-WG (WG-победитель спидтеста в
-# '⚡ Быстрый пул') есть в конфиге, только если в proxies: есть
-# WireGuard/AmneziaWG-ноды, и содержит ровно их (плюс REJECT).
+# fast_wg.awk: служебные группы-пропуски "FAST-WG <нода>" в '⚡ Быстрый пул'
+# есть в конфиге, только если в proxies: есть WireGuard/AmneziaWG-ноды, -
+# по одной на ноду, [REJECT, нода].
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -18,7 +18,7 @@ hasnt() { ! grep -qF -- "$1" "$2" || fail "лишнее '$1' ($3)"; }
 # Шаблон без WG-нод (только Hysteria2) - группы и ссылки на неё нет.
 awk -f "$SCRIPT" "$TEMPLATE" > "$WORK/none.yaml"
 hasnt 'name: FAST-WG' "$WORK/none.yaml" "без WG-нод группа не создаётся"
-hasnt '[FAST-WG]' "$WORK/none.yaml" "без WG-нод ссылки в пуле нет"
+hasnt "'FAST-WG" "$WORK/none.yaml" "без WG-нод ссылки в пуле нет"
 grep -q '^  # --- FAST_WG:BEGIN ---' "$WORK/none.yaml" || fail "маркеры группы остаются"
 grep -q '^    # --- FAST_WG_REF:BEGIN ---' "$WORK/none.yaml" || fail "маркеры ссылки остаются"
 grep -q 'MST-FAST-WG' "$WORK/none.yaml" && fail "старое имя MST-FAST-WG"
@@ -36,11 +36,13 @@ awk '
   }
   { print }' "$TEMPLATE" > "$WORK/src.yaml"
 awk -f "$SCRIPT" "$WORK/src.yaml" > "$WORK/wg.yaml"
-has '  - name: FAST-WG' "$WORK/wg.yaml" "группа создана"
-has "    proxies: [REJECT, 'WG Bob''s', 'AWG-NL']" "$WORK/wg.yaml" "в группе только WG-ноды"
-has '    proxies: [FAST-WG]' "$WORK/wg.yaml" "группа в '⚡ Быстрый пул'"
-has '    hidden: true' "$WORK/wg.yaml" "группа скрыта"
-has '    interval: 300' "$WORK/wg.yaml" "у группы своя проверка задержки"
+has "  - name: 'FAST-WG WG Bob''s'" "$WORK/wg.yaml" "пропуск первой ноды создан"
+has "    proxies: [REJECT, 'WG Bob''s']" "$WORK/wg.yaml" "в пропуске только своя нода"
+has "  - name: 'FAST-WG AWG-NL'" "$WORK/wg.yaml" "пропуск второй ноды создан"
+has "    proxies: [REJECT, 'AWG-NL']" "$WORK/wg.yaml" "в пропуске только своя нода"
+has "    proxies: ['FAST-WG WG Bob''s', 'FAST-WG AWG-NL']" "$WORK/wg.yaml" "пропуски в '⚡ Быстрый пул'"
+[ "$(grep -cxF '    hidden: true' "$WORK/wg.yaml")" -ge 2 ] || fail "пропуски скрыты"
+has '    interval: 300' "$WORK/wg.yaml" "у пропуска своя проверка задержки"
 has '    lazy: false' "$WORK/wg.yaml" "проверка не ленивая"
 fast_block=$(awk '/# --- FAST_WG:BEGIN/{f=1} f{print} /# --- FAST_WG:END/{f=0}' "$WORK/wg.yaml")
 case $fast_block in *include-all*|*Hysteria2*) fail "в FAST-WG попали не-WG ноды" ;; esac
@@ -53,7 +55,7 @@ cmp -s "$WORK/none.yaml" "$WORK/none2.yaml" || fail "повторный прог
 awk '/^  - name: "WG Bob/{skip=1} /^  - name: AWG-NL/{skip=1} /^  # --- STATIC_PROXIES:END/{skip=0} !skip' "$WORK/wg.yaml" > "$WORK/removed.yaml"
 awk -f "$SCRIPT" "$WORK/removed.yaml" > "$WORK/removed2.yaml"
 hasnt 'name: FAST-WG' "$WORK/removed2.yaml" "WG-ноды удалены - группы нет"
-hasnt '[FAST-WG]' "$WORK/removed2.yaml" "WG-ноды удалены - ссылки нет"
+hasnt "'FAST-WG" "$WORK/removed2.yaml" "WG-ноды удалены - ссылки нет"
 
 # Конфиг без маркеров (свой, не из шаблона) не трогается.
 printf 'proxies:\n  - name: w\n    type: wireguard\nproxy-groups:\n  - name: x\n    type: select\n    proxies: [w]\n' > "$WORK/plain.yaml"

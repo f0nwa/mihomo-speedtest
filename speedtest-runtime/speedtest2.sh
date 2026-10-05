@@ -47,7 +47,7 @@ API_MAIN=127.0.0.1:9090   # уточняется по external-controller раб
 # а на уже работающем экземпляре ноды в основном: служебная группа и вход
 # из config.example.yaml (порция 1 плана 2026-09-28-wg-main-core-speedtest).
 WG_GROUP=MST-SPEEDTEST
-WG_FAST_GROUP=FAST-WG       # победитель среди WG/AWG - участник '⚡ Быстрый пул'
+WG_FAST_PREFIX='FAST-WG '   # группы-пропуски WG/AWG-нод в '⚡ Быстрый пул': "FAST-WG <имя>"
 WG_LISTENER=mst-speedtest
 WG_PORT=7896
 MAIN_CONFIG=${MAIN_CONFIG:-$MIHOMO_DIR/config.yaml}
@@ -836,39 +836,37 @@ wg_group_now() {
 }
 
 # wg_publish_fast - WG/AWG-ноды не пишутся в fast.yaml (второй клиент с тем
-# же ключом), вместо этого лучшая из прошедших порог $1 выбирается в группе
-# WG_FAST_GROUP, которая входит в '⚡ Быстрый пул'. Нет прошедших порог:
-# REJECT, только если текущий выбор замерен в этом прогоне ниже порога.
-# Не ответившую или не дошедшую до замера ноду не трогаем: пул сам
-# проверяет FAST-WG пингом через выбранную ноду и пропускает её, пока она
-# не отвечает, а ожив, она вернётся в пул без ожидания следующего прогона.
+# же ключом). Вместо этого у каждой своя группа-пропуск "$WG_FAST_PREFIX<имя>"
+# [REJECT, нода], и все они входят в '⚡ Быстрый пул' - как ноды fast.yaml.
+# Замерена не ниже порога $1 - в пропуске выбирается нода, ниже порога -
+# REJECT до следующего прогона. Не ответившую или не дошедшую до замера
+# ноду не трогаем: пул сам проверяет пропуск пингом через ноду, пропускает
+# её, пока она не отвечает, и возвращает, как только она ожила.
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
-  if ! wg_now=$(wg_group_now "$WG_FAST_GROUP"); then
-    say "WARN: Группы $WG_FAST_GROUP нет в основном ядре - WG-ноды в '⚡ Быстрый пул' не попадают (группа создаётся только для WG/AWG-нод из proxies: конфига, ноды подписок в неё не входят; добавьте ноду в proxies: или обновите конфиг)"
-    return 0
-  fi
-  wg_best=$(awk -v min="$1" -v okfile="$WORK/wg_ok.txt" '
-    BEGIN { FS = "\t"; while ((getline l < okfile) > 0) { split(l, f, "\t"); nm[f[1]] = f[2] } FS = " " }
-    ($2 in nm) && $1 >= min && $1 > best { best = $1; name = nm[$2] }
-    END { if (name != "") print name }' "$WORK/res.txt")
-  if [ -n "$wg_best" ]; then
-    if [ "$wg_now" = "$wg_best" ] || wg_select_in "$WG_FAST_GROUP" "$wg_best"; then
-      say "WG: $wg_best -> '⚡ Быстрый пул' (группа $WG_FAST_GROUP)"
-    else
-      say "WARN: Не удалось выбрать $wg_best в группе $WG_FAST_GROUP"
+  wg_missing=0
+  while IFS="$(printf '\t')" read -r wg_idx wg_name <&3; do
+    [ -n "$wg_idx" ] || continue
+    wg_grp=$WG_FAST_PREFIX$wg_name
+    if ! wg_now=$(wg_group_now "$wg_grp"); then
+      wg_missing=$((wg_missing + 1)); continue
     fi
-    return 0
-  fi
-  [ "$wg_now" != REJECT ] || return 0
-  wg_now_idx=$(awk -F '\t' -v n="$wg_now" '$2 == n { print $1; exit }' "$WORK/wg_ok.txt")
-  [ -n "$wg_now_idx" ] || return 0
-  wg_now_state=$(awk -v k="$wg_now_idx" -v min="$1" '
-    $2 == k && $1 < min { slow = 1 }
-    END { print slow ? "fail" : "keep" }' "$WORK/res.txt")
-  if [ "$wg_now_state" = fail ]; then
-    wg_select_in "$WG_FAST_GROUP" REJECT && say "WG: $wg_now ниже порога скорости - убран из '⚡ Быстрый пул' до следующего прогона"
-  fi
+    wg_want=$(awk -v k="$wg_idx" -v min="$1" '
+      $2 == k { t = 1; sp = $1 + 0 }
+      END { if (t) print (sp >= min) ? "pass" : "slow" }' "$WORK/res.txt")
+    case $wg_want in
+      pass) wg_target=$wg_name ;;
+      slow) wg_target=REJECT ;;
+      *) continue ;;
+    esac
+    if [ "$wg_now" = "$wg_target" ] || wg_select_in "$wg_grp" "$wg_target"; then
+      if [ "$wg_want" = pass ]; then say "WG: $wg_name -> '⚡ Быстрый пул'"
+      else say "WG: $wg_name ниже порога скорости - не в '⚡ Быстрый пул' до следующего прогона"; fi
+    else
+      say "WARN: Не удалось переключить группу $wg_grp"
+    fi
+  done 3< "$WORK/wg_ok.txt"
+  [ "$wg_missing" -eq 0 ] || say "WARN: Для $wg_missing WG-нод нет групп $WG_FAST_PREFIX<имя> в основном ядре - в '⚡ Быстрый пул' они не попадают (группы создаются только для WG/AWG-нод из proxies: конфига, ноды подписок в них не входят; добавьте ноду в proxies: или обновите конфиг)"
   return 0
 }
 
@@ -1158,7 +1156,7 @@ update_node_stability
 # WG/AWG-ноды в fast.yaml не пишутся: полное определение подняло бы в
 # основном ядре второго клиента с тем же ключом, а псевдоним direct +
 # dialer-proxy на роутере шёл мимо туннеля (задержка 33 мс против 126 мс).
-# Победитель среди них попадает в пул через группу WG_FAST_GROUP (wg_publish_fast).
+# Прошедшие порог попадают в пул через свои группы-пропуски (wg_publish_fast).
 awk -v wgfile="$WORK/wg.txt" '
   BEGIN { while ((getline l < wgfile) > 0) { split(l, f, "\t"); wg[f[1]] = 1 } }
   !($2 in wg)' "$WORK/res.txt" > "$WORK/res_fast.txt"

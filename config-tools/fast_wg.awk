@@ -1,15 +1,16 @@
-# fast_wg.awk - служебная группа FAST-WG по WireGuard/AmneziaWG-нодам из
+# fast_wg.awk - служебные группы FAST-WG по WireGuard/AmneziaWG-нодам из
 # proxies: конфига. Используется setup.sh (после render_config.awk) и
 # migrate_config.sh (после migrate_config.awk); на вход - готовый конфиг,
 # на выход - он же с перегенерированными блоками между маркерами:
-#   # --- FAST_WG:BEGIN/END ---      сама группа FAST-WG (proxy-groups:)
-#   # --- FAST_WG_REF:BEGIN/END ---  строка "proxies: [FAST-WG]" в '⚡ Быстрый пул'
-# Есть ноды "type: wireguard" (AmneziaWG - тот же тип) - группа содержит
-# [REJECT, <эти ноды>] (REJECT - "победителя нет", выбирает спидтест) и
-# свою проверку задержки: select сам ноды не проверяет, а пул проверяет
-# только группу целиком - без неё у WG-нод пропадают пинги. lazy: false -
-# группу трогают редко, ленивая проверка бы не запускалась;
-# нет - оба блока пустые. Маркеры остаются, повторный прогон ничего не
+#   # --- FAST_WG:BEGIN/END ---      группы "FAST-WG <нода>" (proxy-groups:)
+#   # --- FAST_WG_REF:BEGIN/END ---  строка "proxies: [...]" в '⚡ Быстрый пул'
+# На каждую ноду "type: wireguard" (AmneziaWG - тот же тип) - своя группа-
+# пропуск [REJECT, нода]: спидтест выбирает в ней ноду, если она прошла
+# порог скорости, и REJECT, если ниже порога. Все пропуски входят в пул,
+# дальше пул сам выбирает по пингу, как среди нод fast.yaml. Своя проверка
+# задержки: select сам ноды не проверяет; lazy: false - пропуск трогают
+# редко, ленивая проверка бы не запускалась. Нет WG-нод - оба блока
+# пустые. Маркеры остаются, повторный прогон ничего не
 # меняет. Ноды из подписок не учитываются: их состав на момент сборки
 # конфига неизвестен. Конфиг без маркеров выводится как есть; непарные
 # маркеры - отказ (код 2, без вывода).
@@ -28,7 +29,7 @@ function unquote(v) {
 function squote(v) { gsub(/'/, "''", v); return "'" v "'" }
 function marker(s, name) { return s ~ ("^[ ]*# --- " name ":(BEGIN|END) ---($|[ ])") }
 function flush_node() {
-  if (node_name != "" && node_type == "wireguard") wg = wg ", " squote(node_name)
+  if (node_name != "" && node_type == "wireguard") wg[++nwg] = node_name
   node_name = ""; node_type = ""
 }
 {
@@ -53,11 +54,11 @@ END {
     print s
     if (marker(s, "FAST_WG") && s ~ /:BEGIN/) {
       skip = 1
-      if (wg != "") {
-        ind = s; sub(/#.*/, "", ind)
-        print ind "- name: FAST-WG"
+      ind = s; sub(/#.*/, "", ind)
+      for (k = 1; k <= nwg; k++) {
+        print ind "- name: " squote("FAST-WG " wg[k])
         print ind "  type: select"
-        print ind "  proxies: [REJECT" wg "]"
+        print ind "  proxies: [REJECT, " squote(wg[k]) "]"
         print ind "  url: \"https://www.gstatic.com/generate_204\""
         print ind "  interval: 300"
         print ind "  lazy: false"
@@ -65,7 +66,11 @@ END {
       }
     } else if (marker(s, "FAST_WG_REF") && s ~ /:BEGIN/) {
       skip = 1
-      if (wg != "") { ind = s; sub(/#.*/, "", ind); print ind "proxies: [FAST-WG]" }
+      if (nwg) {
+        ind = s; sub(/#.*/, "", ind); ref = ""; sep = ""
+        for (k = 1; k <= nwg; k++) { ref = ref sep squote("FAST-WG " wg[k]); sep = ", " }
+        print ind "proxies: [" ref "]"
+      }
     } else if (s ~ /:END ---/ && (marker(s, "FAST_WG") || marker(s, "FAST_WG_REF"))) skip = 0
   }
 }

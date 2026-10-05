@@ -242,7 +242,7 @@ assert_contains 'ERROR|bad|нет Endpoint в [Peer]' "$rep"
 assert_contains 'ERROR|a|b|недопустимое имя ноды' "$rep"
 assert_contains 'FASTWG|created' "$rep"
 txt=$(printf '%s' "$out" | jget '["text"]')
-assert_contains '  - name: FAST-WG' "$txt"
+assert_contains "  - name: 'FAST-WG nl-ams'" "$txt"
 assert_contains "  - name: 'nl-ams'" "$txt"
 assert_not_contains "name: 'a|b'" "$txt"
 [ "$(printf '%s' "$out" | jget '["check"]["ok"]')" = True ] || fail "13: check"
