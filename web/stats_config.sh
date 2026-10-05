@@ -49,6 +49,10 @@ CONFIG_TEMPLATE=${CONFIG_TEMPLATE:-$DIR/config.example.yaml}
 MIGRATE_SCRIPT=${MIGRATE_SCRIPT:-$DIR/migrate_config.sh}
 WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
 FAST_WG_AWK=${FAST_WG_AWK:-$DIR/fast_wg.awk}
+# Конструктор конфига: сборка шаблона с состоянием пользователя (свои
+# сервисы, домены, фильтр нод) - см. config-tools/constructor_build.sh.
+CONSTRUCTOR_BUILD=${CONSTRUCTOR_BUILD:-$DIR/constructor_build.sh}
+CONFIG_STATE_DIR=${CONFIG_STATE_DIR:-$DIR/config-state}
 # Схема конфига: доступная - CONFIG_SCHEMA_VERSION установленного релиза,
 # применённая - config-schema-version (её пишет save мигрированного текста,
 # см. record_schema()); по ним вкладка «Обновления» показывает карточку
@@ -381,6 +385,40 @@ record_schema() {
   fi
 }
 
+# Отпечаток управляемых конструктором разделов config.yaml ($1): anchors,
+# proxy-groups, rule-providers, rules (их пересобирает шаблон).
+managed_sig() {
+  awk '/^[A-Za-z0-9_-]+:/ { k = $0; sub(/:.*/, "", k) }
+       k == "anchors" || k == "proxy-groups" || k == "rule-providers" || k == "rules"' "$1" > "$WORK/managed"
+  fingerprint "$WORK/managed"
+}
+
+# Собран ли текст $1 из состояния конструктора: managed.sig, записанный
+# после последнего применения, совпадает с его управляемыми разделами.
+state_matches() {
+  [ -f "$CONFIG_STATE_DIR/services.tsv" ] && [ -f "$CONFIG_STATE_DIR/managed.sig" ] &&
+    [ "$(cat "$CONFIG_STATE_DIR/managed.sig")" = "$(managed_sig "$1")" ]
+}
+
+# Вызывается после каждого успешного применения (в том числе "не
+# изменился"), рядом с record_schema. По умолчанию: если состояние
+# конструктора есть и применённый config.yaml совпадает со сборкой из него
+# (например, после "Миграции к шаблону"), managed.sig обновляется - иначе
+# конструктор считал бы такую миграцию ручной правкой. stats_constructor.sh
+# переопределяет (пишет само состояние).
+after_apply_ok() {
+  [ -f "$CONFIG_STATE_DIR/services.tsv" ] && [ -f "$CONSTRUCTOR_BUILD" ] || return 0
+  aa_t=$(config_target) || return 0
+  sh "$CONSTRUCTOR_BUILD" --state "$CONFIG_STATE_DIR" --source "$aa_t" --output "$WORK/sigcheck.yaml" \
+    --report "$WORK/sigcheck.report" > /dev/null 2>&1 || return 0
+  aa_sig=$(managed_sig "$aa_t")
+  [ "$aa_sig" = "$(managed_sig "$WORK/sigcheck.yaml")" ] || return 0
+  if printf '%s' "$aa_sig" > "$CONFIG_STATE_DIR/managed.sig.new" && mv -f "$CONFIG_STATE_DIR/managed.sig.new" "$CONFIG_STATE_DIR/managed.sig"; then
+    alog "Конфиг совпадает с настройками конструктора"
+  fi
+  return 0
+}
+
 # Применение кандидата $1 (уже в $WORK). Проверяет base, mihomo -t,
 # делает бэкап, заменяет config.yaml, перезапускает ядро; при провале
 # перезапуска - откат. Пишет JSON-ответ и завершает скрипт.
@@ -405,6 +443,7 @@ apply_candidate() {
   if [ -f "$target" ] && cmp -s "$cand" "$target"; then
     alog "Конфиг не изменился - запись и перезапуск не нужны"
     record_schema
+    after_apply_ok
     printf '{"ok":true,"unchanged":true,"base":"%s"}\n' "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -420,6 +459,7 @@ apply_candidate() {
   if [ "$rrc" = 0 ]; then
     alog "ГОТОВО: конфиг применён, ядро перезапущено"
     record_schema
+    after_apply_ok
     printf '{"ok":true,"backup":%s,"restarted":true,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -427,6 +467,7 @@ apply_candidate() {
     # xkeen не найден: конфиг записан, перезапуск - вручную.
     alog "ГОТОВО: конфиг записан, ядро не перезапускалось"
     record_schema
+    after_apply_ok
     printf '{"ok":true,"backup":%s,"restarted":false,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
@@ -521,7 +562,17 @@ cmd_repair() {
     format|'') ;;
     template)
       [ -f "$MIGRATE_SCRIPT" ] && [ -f "$CONFIG_TEMPLATE" ] || fail_json 500 no_template "Шаблон или migrate_config.sh не найден - переустановите проект"
-      if ! sh "$MIGRATE_SCRIPT" --source "$WORK/fixed.yaml" --template "$CONFIG_TEMPLATE" \
+      if [ -f "$CONSTRUCTOR_BUILD" ]; then
+        # Шаблон собирается с состоянием конструктора (свои сервисы, домены,
+        # фильтр нод); состояния ещё нет - выводится из текущего текста.
+        # Управляемые разделы правили вручную после конструктора - тоже
+        # --import: иначе миграция молча выбросила бы ручные правки.
+        if state_matches "$WORK/fixed.yaml"; then set -- --state "$CONFIG_STATE_DIR"; else set -- --import; fi
+        if ! sh "$CONSTRUCTOR_BUILD" "$@" --source "$WORK/fixed.yaml" \
+            --output "$WORK/migrated.yaml" --report "$WORK/report" > "$WORK/migrate.log" 2>&1; then
+          fail_json 422 migrate_failed "$(tail -n 5 "$WORK/migrate.log")"
+        fi
+      elif ! sh "$MIGRATE_SCRIPT" --source "$WORK/fixed.yaml" --template "$CONFIG_TEMPLATE" \
           --output "$WORK/migrated.yaml" --report "$WORK/report" > "$WORK/migrate.log" 2>&1; then
         fail_json 422 migrate_failed "$(tail -n 5 "$WORK/migrate.log")"
       fi

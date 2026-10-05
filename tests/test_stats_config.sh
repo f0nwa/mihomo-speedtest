@@ -162,6 +162,31 @@ out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
 assert_contains 'proxy-groups' "$(printf '%s' "$out" | jget '["text"]')"
 assert_contains 'managed-section-replaced' "$(printf '%s' "$out" | jget '["report"]')"
 
+# --- 11c: repair template при наличии constructor_build.sh собирает через
+#     него: без состояния - с --import, с состоянием - с --state
+cat > "$DIR/constructor_build.sh" <<EOF
+printf '%s\n' "\$*" > "$TMP/cb.args"
+while [ \$# -gt 0 ]; do case \$1 in --import) shift; continue;; --output) o=\$2;; --report) r=\$2;; --source) s=\$2;; esac; shift 2; done
+{ cat "\$s"; echo 'built: 1'; } > "\$o"; echo 'IMPORTED|svc|mine' > "\$r"
+EOF
+export CONFIG_STATE_DIR=$TMP/cstate
+out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
+assert_contains 'built: 1' "$(printf '%s' "$out" | jget '["text"]')"
+assert_contains '--import' "$(cat "$TMP/cb.args")"
+mkdir -p "$CONFIG_STATE_DIR"; : > "$CONFIG_STATE_DIR/services.tsv"
+# состояние есть, но config.yaml собран не из него (нет managed.sig) - --import
+out=$(printf 'a: 1\n' | cgi repair POST 'mode=template')
+assert_contains '--import' "$(cat "$TMP/cb.args")"
+# managed.sig совпадает с управляемыми разделами текста - --state
+printf 'a: 1\nrules:\n  - MATCH,DIRECT\n' > "$TMP/in.yaml"
+( MST_CONFIG_LIB=1 . "$SCRIPT"; new_work; managed_sig "$TMP/in.yaml" ) > "$CONFIG_STATE_DIR/managed.sig"
+out=$(cgi repair POST 'mode=template' < "$TMP/in.yaml")
+assert_contains "--state $CONFIG_STATE_DIR" "$(cat "$TMP/cb.args")"
+# управляемые разделы правили вручную - --import, правки не теряются
+printf 'a: 1\nrules:\n  - DOMAIN,hand.example,DIRECT\n  - MATCH,DIRECT\n' | cgi repair POST 'mode=template' > /dev/null
+assert_contains '--import' "$(cat "$TMP/cb.args")"
+rm -f "$DIR/constructor_build.sh"; unset CONFIG_STATE_DIR
+
 # --- 11b: схема конфига - repair template отдаёт схему установленного
 #     релиза, save с ?schema=N после успеха пишет config-schema-version
 export UPDATE_STATE_DIR=$TMP/ustate

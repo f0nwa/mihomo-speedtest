@@ -37,6 +37,7 @@ FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
 FILE|web|web/stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|0755|sh
 FILE|web|web/stats_xkeen.sh|/opt/etc/mihomo-speedtest/stats_xkeen.sh|0755|sh
+FILE|web|web/stats_constructor.sh|/opt/etc/mihomo-speedtest/stats_constructor.sh|0755|sh
 FILE|web|web/stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|0644|py
 FILE|web|web/stats_auth.py|/opt/etc/mihomo-speedtest/stats_auth.py|0644|py
 FILE|web|web/stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|0755|sh
@@ -72,5 +73,9 @@ FILE|config-tools|config-tools/fast_wg.awk|/opt/etc/mihomo-speedtest/fast_wg.awk
 FILE|config-tools|config-tools/wg_import.awk|/opt/etc/mihomo-speedtest/wg_import.awk|0644|awk
 FILE|config-tools|config-tools/existing_config.awk|/opt/etc/mihomo-speedtest/existing_config.awk|0644|awk
 FILE|config-tools|config-tools/config.example.yaml|/opt/etc/mihomo-speedtest/config.example.yaml|0644|none
+FILE|config-tools|config-tools/render_services.awk|/opt/etc/mihomo-speedtest/render_services.awk|0644|awk
+FILE|config-tools|config-tools/services.default.tsv|/opt/etc/mihomo-speedtest/services.default.tsv|0644|none
+FILE|config-tools|config-tools/config_to_state.awk|/opt/etc/mihomo-speedtest/config_to_state.awk|0644|awk
+FILE|config-tools|config-tools/constructor_build.sh|/opt/etc/mihomo-speedtest/constructor_build.sh|0755|sh
 
 ACTION|web|restart-web

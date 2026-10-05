@@ -20,13 +20,13 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_constructor.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -1076,6 +1076,8 @@ install_files() {
   chmod +x "$DIR/stats_config.sh"
   atomic_install "$SELFDIR/stats_xkeen.sh" "$DIR/stats_xkeen.sh" || return 1
   chmod +x "$DIR/stats_xkeen.sh"
+  atomic_install "$SELFDIR/stats_constructor.sh" "$DIR/stats_constructor.sh" || return 1
+  chmod +x "$DIR/stats_constructor.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
   # веб-сервиса статистики - stats_httpd.py раздаёт их прямо из $DIR;
   # исполняемый бит не нужен.

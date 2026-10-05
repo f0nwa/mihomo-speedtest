@@ -506,6 +506,11 @@ API_ROUTES = {
     "api/config/restore": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
     "api/config/restore-working": ("stats_config.sh", {"MST_CONFIG_ACTION": "restore-working", "MST_CGI_TIMEOUT": "300"}),
     "api/config/log": ("stats_config.sh", {"MST_CONFIG_ACTION": "log"}),
+    # Конструктор конфига: apply ждёт сборку, mihomo -t, xkeen -restart,
+    # проверку ядра и при провале - откат.
+    "api/constructor": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "read", "MST_CGI_TIMEOUT": "60"}),
+    "api/constructor/preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "preview", "MST_CGI_TIMEOUT": "60"}),
+    "api/constructor/apply": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "apply", "MST_CGI_TIMEOUT": "180"}),
     # Команды XKeen: run запускает команду в фоне и отвечает сразу, вывод
     # окно забирает опросом run-log - длинные таймауты не нужны.
     "api/xkeen/run": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run"}),
