@@ -194,4 +194,14 @@ grep -q 'upstream' "$TMP/err" || fail "нет сообщения об upstream: 
 # --dry-run не требует запушенного HEAD.
 GIT_UPSTREAM= run --channel dev --dry-run >/dev/null 2>&1 || fail "dry-run не должен проверять upstream"
 
+# Шаблон должен совпадать со сборкой из services.default.tsv.
+grep -q check_services_template "$SCRIPT" || fail "в cut_release.sh нет check_services_template"
+mkdir -p "$TMP/ct"
+cp "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$TMP/ct/"
+sed 's/^  - name: YouTube$/  - name: YouTubeX/' "$ROOT/config-tools/config.example.yaml" > "$TMP/ct/config.example.yaml"
+if CONFIG_TOOLS_DIR="$TMP/ct" run --channel dev --dry-run >/dev/null 2>"$TMP/err"; then
+  fail "рассинхрон шаблона и services.default.tsv должен давать ненулевой код"
+fi
+grep -q 'services.default.tsv' "$TMP/err" || fail "нет сообщения о рассинхроне шаблона: $(cat "$TMP/err")"
+
 echo "OK: test_cut_release"

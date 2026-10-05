@@ -121,6 +121,24 @@ sha_of() {
   [ "${#hash_value}" = 64 ] || return 1
   printf '%s\n' "$hash_value"
 }
+# check_services_template: config.example.yaml хранится собранным - участки
+# между маркерами SERVICE_* должны совпадать со сборкой render_services.awk
+# из services.default.tsv (см. docs/superpowers/specs/
+# 2026-10-05-config-constructor-design.md). Иначе выпуск отменяется.
+# CONFIG_TOOLS_DIR - только для тестов.
+check_services_template() {
+  cst_dir=${CONFIG_TOOLS_DIR:-$ROOT/config-tools}
+  cst_out=$(mktemp "${TMPDIR:-/tmp}/cut-release-template.XXXXXX") || exit 1
+  if ! awk -v services_file="$cst_dir/services.default.tsv" -f "$cst_dir/render_services.awk" "$cst_dir/config.example.yaml" > "$cst_out" \
+     || ! cmp -s "$cst_out" "$cst_dir/config.example.yaml"; then
+    rm -f "$cst_out"
+    echo "cut_release.sh: config.example.yaml не совпадает со сборкой из services.default.tsv - пересоберите: awk -v services_file=config-tools/services.default.tsv -f config-tools/render_services.awk config-tools/config.example.yaml > /tmp/t && cat /tmp/t > config-tools/config.example.yaml" >&2
+    exit 1
+  fi
+  rm -f "$cst_out"
+}
+check_services_template
+
 # Файлы, от которых зависит схема config.yaml (см. release/manifest-format.md,
 # "Версии и заголовок"): их изменение относительно прошлого релиза
 # автоматически поднимает CONFIG_SCHEMA_VERSION - роутер увидит отдельное
