@@ -268,18 +268,18 @@ rep=$(printf '%s' "$out" | jget '["report"]')
 assert_contains 'ADDED|nl-ams' "$rep"
 assert_contains 'ERROR|bad|нет Endpoint в [Peer]' "$rep"
 assert_contains 'ERROR|a|b|недопустимое имя ноды' "$rep"
-assert_contains 'FASTWG|created' "$rep"
+assert_not_contains 'FASTWG|created' "$rep"
 txt=$(printf '%s' "$out" | jget '["text"]')
-assert_contains "  - name: 'FAST-WG nl-ams'" "$txt"
+assert_not_contains "  - name: 'FAST-WG nl-ams'" "$txt"
 assert_contains "  - name: 'nl-ams'" "$txt"
 assert_not_contains "name: 'a|b'" "$txt"
 [ "$(printf '%s' "$out" | jget '["check"]["ok"]')" = True ] || fail "13: check"
 cmp -s "$M/config.yaml" "$TMP/cfg-before" || fail "13: config.yaml изменён"
-# повтор с уже импортированной нодой - REPLACED, FAST-WG не меняется
+# повтор с уже импортированной нодой - REPLACED, технических групп нет
 printf '%s' "$txt" > "$TMP/imported.yaml"
 out=$({ printf '### MST-WG nl-ams\n%s\n' "$WGC"; printf '### MST-CONFIG\n'; cat "$TMP/imported.yaml"; } | cgi import-wg POST '')
 assert_contains 'REPLACED|nl-ams' "$(printf '%s' "$out" | jget '["report"]')"
-assert_contains 'FASTWG|none' "$(printf '%s' "$out" | jget '["report"]')"
+assert_not_contains 'FASTWG|none' "$(printf '%s' "$out" | jget '["report"]')"
 # имя: 64 символа кириллицей - можно, 65 - нельзя
 n64=$(printf 'я%.0s' $(seq 64)); n65=${n64}я
 out=$({ printf '### MST-WG %s\n%s\n' "$n64" "$WGC"; printf '### MST-WG %s\n%s\n' "$n65" "$WGC"

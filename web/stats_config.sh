@@ -537,11 +537,6 @@ cmd_repair() {
   reply 200 "$WORK/resp"
 }
 
-# Блок FAST_WG (между маркерами) файла $1 - для отчёта created/updated/none.
-fast_wg_block() {
-  awk '/# --- FAST_WG:BEGIN/ { f = 1; next } /# --- FAST_WG:END/ { f = 0 } f' "$1"
-}
-
 cmd_import_wg() {
   [ -f "$WG_IMPORT_AWK" ] && [ -f "$FAST_WG_AWK" ] || fail_json 500 no_tools "wg_import.awk или fast_wg.awk не найден - переустановите проект"
   read_body "$WORK/body"
@@ -568,10 +563,6 @@ cmd_import_wg() {
     || fail_json 422 import_failed "Не удалось вставить ноды в конфиг (повреждены маркеры STATIC_PROXIES?)"
   awk -f "$FAST_WG_AWK" "$WORK/imp.yaml" > "$WORK/out.yaml" 2> "$WORK/fastwg.log" \
     || fail_json 422 import_failed "$(head -n 1 "$WORK/fastwg.log")"
-  fast_wg_block "$WORK/in.yaml" > "$WORK/fw.before"; fast_wg_block "$WORK/out.yaml" > "$WORK/fw.after"
-  if [ ! -s "$WORK/fw.after" ] || cmp -s "$WORK/fw.before" "$WORK/fw.after"; then echo 'FASTWG|none' >> "$WORK/report"
-  elif [ -s "$WORK/fw.before" ]; then echo 'FASTWG|updated' >> "$WORK/report"
-  else echo 'FASTWG|created' >> "$WORK/report"; fi
   rc=0; check_file "$WORK/out.yaml" || rc=$?
   printf '{"ok":true,"text":%s,"report":%s,"check":%s}\n' \
     "$(jstr_file "$WORK/out.yaml")" "$(lines_json "$WORK/report")" "$(check_json "$rc")" > "$WORK/resp"

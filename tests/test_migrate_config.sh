@@ -50,8 +50,8 @@ class Migration(unittest.TestCase):
   self.run_cli();t=self.out.read_text()
   self.assertNotIn('name: FAST-WG',t);self.assertNotIn("'FAST-WG",t);self.assertNotIn('MST-FAST-WG',t)
   self.add_wg();self.run_cli();t=self.out.read_text()
-  self.assertIn("  - name: 'FAST-WG My AWG'\n    type: select\n    proxies: [REJECT, 'My AWG']\n    url: \"https://www.gstatic.com/generate_204\"\n    interval: 300\n    lazy: false\n    hidden: true\n",t)
-  self.assertIn("    proxies: ['FAST-WG My AWG']\n",t)
+  self.assertNotIn("'FAST-WG",t)
+  self.assertIn('name: My AWG',t)
  def test_repeat_migration_with_wg_is_stable(self):
   self.add_wg();self.run_cli();first=self.out.read_bytes();self.old.write_bytes(first);self.run_cli()
   self.assertEqual(self.out.read_bytes(),first)

@@ -93,38 +93,74 @@ wg_select 'Blanc "NL"' || fail "wg_select failed"
 grep -qx 'http://127.0.0.1:9090/proxies/MST-SPEEDTEST' "$T/select_args" || fail "wg_select: неверный URL группы"
 grep -qxF '{"name":"Blanc \"NL\""}' "$T/select_args" || fail "wg_select: неверное тело"
 
-# --- wg_publish_fast: у каждой WG-ноды свой пропуск "FAST-WG <имя>";
-#     выше порога -> нода, замерена ниже порога -> REJECT, иначе не трогаем ---
+# --- Прямые ссылки, атомарная запись и откат при ошибках применения ---
+FAST_WG_AWK=$ROOT/config-tools/fast_wg.awk
+CONFIGEDIT_LOCK=$T/config-lock
+MIHOMO_DIR=$T
+BIN=/usr/bin/true
+cat > "$MAIN_CONFIG" <<'YAML'
+proxies:
+  - name: Blanc_NL_AMS_1
+    type: wireguard
+  - name: Other WG
+    type: wireguard
+proxy-groups:
+  - name: '⚡ Быстрый пул'
+    type: url-test
+    # --- FAST_WG_REF:BEGIN ---
+    # --- FAST_WG_REF:END ---
+  # --- FAST_WG:BEGIN ---
+  - name: 'FAST-WG Blanc_NL_AMS_1'
+    type: select
+    proxies: [REJECT, Blanc_NL_AMS_1]
+  # --- FAST_WG:END ---
+YAML
 printf 'n0002\tBlanc_NL_AMS_1\nn0003\tOther WG\n' > "$WORK/wg_ok.txt"
-publish_case() {  # $1 now (MISSING - группы нет), $2 res.txt
-  printf '%s' "$2" > "$WORK/res.txt"; : > "$T/put"; : > "$RUN_LOG"
-  PUB_NOW=$1
-  curl() {
-    case "$*" in
-      *'-X PUT'*) printf '%s\n' "$*" >> "$T/put" ;;
-      *) [ "$PUB_NOW" = MISSING ] && return 22; printf '{"all":["REJECT"],"now":"%s","type":"Selector"}' "$PUB_NOW" ;;
+printf '2000000 n0002\n3000000 n0003\n' > "$WORK/res.txt"
+: > "$T/put"
+curl() { printf '%s\n' "$*" >> "$T/put"; }
+wg_publish_fast 1000000
+grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$MAIN_CONFIG" || fail "нет прямых ссылок на победителей"
+! grep -qF "name: 'FAST-WG" "$MAIN_CONFIG" || fail "осталась техническая группа"
+grep -q '/configs' "$T/put" || fail "конфиг не перечитан"
+cp "$MAIN_CONFIG" "$T/good"
+: > "$T/put"
+wg_publish_fast 1000000
+[ ! -s "$T/put" ] || fail "тот же состав вызывает перезагрузку"
+printf '500000 n0002\n' > "$WORK/res.txt"
+BIN=/usr/bin/false
+wg_publish_fast 1000000
+cmp -s "$MAIN_CONFIG" "$T/good" || fail "ошибка валидации изменила конфиг"
+BIN=/usr/bin/true
+(
+  cp() {
+    for dst do :; done
+    case "$dst" in
+      "$T"/.config.yaml.*) printf 'partial' > "$dst"; return 1 ;;
+      *) command cp "$@" ;;
     esac
   }
   wg_publish_fast 1000000
-}
-publish_case REJECT '2000000 n0002
-3000000 n0003
-'
-grep -qF 'proxies/FAST-WG%20Blanc_NL_AMS_1' "$T/put" && grep -qF '{"name":"Blanc_NL_AMS_1"}' "$T/put" || fail "первый WG выше порога не выбран в своём пропуске"
-grep -qF 'proxies/FAST-WG%20Other%20WG' "$T/put" && grep -qF '{"name":"Other WG"}' "$T/put" || fail "второй WG выше порога не выбран в своём пропуске"
-publish_case 'Other WG' '3000000 n0003
-'
-[ "$(grep -c PUT "$T/put")" = 0 ] || fail "Other WG уже выбран, а Blanc не замерен - PUT не нужен"
-publish_case Blanc_NL_AMS_1 '500000 n0002
-'
-grep -qF 'proxies/FAST-WG%20Blanc_NL_AMS_1' "$T/put" && grep -qF '{"name":"REJECT"}' "$T/put" || fail "WG ниже порога должен получить REJECT"
-grep -q 'Other%20WG' "$T/put" && fail "не замеренный WG трогать нельзя"
-publish_case Blanc_NL_AMS_1 ''
-[ ! -s "$T/put" ] || fail "не ответивший или не замеренный WG не трогаем - пул сам пропускает его по пингу"
-publish_case MISSING '2000000 n0002
-'
-[ ! -s "$T/put" ] || fail "без групп-пропусков выбирать нечего"
-grep -q 'нет групп FAST-WG <имя>' "$RUN_LOG" || fail "нет причины про отсутствие пропусков"
+)
+cmp -s "$MAIN_CONFIG" "$T/good" || fail "ошибка записи повредила конфиг"
+[ ! -d "$CONFIGEDIT_LOCK" ] || fail "ошибка записи оставила блокировку"
+curl() { return 22; }
+wg_publish_fast 1000000
+cmp -s "$MAIN_CONFIG" "$T/good" || fail "ошибка API не откатила конфиг"
+[ ! -d "$CONFIGEDIT_LOCK" ] || fail "блокировка не очищена"
+curl() { printf '%s\n' "$*" >> "$T/put"; }
+mkdir "$CONFIGEDIT_LOCK"
+printf '%s\n' $$ > "$CONFIGEDIT_LOCK/pid"
+wg_publish_fast 1000000
+cmp -s "$MAIN_CONFIG" "$T/good" || fail "занятый конфиг изменён"
+rm -rf "$CONFIGEDIT_LOCK"
+# WG, исключённая из текущего замера, сохраняет прежнее участие.
+printf 'n0002\tBlanc_NL_AMS_1\n' > "$WORK/wg_ok.txt"
+wg_publish_fast 1000000
+grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "медленная WG не удалена / незамеренная удалена"
+: > "$WORK/res.txt"; : > "$T/put"
+wg_publish_fast 1000000
+[ ! -s "$T/put" ] || fail "без результатов состав изменён"
 unset -f curl
 
 # --- main(): пул только из WG - второе ядро не запускается, замер через
@@ -138,6 +174,8 @@ proxies:
     port: 51121
 YAML
 printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n    port: 7896\n' > "$E/config.yaml"
+cat "$E/sources.yaml" >> "$E/config.yaml"
+printf "proxy-groups:\n  - name: '⚡ Быстрый пул'\n    type: url-test\n    # --- FAST_WG_REF:BEGIN ---\n    # --- FAST_WG_REF:END ---\n" >> "$E/config.yaml"
 (
   MST_LIB_ONLY=1 . "$SCRIPT"
   FORCE=1; BLOCK='Russia'; SOURCES=$E/sources.yaml; MAIN_CONFIG=$E/config.yaml
@@ -146,13 +184,14 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
   OUT=$E/fast.yaml; LAST=$E/last.txt; HISTORY_RUNS=$E/runs.tsv; HISTORY_NODES=$E/nodes.tsv
   HISTORY_STABILITY=$E/stability.tsv; STATS_PROGRESS=$E/www/progress.json; STATS_HTTP_ENABLE=0
   STATS_HTML=$E/www/stats.html; STATS_JSON=$E/www/stats.json
-  BIN=/bin/false
+  BIN=/usr/bin/true
+  FAST_WG_AWK=$ROOT/config-tools/fast_wg.awk; CONFIGEDIT_LOCK=$E/config-lock; MIHOMO_DIR=$E
   netstat() { printf '%s\n' 'tcp 0 0 127.0.0.1:7896 0.0.0.0:* LISTEN'; }
   curl() {
     printf '%s\n' "$*" >> "$E/curl.log"
     case "$*" in
       *127.0.0.1:9099*) return 7 ;;
-      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/proxies/FAST-WG'*) return 0 ;;
+      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/configs'*) return 0 ;;
       *'/proxies/MST'*|*'/proxies/FAST-WG'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
       *'/delay?'*) printf '%s' '{"delay":126}' ;;
       *'127.0.0.1:7896'*) printf '%s' '200 1000000' ;;
@@ -173,7 +212,7 @@ grep -q 'Лучший результат: 8.0 Мбит/с' "$E/speedtest.log" ||
 grep -q 'МБ/с' "$E/speedtest.log" && fail "в журнале остались МБ/с"
 [ "$(awk -F '\t' '$1 == "Blanc_NL_AMS_1" { print $10 }' "$E/stability.tsv")" = "A" ] || fail "окно стабильности WG-ноды не A"
 
-# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул через свой пропуск ---
+# --- тот же прогон, но канал медленный: WG проходит порог и попадает в пул напрямую ---
 E=$T/e2e_win; mkdir -p "$E/www"
 cat > "$E/sources.yaml" <<'YAML'
 proxies:
@@ -183,6 +222,8 @@ proxies:
     port: 51121
 YAML
 printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n    port: 7896\n' > "$E/config.yaml"
+cat "$E/sources.yaml" >> "$E/config.yaml"
+printf "proxy-groups:\n  - name: '⚡ Быстрый пул'\n    type: url-test\n    # --- FAST_WG_REF:BEGIN ---\n    # --- FAST_WG_REF:END ---\n" >> "$E/config.yaml"
 (
   MST_LIB_ONLY=1 . "$SCRIPT"
   FORCE=0; BLOCK='Russia'; SOURCES=$E/sources.yaml; MAIN_CONFIG=$E/config.yaml
@@ -191,13 +232,14 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
   OUT=$E/fast.yaml; LAST=$E/last.txt; HISTORY_RUNS=$E/runs.tsv; HISTORY_NODES=$E/nodes.tsv
   HISTORY_STABILITY=$E/stability.tsv; STATS_PROGRESS=$E/www/progress.json; STATS_HTTP_ENABLE=0
   STATS_HTML=$E/www/stats.html; STATS_JSON=$E/www/stats.json
-  BIN=/bin/false
+  BIN=/usr/bin/true
+  FAST_WG_AWK=$ROOT/config-tools/fast_wg.awk; CONFIGEDIT_LOCK=$E/config-lock; MIHOMO_DIR=$E
   netstat() { printf '%s\n' 'tcp 0 0 127.0.0.1:7896 0.0.0.0:* LISTEN'; }
   curl() {
     printf '%s\n' "$*" >> "$E/curl.log"
     case "$*" in
       *127.0.0.1:9099*) return 7 ;;
-      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/proxies/FAST-WG'*) return 0 ;;
+      *'-X PUT'*'/proxies/MST'*|*'-X PUT'*'/configs'*) return 0 ;;
       *'/proxies/MST'*|*'/proxies/FAST-WG'*) printf '%s' '{"all":["REJECT","Blanc_NL_AMS_1"],"now":"REJECT"}' ;;
       *'/delay?'*) printf '%s' '{"delay":126}' ;;
       *'127.0.0.1:7896'*) printf '%s' '200 1000000' ;;
@@ -207,8 +249,8 @@ printf 'external-controller: 0.0.0.0:9090\nlisteners:\n  - name: mst-speedtest\n
   }
   main
 ) > "$E/out.txt" 2>&1 || true
-grep -q -- '-X PUT.*FAST-WG%20Blanc_NL_AMS_1' "$E/curl.log" || fail "WG выше порога не выбран в своём пропуске"
-grep -q "WG: Blanc_NL_AMS_1 -> '⚡ Быстрый пул'" "$E/speedtest.log" || fail "нет строки о WG-победителе в пуле"
+grep -qF "proxies: ['Blanc_NL_AMS_1']" "$E/config.yaml" || fail "WG-победитель не включён напрямую"
+grep -q "WG: Прямые ссылки в '⚡ Быстрый пул' обновлены" "$E/speedtest.log" || fail "нет строки о WG-победителе в пуле"
 [ ! -e "$E/fast.yaml" ] || fail "WG-победитель записан в fast.yaml"
 
 echo "test_speedtest_wg.sh: OK"

@@ -181,15 +181,15 @@ PYX
   has 'ADDED|plain' "$WORK/rep" "хороший файл"
   hasnt "name: 'noep'" "$WORK/new" "плохой не вставлен"
 
-  # Вместе с fast_wg.awk - валидный YAML, пропуск FAST-WG plain в пуле.
+  # Вместе с fast_wg.awk - валидный YAML без технических групп.
   $AWK -f "$FASTWG" "$WORK/with_plain.yaml" > "$WORK/full.yaml"
   if python3 -c 'import yaml' 2>/dev/null; then
     python3 -c "
 import yaml,sys
 c=yaml.safe_load(open(sys.argv[1]))
 g={x['name']:x for x in c['proxy-groups']}
-assert g['FAST-WG plain']['proxies']==['REJECT','plain'], g['FAST-WG plain']
-assert 'FAST-WG plain' in g['⚡ Быстрый пул']['proxies']
+assert not any(n.startswith('FAST-WG ') for n in g)
+assert 'plain' not in g['⚡ Быстрый пул'].get('proxies', [])
 assert 'plain' in g['⚙️Manual']['proxies']
 assert [p for p in c['proxies'] if p['name']=='plain'][0]['port']==51820
 " "$WORK/full.yaml" || fail "итоговый YAML"

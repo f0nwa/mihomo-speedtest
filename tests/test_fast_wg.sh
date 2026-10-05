@@ -1,7 +1,5 @@
 #!/bin/sh
-# fast_wg.awk: служебные группы-пропуски "FAST-WG <нода>" в '⚡ Быстрый пул'
-# есть в конфиге, только если в proxies: есть WireGuard/AmneziaWG-ноды, -
-# по одной на ноду, [REJECT, нода].
+# Прямые ссылки на WG-победителей, без промежуточных групп.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -36,16 +34,16 @@ awk '
   }
   { print }' "$TEMPLATE" > "$WORK/src.yaml"
 awk -f "$SCRIPT" "$WORK/src.yaml" > "$WORK/wg.yaml"
-has "  - name: 'FAST-WG WG Bob''s'" "$WORK/wg.yaml" "пропуск первой ноды создан"
-has "    proxies: [REJECT, 'WG Bob''s']" "$WORK/wg.yaml" "в пропуске только своя нода"
-has "  - name: 'FAST-WG AWG-NL'" "$WORK/wg.yaml" "пропуск второй ноды создан"
-has "    proxies: [REJECT, 'AWG-NL']" "$WORK/wg.yaml" "в пропуске только своя нода"
-has "    proxies: ['FAST-WG WG Bob''s', 'FAST-WG AWG-NL']" "$WORK/wg.yaml" "пропуски в '⚡ Быстрый пул'"
-[ "$(grep -cxF '    hidden: true' "$WORK/wg.yaml")" -ge 2 ] || fail "пропуски скрыты"
-has '    interval: 300' "$WORK/wg.yaml" "у пропуска своя проверка задержки"
-has '    lazy: false' "$WORK/wg.yaml" "проверка не ленивая"
-fast_block=$(awk '/# --- FAST_WG:BEGIN/{f=1} f{print} /# --- FAST_WG:END/{f=0}' "$WORK/wg.yaml")
-case $fast_block in *include-all*|*Hysteria2*) fail "в FAST-WG попали не-WG ноды" ;; esac
+hasnt "'FAST-WG" "$WORK/wg.yaml" "технические группы не создаются"
+hasnt "proxies: ['WG Bob''s', 'AWG-NL']" "$WORK/wg.yaml" "до замера ноды не в быстром пуле"
+printf "WG Bob's\nAWG-NL\n" > "$WORK/winners"
+awk -v WINNERS="$WORK/winners" -f "$SCRIPT" "$WORK/wg.yaml" > "$WORK/won.yaml"
+has "    proxies: ['WG Bob''s', 'AWG-NL']" "$WORK/won.yaml" "победители напрямую в пуле"
+awk -f "$SCRIPT" "$WORK/won.yaml" > "$WORK/kept.yaml"
+cmp -s "$WORK/won.yaml" "$WORK/kept.yaml" || fail "импорт/повторная обработка стирает победителей"
+: > "$WORK/winners"
+awk -v WINNERS="$WORK/winners" -f "$SCRIPT" "$WORK/won.yaml" > "$WORK/empty.yaml"
+hasnt "proxies: ['WG Bob''s', 'AWG-NL']" "$WORK/empty.yaml" "следующий замер убирает проигравших"
 
 # Повторный прогон ничего не меняет, а удаление WG-нод убирает группу.
 awk -f "$SCRIPT" "$WORK/wg.yaml" > "$WORK/wg2.yaml"

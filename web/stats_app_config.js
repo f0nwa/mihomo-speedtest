@@ -372,7 +372,7 @@ export function renderConfig() {
     repairCard.appendChild(el('p', 'hint', 'Исправление формата, миграция и импорт WireGuard только меняют текст в редакторе - ' +
       'проверьте результат и нажмите «Сохранить и применить». Откат к рабочему бэкапу сразу применяет ' +
       'самый свежий бэкап, который проходит mihomo -t. Импорт WireGuard добавляет ноды из файлов .conf ' +
-      '(WireGuard и AmneziaWG) в proxies: и в группы 🚀 Авто по пингу, 🛡️Fallback-Stable, ⚙️Manual, а для ⚡ Быстрый пул - в свою группу FAST-WG <нода>; ' +
+      '(WireGuard и AmneziaWG) в proxies: и в группы 🚀 Авто по пингу, 🛡️Fallback-Stable, ⚙️Manual; в ⚡ Быстрый пул они попадут после успешного замера скорости; ' +
       'новые строки отмечаются зелёной полосой слева, изменённые - жёлтой. После применения миграции ' +
       'карточка «Доступно обновление конфига» на вкладке «Обновления» исчезнет.'));
     repairCard.appendChild(row2);
@@ -754,13 +754,12 @@ export function renderConfig() {
       var marks = importLineMarks(before, r.text || '');
       if (marks) { view.editor.markImport(marks); }
       setDirty();
-      var n = { ADDED: 0, REPLACED: 0 }, groups = [], missing = [], fast = 'none';
+      var n = { ADDED: 0, REPLACED: 0 }, groups = [], missing = [];
       (r.report || []).forEach(function (l) {
         var p = l.split('|');
         if (p[0] in n) { n[p[0]]++; }
         if (p[0] === 'GROUP') { groups.push(p[1]); }
         if (p[0] === 'GROUP_MISSING') { missing.push(p[1]); }
-        if (p[0] === 'FASTWG') { fast = p[1]; }
       });
       clearOutput();
       showCheck(r.check, 'Ноды добавлены в редактор, конфиг проходит mihomo -t. Проверьте подсвеченное и нажмите «Сохранить и применить».');
@@ -769,8 +768,6 @@ export function renderConfig() {
       box.appendChild(el('h2', null, 'Импорт WireGuard'));
       var ul = el('ul', 'config-fixes');
       ul.appendChild(el('li', null, 'добавлено нод: ' + n.ADDED + ', заменено: ' + n.REPLACED));
-      if (fast === 'created') { ul.appendChild(el('li', null, 'созданы группы FAST-WG <нода> (WG-ноды, прошедшие порог скорости, попадают в ⚡ Быстрый пул)')); }
-      if (fast === 'updated') { ul.appendChild(el('li', null, 'добавлены группы FAST-WG <нода> для новых WG-нод')); }
       if (groups.length) { ul.appendChild(el('li', null, 'дописано в группы: ' + groups.join(', '))); }
       if (missing.length) { ul.appendChild(el('li', 'msg-err', 'группы не найдены или их proxies: записан не в одну строку - добавьте ноды вручную: ' + missing.join(', '))); }
       if (!marks) { ul.appendChild(el('li', 'hint', 'конфиг слишком большой для подсветки изменений')); }

@@ -71,9 +71,8 @@ for rendered in "$OUT" "$OUT2" "$OUT3"; do
   assert_contains "proxies: ['⚡ Самые быстрые + Fallback', DIRECT" "$rendered"
   assert_not_contains "name: '⚡ Самые быстрые'" "$rendered"
   # hidden: true - только у служебной группы MST-SPEEDTEST (замер WG через
-  # основное ядро), остальные видимы. FAST-WG (WG-победитель в пуле) здесь
-  # нет: её между маркерами FAST_WG дописывает fast_wg.awk после рендера,
-  # только при WG-нодах в proxies: (см. test_fast_wg.sh).
+  # основное ядро), остальные видимы. WG-победители входят напрямую;
+  # технические группы FAST-WG больше не генерируются.
   hidden_owner=$(printf '%s\n' "$rendered" | awk '/^  - name:/{g=$0} /hidden: true/{print g}')
   assert_eq "$hidden_owner" "  - name: MST-SPEEDTEST" "hidden только у служебных групп"
   assert_contains "  # --- FAST_WG:BEGIN ---" "$rendered"

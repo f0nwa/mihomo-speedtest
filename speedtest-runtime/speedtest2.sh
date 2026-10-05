@@ -47,7 +47,8 @@ API_MAIN=127.0.0.1:9090   # уточняется по external-controller раб
 # а на уже работающем экземпляре ноды в основном: служебная группа и вход
 # из config.example.yaml (порция 1 плана 2026-09-28-wg-main-core-speedtest).
 WG_GROUP=MST-SPEEDTEST
-WG_FAST_PREFIX='FAST-WG '   # группы-пропуски WG/AWG-нод в '⚡ Быстрый пул': "FAST-WG <имя>"
+FAST_WG_AWK=${FAST_WG_AWK:-$DIR/fast_wg.awk}
+CONFIGEDIT_LOCK=${CONFIGEDIT_LOCK:-$TMPROOT/mst-configedit.lock}
 WG_LISTENER=mst-speedtest
 WG_PORT=7896
 MAIN_CONFIG=${MAIN_CONFIG:-$MIHOMO_DIR/config.yaml}
@@ -818,63 +819,76 @@ wg_delays() {
   return 0
 }
 
-# wg_group_now - поле "now" (текущий выбор) группы $1 основного ядра.
-wg_group_now() {
-  main_curl -f -s -m 5 "http://$API_MAIN/proxies/$(urlencode "$1")" 2>/dev/null | awk 'BEGIN { RS = "\001" }
-  {
-    i = index($0, "\"now\":\"")
-    if (!i) exit 1
-    s = substr($0, i + 7); out = ""
-    for (j = 1; j <= length(s); j++) {
-      c = substr(s, j, 1)
-      if (c == "\\") { out = out substr(s, j + 1, 1); j++; continue }
-      if (c == "\"") { print out; found = 1; exit }
-      out = out c
-    }
-  }
-  END { exit !found }'
-}
-
-# wg_publish_fast - WG/AWG-ноды не пишутся в fast.yaml (второй клиент с тем
-# же ключом). Вместо этого у каждой своя группа-пропуск "$WG_FAST_PREFIX<имя>"
-# [REJECT, нода], и все они входят в '⚡ Быстрый пул' - как ноды fast.yaml.
-# Замерена не ниже порога $1 - в пропуске выбирается нода, ниже порога -
-# REJECT до следующего прогона. Не ответившую или не дошедшую до замера
-# ноду не трогаем: пул сам проверяет пропуск пингом через ноду, пропускает
-# её, пока она не отвечает, и возвращает, как только она ожила.
+# WG-победители входят в быстрый пул ссылками на исходные ноды.
+# Конфиг перечитывается только при изменении состава; копий туннелей нет.
+# Незамеренные ноды сохраняют прежнее участие, как и до удаления FAST-WG.
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
-  wg_missing=0
-  while IFS="$(printf '\t')" read -r wg_idx wg_name <&3; do
-    [ -n "$wg_idx" ] || continue
-    wg_grp=$WG_FAST_PREFIX$wg_name
-    if ! wg_now=$(wg_group_now "$wg_grp"); then
-      wg_missing=$((wg_missing + 1)); continue
-    fi
-    wg_want=$(awk -v k="$wg_idx" -v min="$1" '
-      $2 == k { t = 1; sp = $1 + 0 }
-      END { if (t) print (sp >= min) ? "pass" : "slow" }' "$WORK/res.txt")
-    case $wg_want in
-      pass) wg_target=$wg_name ;;
-      slow) wg_target=REJECT ;;
-      *) continue ;;
-    esac
-    if [ "$wg_now" = "$wg_target" ] || wg_select_in "$wg_grp" "$wg_target"; then
-      if [ "$wg_want" = pass ]; then say "WG: $wg_name -> '⚡ Быстрый пул'"
-      else say "WG: $wg_name ниже порога скорости - не в '⚡ Быстрый пул' до следующего прогона"; fi
-    else
-      say "WARN: Не удалось переключить группу $wg_grp"
-    fi
-  done 3< "$WORK/wg_ok.txt"
-  [ "$wg_missing" -eq 0 ] || say "WARN: Для $wg_missing WG-нод нет групп $WG_FAST_PREFIX<имя> в основном ядре - в '⚡ Быстрый пул' они не попадают (группы создаются только для WG/AWG-нод из proxies: конфига, ноды подписок в них не входят; добавьте ноду в proxies: или обновите конфиг)"
+  if ! wg_publish_config "$1"; then
+    say "WARN: Не удалось применить WG-победителей к быстрому пулу; см. причину выше"
+  fi
   return 0
 }
 
-wg_select_in() {
-  main_curl -f -s -m 3 -X PUT -H 'Content-Type: application/json' \
-    --data-binary "{\"name\":\"$(json_escape "$2")\"}" \
-    "http://$API_MAIN/proxies/$(urlencode "$1")" >/dev/null 2>&1
+wg_reload_config() {
+  main_curl -f -s -m 30 -X PUT -H 'Content-Type: application/json' \
+    --data-binary "{\"path\":\"$(json_escape "$MAIN_CONFIG")\"}" \
+    "http://$API_MAIN/configs" >/dev/null 2>&1
 }
+
+# Подоболочка ограничивает время жизни блокировки редактора и отката.
+wg_publish_config() (
+  [ -f "$FAST_WG_AWK" ] && [ -f "$MAIN_CONFIG" ] && [ ! -L "$MAIN_CONFIG" ] || {
+    say "WARN: Нет обработчика WG или обычного файла конфига"; exit 1;
+  }
+  grep -q '^[ ]*# --- FAST_WG_REF:BEGIN ---' "$MAIN_CONFIG" || {
+    say "WARN: В конфиге нет блока WG-победителей; обновите конфиг"; exit 1;
+  }
+  if ! mkdir "$CONFIGEDIT_LOCK" 2>/dev/null; then
+    say "WARN: Конфиг занят редактором; WG-победители не применены"; exit 1
+  fi
+  wg_pending=0
+  wg_config_cleanup() {
+    if [ "$wg_pending" = 1 ]; then
+      if publish_file "$WORK/wg-config.old" "$MAIN_CONFIG"; then
+        wg_reload_config || say "WARN: Прежний конфиг восстановлен на диске, но API не подтвердил его применение"
+      else
+        say "WARN: Не удалось восстановить прежний конфиг после ошибки применения"
+      fi
+    fi
+    [ -z "$PUBLISH_TMP" ] || rm -f "$PUBLISH_TMP"
+    rm -rf "$CONFIGEDIT_LOCK"
+  }
+  trap wg_config_cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+  echo $$ > "$CONFIGEDIT_LOCK/pid" || exit 1
+  cp -p "$MAIN_CONFIG" "$WORK/wg-config.old" || exit 1
+  cp -p "$MAIN_CONFIG" "$WORK/wg-config.new" || exit 1
+  : > "$WORK/wg-winners" || exit 1
+  : > "$WORK/wg-tested" || exit 1
+  awk -F '\t' -v results="$WORK/res.txt" -v min="$1" \
+      -v winners="$WORK/wg-winners" -v tested="$WORK/wg-tested" '
+    BEGIN { while ((getline l < results) > 0) { split(l, a, " "); speed[a[2]] = a[1] + 0 } }
+    $1 in speed { print $2 > tested }
+    ($1 in speed) && speed[$1] >= min { print $2 > winners }
+  ' "$WORK/wg_ok.txt" || exit 1
+  awk -v WINNERS="$WORK/wg-winners" -v TESTED="$WORK/wg-tested" \
+    -f "$FAST_WG_AWK" "$WORK/wg-config.old" > "$WORK/wg-config.new" || exit 1
+  cmp -s "$WORK/wg-config.old" "$WORK/wg-config.new" && exit 0
+  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$WORK/wg-config.new" > "$WORK/wg-check.log" 2>&1; then
+    say "WARN: Конфиг с WG-победителями не прошёл проверку; прежний сохранён"; exit 1
+  fi
+  # Чужие изменения без общей блокировки тоже не перезаписываем.
+  cmp -s "$MAIN_CONFIG" "$WORK/wg-config.old" || exit 1
+  wg_pending=1
+  publish_file "$WORK/wg-config.new" "$MAIN_CONFIG" || exit 1
+  if ! wg_reload_config; then
+    say "WARN: API не применил WG-победителей; восстанавливаю прежний конфиг"; exit 1
+  fi
+  wg_pending=0
+  say "WG: Прямые ссылки в '⚡ Быстрый пул' обновлены"
+)
 
 wg_select() {
   main_curl -f -s -m 3 -X PUT -H 'Content-Type: application/json' \
@@ -1156,7 +1170,7 @@ update_node_stability
 # WG/AWG-ноды в fast.yaml не пишутся: полное определение подняло бы в
 # основном ядре второго клиента с тем же ключом, а псевдоним direct +
 # dialer-proxy на роутере шёл мимо туннеля (задержка 33 мс против 126 мс).
-# Прошедшие порог попадают в пул через свои группы-пропуски (wg_publish_fast).
+# Прошедшие порог попадают в пул прямыми ссылками (wg_publish_fast).
 awk -v wgfile="$WORK/wg.txt" '
   BEGIN { while ((getline l < wgfile) > 0) { split(l, f, "\t"); wg[f[1]] = 1 } }
   !($2 in wg)' "$WORK/res.txt" > "$WORK/res_fast.txt"
