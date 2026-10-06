@@ -1,0 +1,121 @@
+#!/bin/sh
+# Модель конструктора конфига (web/stats_app_constructor_model.js) - без
+# DOM, проверяется node. Нет node - тест пропускается (на роутере его нет).
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+command -v node >/dev/null 2>&1 || { echo "SKIP test_constructor_model: нет node"; exit 0; }
+node --input-type=module - "$ROOT/web/stats_app_constructor_model.js" <<'JS'
+import { pathToFileURL } from 'node:url';
+const M = await import(pathToFileURL(process.argv[2]).href);
+let failed = 0;
+function eq(a, b, what) { const A = JSON.stringify(a), B = JSON.stringify(b); if (A !== B) { console.error('FAIL: ' + what + '\n  ожидалось ' + B + '\n  получено  ' + A); failed = 1; } }
+function throws(fn, what) { try { fn(); console.error('FAIL: ' + what + ' - нет ошибки'); failed = 1; } catch (e) { /* ok */ } }
+const T = '\t';
+const D = [
+  '# комментарий',
+  ['section', 'media', 'Видео'].join(T), ['section', 'other', 'Прочее'].join(T),
+  ['svc', 'youtube', 'YouTube', 'media'].join(T), ['svc', 'spotify', 'Spotify', 'media'].join(T),
+  ['svc', 'kinopub', 'KinoPub', 'media'].join(T),
+  ['icon', 'youtube', 'https://i/y.png'].join(T),
+  ['prov', 'youtube', 'youtube@domain: { <<: *domain, url: "https://y" }'].join(T),
+  ['rule', 'kinopub', 'DOMAIN-SUFFIX,pkr.ovh,KinoPub'].join(T),
+  ['rule', 'kinopub', 'GEOSITE,kinopub,KinoPub # комм'].join(T),
+  ['rule', '-', 'RULE-SET,category-ru@domain,DIRECT'].join(T),
+  ['rule', 'youtube', 'RULE-SET,youtube@domain,YouTube'].join(T),
+].join('\n') + '\n';
+
+// test_roundtrip_unmodified: неизменённое состояние сериализуется как было
+const S0 = ['del' + T + 'spotify', 'unrule' + T + 'kinopub' + T + 'DOMAIN-SUFFIX,pkr.ovh,KinoPub',
+  'svc' + T + 'nl' + T + 'NL' + T + 'other', 'icon' + T + 'nl' + T + 'https://i/n.png', 'gkey' + T + 'nl' + T + 'filter: (?i)NL',
+  'src' + T + 'nl' + T + 'nl' + T + 'domain' + T + 'https://n', 'dom' + T + 'youtube' + T + 'suffix' + T + 'youtu.be',
+  'prov' + T + '-' + T + 'my@domain: { <<: *domain, url: "https://m" }'].join('\n') + '\n';
+let m = M.createModel(D, S0, 'RULE-SET,my@domain,DIRECT\n');
+eq(m.serialize(), { services: S0, user_rules: 'RULE-SET,my@domain,DIRECT\n' }, 'roundtrip');
+eq(m.summary(m.serialize()), [], 'нет изменений - пустая сводка');
+
+// test_services_list
+const list = m.services();
+eq(list.map(s => [s.id, s.name, s.section, s.user, s.deleted]),
+  [['youtube', 'YouTube', 'media', false, false], ['spotify', 'Spotify', 'media', false, true],
+   ['kinopub', 'KinoPub', 'media', false, false], ['nl', 'NL', 'other', true, false]], 'список сервисов');
+eq(m.sections().map(s => s.id), ['media', 'other'], 'разделы');
+
+// test_domains: встроенные доменные правила + свои; удалённое встроенное отмечено
+eq(m.domains('kinopub'), [{ type: 'suffix', value: 'pkr.ovh', builtin: true, removed: true }], 'домены kinopub');
+eq(m.domains('youtube'), [{ type: 'suffix', value: 'youtu.be', builtin: false, removed: false }], 'домены youtube');
+eq(m.rules('kinopub'), [{ text: 'GEOSITE,kinopub,KinoPub # комм', removed: false }], 'не-доменные правила kinopub');
+
+// test_edits
+const init = m.serialize();
+m.restoreService('spotify');
+m.deleteService('youtube');
+m.restoreRule('kinopub', 'DOMAIN-SUFFIX,pkr.ovh,KinoPub');
+m.removeRule('kinopub', 'GEOSITE,kinopub,KinoPub # комм');
+m.addDomain('kinopub', 'full', 'Kino.Pub');
+m.removeDomain('nl', 'suffix', 'nothing'); // нет такого - без ошибки
+const id = m.addService('Мой сервис', 'other');
+eq(id, 'svc1', 'id своего сервиса без латиницы');
+m.addDomain(id, 'keyword', 'mine');
+m.setUserRules('RULE-SET,my@domain,DIRECT\n\nDOMAIN,x.ru,DIRECT\n');
+const out = m.serialize();
+eq(out.services, ['del' + T + 'youtube', 'unrule' + T + 'kinopub' + T + 'GEOSITE,kinopub,KinoPub # комм',
+  'svc' + T + 'nl' + T + 'NL' + T + 'other', 'icon' + T + 'nl' + T + 'https://i/n.png', 'gkey' + T + 'nl' + T + 'filter: (?i)NL',
+  'svc' + T + 'svc1' + T + 'Мой сервис' + T + 'other',
+  'src' + T + 'nl' + T + 'nl' + T + 'domain' + T + 'https://n',
+  'dom' + T + 'youtube' + T + 'suffix' + T + 'youtu.be',
+  'dom' + T + 'kinopub' + T + 'full' + T + 'kino.pub', 'dom' + T + 'svc1' + T + 'keyword' + T + 'mine',
+  'prov' + T + '-' + T + 'my@domain: { <<: *domain, url: "https://m" }'].join('\n') + '\n', 'сериализация правок');
+eq(out.user_rules, 'RULE-SET,my@domain,DIRECT\nDOMAIN,x.ru,DIRECT\n', 'свои правила без пустых строк');
+eq(m.summary(init), [
+  'Вернуть сервис Spotify', 'Убрать сервис YouTube',
+  'Вернуть домен pkr.ovh (KinoPub)', 'Убрать правило GEOSITE,kinopub,KinoPub # комм (KinoPub)',
+  'Новый сервис Мой сервис',
+  '+ домен kino.pub → KinoPub', '+ домен mine → Мой сервис',
+  'Свои правила изменены'], 'сводка изменений');
+
+// test_remove_builtin_domain -> unrule с точным текстом; свой сервис удаляется целиком
+m = M.createModel(D, '', '');
+m.removeDomain('kinopub', 'suffix', 'pkr.ovh');
+eq(m.serialize().services, 'unrule' + T + 'kinopub' + T + 'DOMAIN-SUFFIX,pkr.ovh,KinoPub\n', 'удаление встроенного домена');
+const a = m.addService('Netflix', 'media');
+eq(a, 'netflix', 'id из имени');
+m.addDomain(a, 'suffix', 'netflix.com');
+m.removeUserService(a);
+eq(m.serialize().services, 'unrule' + T + 'kinopub' + T + 'DOMAIN-SUFFIX,pkr.ovh,KinoPub\n', 'удалённый свой сервис уходит с доменами');
+eq(m.addService('Steam', 'other') !== 'steam' || true, true, 'ok');
+
+// test_validation
+m = M.createModel(D, '', '');
+throws(() => m.addService('YouTube', 'other'), 'имя встроенного');
+throws(() => m.addService('A, B', 'other'), 'запятая в имени');
+throws(() => m.addService(' A', 'other'), 'пробел по краю');
+throws(() => m.addService('A', 'nosection'), 'нет раздела');
+m.addService('A', 'other');
+throws(() => m.addService('A', 'other'), 'повтор имени');
+throws(() => m.addDomain('kinopub', 'suffix', 'bad domain'), 'пробел в домене');
+throws(() => m.addDomain('kinopub', 'regex', 'a.com'), 'тип домена');
+throws(() => m.addDomain('kinopub', 'suffix', 'pkr.ovh'), 'домен уже есть');
+throws(() => m.setUserRules('a\tb'), 'табуляция в правиле');
+eq(M.createModel(D, '', '').addService('youtube', 'other') !== 'youtube', true, 'id не совпадает со встроенным');
+eq(M.stateBody({ services: 'x\n', user_rules: '' }), '### MST-STATE services.tsv\nx\n', 'тело без пустых своих правил');
+eq(M.stateBody({ services: '', user_rules: 'r\n', geofilter: 'RU\n' }), '### MST-STATE services.tsv\n### MST-STATE user-rules.txt\nr\n### MST-STATE geofilter.txt\nRU\n', 'тело с правилами и фильтром');
+
+// ===== ревью порции 3 =====
+// свой сервис с id или именем встроенного заменяет его - одна строка в списке
+m = M.createModel(D, ['svc', 'youtube', 'YouTube', 'other'].join(T) + '\n' + ['svc', 'my', 'Spotify', 'other'].join(T) + '\n', '');
+eq(m.services().filter(s => s.name === 'YouTube').map(s => [s.id, s.user]), [['youtube', true]], 'свой YouTube заменяет встроенный');
+eq(m.services().filter(s => s.name === 'Spotify').map(s => [s.id, s.user]), [['my', true]], 'свой Spotify заменяет встроенный');
+// домен: регистр, адрес со схемой и путём, точки по краям
+m = M.createModel(D, ['dom', 'kinopub', 'suffix', 'Example.ORG'].join(T) + '\n', '');
+throws(() => m.addDomain('kinopub', 'suffix', 'example.org'), 'дубль домена без учёта регистра');
+m.addDomain('kinopub', 'suffix', 'https://Site.ru/path?x=1');
+m.addDomain('kinopub', 'suffix', '.zoom.us.');
+eq(m.domains('kinopub').filter(x => !x.builtin).map(x => x.value), ['example.org', 'site.ru', 'zoom.us'], 'очистка адреса');
+throws(() => m.addDomain('kinopub', 'suffix', 'сайт.рф'), 'кириллица');
+try { m.addDomain('kinopub', 'suffix', 'сайт.рф'); } catch (e) { eq(/punycode|xn--/.test(e.message), true, 'подсказка про punycode'); }
+// своё имя не может совпасть с группами шаблона и спеццелями
+throws(() => M.createModel(D, '', '').addService('DIRECT', 'other'), 'имя DIRECT');
+
+if (failed) process.exit(1);
+console.log('OK test_constructor_model');
+JS

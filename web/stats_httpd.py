@@ -462,6 +462,8 @@ STATIC_FILES = {
     "app-log.js": "stats_app_log.js",
     "app-config.js": "stats_app_config.js",
     "app-xkeen.js": "stats_app_xkeen.js",
+    "app-constructor.js": "stats_app_constructor.js",
+    "app-constructor-model.js": "stats_app_constructor_model.js",
     "codemirror.js": "stats_codemirror.js",
     "codemirror.css": "stats_codemirror.css",
 }

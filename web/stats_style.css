@@ -294,3 +294,15 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-add .xk-grow{align-self:center}
 .xk-savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .xk-savebar .submit{margin-top:0}
+
+/* Вкладка «Конфиг»: переключатель «Конструктор | YAML» (modeBar() в
+   stats_app_config.js); сам конструктор - на классах geo-*, xk-*. */
+.config-mode-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:16px}
+.config-mode-bar .xk-mode button{font-size:13px;padding:5px 14px}
+button.geo-chip{font:inherit;font-size:12.5px;color:var(--text);cursor:pointer}
+button.geo-chip:hover{border-color:var(--accent)}
+/* Строки конструктора: на узком экране имя, подпись и кнопки переносятся. */
+.cx-row{flex-wrap:wrap}
+.cx-row .xk-val{flex:1 1 160px;min-width:0;overflow-wrap:anywhere}
+.cx-row .geo-code{margin-left:0;flex:0 1 auto}
+.cx-row button{white-space:nowrap}

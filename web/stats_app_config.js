@@ -1,6 +1,7 @@
 // Вкладка «Конфиг» (/config): редактор config.yaml на CodeMirror 5.
 
-import { app, card, clearApp, el, fetchJson, setLoading, showError, viewGuard } from './app-core.js';
+import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
+import { constructorDirty, leaveConstructor, renderConstructor } from './app-constructor.js';
 
 // ----- раздел "Конфиг" (/api/config/*, stats_config.sh) -----
 //
@@ -13,10 +14,50 @@ import { app, card, clearApp, el, fetchJson, setLoading, showError, viewGuard } 
 
 var configView = null;   // {dirty:bool} - есть несохранённые правки
 
-export function configDirty() { return !!(configView && configView.dirty); }
+export function configDirty() { return !!(configView && configView.dirty) || constructorDirty(); }
 
 // Вызывается при уходе с вкладки (render() в app.js).
-export function leaveConfig() { configView = null; }
+export function leaveConfig() { configView = null; leaveConstructor(); }
+
+// Режим вкладки: «Конструктор» (stats_app_constructor.js) или «YAML»
+// (редактор ниже). Выбор запоминается в браузере; миграция с карточки
+// «Обновлений» всегда открывает YAML.
+var MODE_KEY = 'mst-config-mode';
+function savedMode() {
+  try { return localStorage.getItem(MODE_KEY) === 'yaml' ? 'yaml' : 'constructor'; } catch (e) { return 'constructor'; }
+}
+function saveMode(m) { try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* без запоминания */ } }
+
+function modeBar(current) {
+  var bar = el('div', 'config-mode-bar');
+  var group = el('div', 'xk-mode');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Режим редактирования конфига');
+  [['constructor', 'Конструктор'], ['yaml', 'YAML']].forEach(function (m) {
+    var b = el('button', null, m[1]);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', m[0] === current ? 'true' : 'false');
+    b.addEventListener('click', function () {
+      if (m[0] === current) { return; }
+      if (configDirty() && !window.confirm('Несохранённые правки пропадут. Переключить режим?')) { return; }
+      saveMode(m[0]);
+      leaveConfig();
+      nextView();   // запоздалый ответ прежнего режима не перерисует новый
+      renderConfig();
+    });
+    group.appendChild(b);
+  });
+  bar.appendChild(group);
+  bar.appendChild(el('span', 'hint', current === 'yaml'
+    ? 'Ручная правка config.yaml. Изменения групп и правил отсюда конструктор заметит и предложит перенести.'
+    : 'Сервисы, домены и правила без правки кода.'));
+  return bar;
+}
+
+export function renderConfig() {
+  if (pendingMigration || savedMode() === 'yaml') { renderYaml(modeBar('yaml')); return; }
+  renderConstructor(modeBar('constructor'), { renderDiff: renderDiff });
+}
 
 // Карточка «Доступно обновление конфига» (вкладка «Обновления») просит
 // сразу после открытия вкладки запустить «Миграцию к шаблону» - без
@@ -305,7 +346,7 @@ function postText(url, text) {
   return fetchJson(url, { method: 'POST', body: text, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }
 
-export function renderConfig() {
+function renderYaml(bar) {
   setLoading();
   configView = { dirty: false };
   var view = configView;
@@ -313,6 +354,7 @@ export function renderConfig() {
   fetchConfigJson('/api/config', 'text').then(function (data) {
     if (!alive()) { return; }
     clearApp();
+    app.appendChild(bar);
     view.base = data.base;
     view.saved = data.text || '';
     // Схема шаблона, если текст в редакторе получен «Миграцией к шаблону»:
@@ -808,5 +850,5 @@ export function renderConfig() {
 }
 
 window.addEventListener('beforeunload', function (e) {
-  if (configView && configView.dirty) { e.preventDefault(); e.returnValue = ''; }
+  if (configDirty()) { e.preventDefault(); e.returnValue = ''; }
 });

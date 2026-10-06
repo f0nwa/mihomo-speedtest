@@ -138,4 +138,13 @@ out=$(printf '### MST-STATE services.tsv\nsvc\tn\tN\tnosection\n' | cgi preview 
 assert_contains 'Status: 422' "$out"
 assert_contains 'nosection' "$out"
 
+# --- 9: ?import=1 - перенос из config.yaml даже при наличии состояния
+[ -f "$ST/services.tsv" ] || fail "9: нет состояния для проверки"
+sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,hand.example,DIRECT\
+  - MATCH,DIRECT/' "$M/config.yaml" > "$TMP/c" && cat "$TMP/c" > "$M/config.yaml"
+out=$(cgi read GET 'import=1' </dev/null)
+[ "$(printf '%s' "$out" | jget '["imported"]')" = True ] || fail "9: imported"
+[ "$(printf '%s' "$out" | jget '["manual_edits"]')" = False ] || fail "9: manual_edits при переносе"
+assert_contains 'hand.example' "$(printf '%s' "$out" | jget '["user_rules"]')"
+
 echo "test_stats_constructor.sh: OK"

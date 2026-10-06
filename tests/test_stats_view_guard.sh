@@ -24,6 +24,8 @@ check "$W/stats_app_stats.js" 'export function renderStats()'
 check "$W/stats_app_stats.js" 'function progressPollTick()'
 check "$W/stats_app_settings.js" 'export function renderSettings('
 check "$W/stats_app_updates.js" 'export function renderUpdates()'
-check "$W/stats_app_config.js" 'export function renderConfig()'
+# renderConfig() только выбирает режим: YAML-редактор и конструктор
+check "$W/stats_app_config.js" 'function renderYaml(bar)'
+check "$W/stats_app_constructor.js" 'export function renderConstructor('
 
 echo "test_stats_view_guard.sh: OK"

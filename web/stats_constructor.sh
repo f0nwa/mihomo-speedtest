@@ -9,8 +9,9 @@
 # Действие - в MST_CONSTRUCTOR_ACTION:
 #   read     GET  - {"imported","manual_edits","base","defaults","services",
 #                   "geofilter","user_rules","report"}: состояние из
-#                   $CONFIG_STATE_DIR, а если его нет - перенос из config.yaml
-#                   (imported=true, отчёт в report); null - файла нет.
+#                   $CONFIG_STATE_DIR, а если его нет (или ?import=1) - перенос
+#                   из config.yaml (imported=true, отчёт в report); null -
+#                   файла нет.
 #   preview  POST - собрать кандидата из присланного состояния, без записи:
 #                   {"ok","text","report","check"}.
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
@@ -120,7 +121,9 @@ case $action:$method in
     [ -f "$CONSTRUCTOR_DEFAULTS" ] || fail_json 500 no_tools "services.default.tsv не найден - переустановите проект"
     imported=false manual=false
     : > "$WORK/report"
-    if [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
+    # ?import=1 - «Перенести в конструктор»: перенос из config.yaml даже при
+    # сохранённом состоянии (оно заменится только при применении).
+    if [ "$(query_param import)" != 1 ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
       st=$CONFIG_STATE_DIR
       if [ -f "$st/managed.sig" ] && [ "$(cat "$st/managed.sig")" != "$(managed_sig "$target")" ]; then manual=true; fi
     else
