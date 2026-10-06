@@ -407,6 +407,9 @@ exit 1
 EOF
 chmod +x "$MISSING_PIDOF/pidof"
 WORK=$(mktemp -d)
+# Процесс ядра обязателен, когда в конфиге есть ноды (без нод и без конфига -
+# нет, см. install_env_check ниже).
+printf 'proxy-providers:\n  demo:\n    type: http\n    url: "https://example.com/sub"\n' > "$WORK/config.yaml"
 # Review Focus 4: stdin не терминал, stderr - файл, переменной UI нет вовсе
 # (как у обновлятора) - режим plain выбирается сам, ни одного байта ESC.
 if (unset UI; PATH="$MISSING_PIDOF:$PATH" DIR="$WORK" CONFIG="$WORK/config.yaml" \
@@ -418,6 +421,22 @@ grep -q "$(printf '\033')" "$WORK/err.log" && fail "без терминала в
 grep -q '^ 01/05  Проверка окружения' "$WORK/err.log" || fail "нет шага «Проверка окружения»: $(cat "$WORK/err.log")"
 grep -q 'Установка остановлена на шаге 01/05' "$WORK/err.log" || fail "фатальная ошибка main должна завершаться ui_abort: $(cat "$WORK/err.log")"
 rm -rf "$MISSING_PIDOF" "$WORK"
+
+# install_env_check: ядро не обязано работать, пока нет конфига или нод
+(
+  W_ENV=$(mktemp -d)
+  check_versions() { return 0; }
+  check_mihomo_process() { return 1; }
+  CONFIG=$W_ENV/нет-такого.yaml
+  install_env_check || { echo "FAIL: без config.yaml процесс mihomo требовать нельзя" >&2; exit 1; }
+  printf 'proxy-providers:\n  fast:\n    type: file\n' > "$W_ENV/c.yaml"
+  CONFIG=$W_ENV/c.yaml
+  install_env_check || { echo "FAIL: без нод процесс mihomo требовать нельзя" >&2; exit 1; }
+  printf 'proxy-providers:\n  demo:\n    type: http\n' > "$W_ENV/d.yaml"
+  CONFIG=$W_ENV/d.yaml
+  if install_env_check; then echo "FAIL: с подпиской процесс mihomo обязателен" >&2; exit 1; fi
+  rm -rf "$W_ENV"
+) || fail "install_env_check"
 
 FIXDIR=$TEST_ROOT/install-fixture
 mkdir -p "$FIXDIR/proxy-providers" "$FIXDIR/bin"
@@ -564,6 +583,88 @@ kill -0 "$sup_pid" 2>/dev/null \
   STOP_WAIT=3
   export STOP_WAIT
   "$INITD_SCRIPT_FIXDIR" stop >/dev/null 2>&1 || true
+)
+
+# --- Конфиг без нод (подписку пропустили при первой установке): ядро не
+# запущено (pidof его не видит), и так задумано. install.sh не требует
+# процесс, не гоняет mihomo -t и providers.awk, не делает пробный прогон,
+# но ставит файлы и поднимает веб-интерфейс - ноды добавят оттуда.
+FIXDIR3=$TEST_ROOT/install-fixture-nonodes
+mkdir -p "$FIXDIR3"
+cp -R "$FIXDIR"/. "$FIXDIR3"/
+rm -rf "$FIXDIR3/runtime" "$FIXDIR3/speedtest2.env" "$FIXDIR3/crontab.txt" "$FIXDIR3/proxy-providers"
+mkdir -p "$FIXDIR3/proxy-providers"
+cat > "$FIXDIR3/bin/pidof" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$FIXDIR3/bin/pidof"
+# mihomo -t на таком конфиге не должен вызываться вовсе
+cat > "$FIXDIR3/bin/mihomo" <<EOF
+#!/bin/sh
+echo "\$@" >> "$FIXDIR3/mihomo-calls"
+exit 1
+EOF
+chmod +x "$FIXDIR3/bin/mihomo"
+cat > "$FIXDIR3/config.yaml" <<'EOF'
+anchors:
+  http-provider: &http-provider { type: http, exclude-filter: &geofilter '(?i)Russia|Moscow' }
+  sub-names: &sub-names []
+proxies:
+  # --- STATIC_PROXIES:BEGIN ---
+  # --- STATIC_PROXIES:END ---
+proxy-providers:
+  # --- SUBSCRIPTIONS:BEGIN ---
+  # --- SUBSCRIPTIONS:END ---
+  fast:
+    type: file
+    path: ./fast.yaml
+EOF
+if ! config_no_nodes "$FIXDIR3/config.yaml"; then fail "config_no_nodes: конфиг без подписок и нод должен считаться пустым"; fi
+if config_no_nodes "$FIXDIR/config.yaml"; then fail "config_no_nodes: конфиг с подпиской demo - не пустой"; fi
+printf 'proxies:\n  - name: n\n    type: ss\n' > "$TEST_ROOT/c-static.yaml"
+if config_no_nodes "$TEST_ROOT/c-static.yaml"; then fail "config_no_nodes: своя нода в proxies - не пустой конфиг"; fi
+[ "$(config_geofilter_block "$FIXDIR3/config.yaml")" = 'Russia|Moscow' ] || fail "config_geofilter_block: $(config_geofilter_block "$FIXDIR3/config.yaml")"
+(
+  PATH="$FIXDIR3/bin:$PATH"
+  export PATH
+  DIR=$FIXDIR3
+  BIN=$FIXDIR3/bin/mihomo
+  SELFDIR=$FIXDIR3
+  CONFIG=$FIXDIR3/config.yaml
+  MIHOMO_DIR=$FIXDIR3
+  TMPROOT=$FIXDIR3
+  INSTALL_CHANNEL=stable
+  INITD_DIR=$FIXDIR3/etc-init.d
+  unset BLOCK
+  export DIR
+  export MIHOMO_DIR
+  export STATS_SERVICE_RUNTIME_DIR="$FIXDIR3/runtime"
+  export STATS_HTTPD_PY_CMD=sh
+  export STATS_HTTPD_PY="$FAKE_HTTPD"
+  export STATS_HTTPD_CMD="sh $FAKE_HTTPD"
+  unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
+  INSTALL_LIB_ONLY=1 . "$SCRIPT"
+  main
+) 2>"$TEST_ROOT/main3.err" || fail "main без нод и без запущенного ядра должен завершаться успешно: $(cat "$TEST_ROOT/main3.err")"
+grep -q 'нет ни подписок, ни нод: проверка mihomo -t и запуск ядра пропущены' "$TEST_ROOT/main3.err" || fail "нет предупреждения про пропуск mihomo -t: $(cat "$TEST_ROOT/main3.err")"
+grep -q 'Пробный прогон пропущен: в конфиге нет нод' "$TEST_ROOT/main3.err" || fail "пробный прогон без нод не пропущен"
+grep -q 'Ядро mihomo не запущено: в конфиге пока нет ни подписок, ни нод' "$TEST_ROOT/main3.err" || fail "нет заметки про запуск ядра из веб-интерфейса"
+grep -q 'Фильтр: *Russia|Moscow' "$TEST_ROOT/main3.err" || fail "фильтр должен браться из конфига: $(cat "$TEST_ROOT/main3.err")"
+grep -q 'Процесс mihomo не найден' "$TEST_ROOT/main3.err" && fail "без нод процесс mihomo требовать нельзя"
+[ ! -e "$FIXDIR3/mihomo-calls" ] || fail "mihomo вызывался на конфиге без нод: $(cat "$FIXDIR3/mihomo-calls")"
+grep -qF "BLOCK='Russia|Moscow'" "$FIXDIR3/speedtest2.env" || fail "BLOCK без нод: $(cat "$FIXDIR3/speedtest2.env" 2>&1)"
+grep -qF "SOURCES=''" "$FIXDIR3/speedtest2.env" || grep -q '^SOURCES=' "$FIXDIR3/speedtest2.env" || fail "SOURCES не записан"
+[ -x "$FIXDIR3/etc-init.d/S80speedtest-stats" ] || fail "веб-служба не установлена без нод"
+[ -f "$FIXDIR3/runtime/supervisor.pid" ] || fail "веб-интерфейс не запущен без нод (нет supervisor.pid)"
+kill -0 "$(cat "$FIXDIR3/runtime/supervisor.pid")" 2>/dev/null || fail "supervisor веб-службы не работает"
+grep -q 'Открыть: *http://' "$TEST_ROOT/main3.err" || fail "в итоге нет ссылки на веб-интерфейс: $(cat "$TEST_ROOT/main3.err")"
+(
+  STATS_SERVICE_RUNTIME_DIR=$FIXDIR3/runtime
+  export STATS_SERVICE_RUNTIME_DIR
+  STOP_WAIT=3
+  export STOP_WAIT
+  "$FIXDIR3/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
 )
 
 if (

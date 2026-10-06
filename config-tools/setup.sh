@@ -93,17 +93,23 @@ collect_subscriptions() {
       n=$((n + 1))
       echo "$u" >> "$urls_file"
     done
+  elif [ "$n" -eq 0 ] && [ "${SKIP_SUBSCRIPTION:-0}" = 1 ]; then
+    SETUP_SKIPPED=1
   else
     attempt=0
     while :; do
       if [ "$n" -eq 0 ]; then
-        ui_ask "Ссылка на подписку #$((n + 1)) (обязательно)"
+        ui_ask "Ссылка на подписку #1 (Enter - пропустить: подписку или WireGuard-ноду добавите позже в веб-интерфейсе, ядро пока не запустится)"
       else
         ui_ask "Есть ещё одна ссылка на подписку сверх уже указанных ($n шт.)? Если нет - просто нажмите Enter"
       fi
-      read -r url || url=""
+      # Пустая строка с терминала (rc 0) - осознанный пропуск; конец ввода
+      # (EOF, rc != 0) - ввода нет вовсе, как раньше: отказ после трёх попыток.
+      read_eof=0
+      read -r url || { url=""; read_eof=1; }
       if [ -z "$url" ]; then
         if [ "$n" -gt 0 ]; then break; fi
+        if [ "$read_eof" = 0 ]; then SETUP_SKIPPED=1; break; fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 3 ]; then
           ui_fail "Нужна хотя бы одна ссылка на подписку"
@@ -360,7 +366,9 @@ main() {
   # раздела; отдельный запуск мастера показывает полный баннер.
   ui_banner "MIHOMO-SPEEDTEST" "Настройка нового роутера"
 
-  check_mihomo_process && check_versions || return 1
+  # Нет конфига - ядро ещё не запускали (его запускают, когда есть ноды),
+  # процесс mihomo не требуется, достаточно версий.
+  if [ ! -f "$CONFIG" ]; then check_versions || return 1; else check_mihomo_process && check_versions || return 1; fi
 
   confirm_config_replace || return 1
 
@@ -376,20 +384,30 @@ main() {
 
   ui_step 2 4 "User-Agent"
   specs_file=$(mktemp "${TMPDIR:-/tmp}/setup_specs.XXXXXX")
-  build_provider_specs "$subs_file" > "$specs_file"
-  rm -f "$subs_file"
+  no_nodes=0
+  if [ "${SETUP_SKIPPED:-0}" = 1 ] && [ ! -s "$subs_file" ]; then
+    # Подписку пропустили: конфиг собирается без нод, ядро не запускается.
+    no_nodes=1
+    rm -f "$subs_file"
+    ui_ok "Подписка пропущена: конфиг будет без нод, ядро не запустится"
+    ui_step 3 4 "Имена провайдеров"
+    ui_ok "Не нужны"
+  else
+    build_provider_specs "$subs_file" > "$specs_file"
+    rm -f "$subs_file"
 
-  if [ ! -s "$specs_file" ]; then
-    ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+    if [ ! -s "$specs_file" ]; then
+      ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+      rm -f "$specs_file"
+      return 1
+    fi
+
+    ui_step 3 4 "Имена провайдеров"
+    named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
+    assign_provider_names "$specs_file" > "$named_file"
     rm -f "$specs_file"
-    return 1
+    specs_file=$named_file
   fi
-
-  ui_step 3 4 "Имена провайдеров"
-  named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
-  assign_provider_names "$specs_file" > "$named_file"
-  rm -f "$specs_file"
-  specs_file=$named_file
 
   ui_step 4 4 "Конфиг"
   static_file=""
@@ -466,8 +484,9 @@ main() {
 
   ui_ok "Новый config.yaml собран из шаблона"
 
-  # mihomo -t под ui_run: полный вывод - в UI_LOG, на экране [!!] и хвост.
-  if ! ui_run "Проверка конфига (mihomo -t)" "$BIN" -t -d "$MIHOMO_DIR" -f "$rendered"; then
+  # Без нод конфиг заведомо не запустить (группам нечего выбирать): ни
+  # mihomo -t, ни запуск ядра - их сделает веб-интерфейс, когда нода появится.
+  if [ "$no_nodes" = 0 ] && ! ui_run "Проверка конфига (mihomo -t)" "$BIN" -t -d "$MIHOMO_DIR" -f "$rendered"; then
     ui_fail "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут"
     # Строку с путём не оформляем префиксом: по ней разбирают путь (тесты).
     echo "Непринятый конфиг оставлен в $rendered для разбора (удалите вручную, когда закончите)" >&2
@@ -481,13 +500,16 @@ main() {
     return 1
   }
 
-  if ! ui_run "Перезапуск ядра" restart_core; then
-    ui_fail "mihomo не поднялся после xkeen -restart"
-    ui_log "mihomo не поднялся после xkeen -restart"
-    return 1
+  if [ "$no_nodes" = 1 ]; then
+    ui_ok "Конфиг записан без нод, ядро не запускалось, запускаю install.sh"
+  else
+    if ! ui_run "Перезапуск ядра" restart_core; then
+      ui_fail "mihomo не поднялся после xkeen -restart"
+      ui_log "mihomo не поднялся после xkeen -restart"
+      return 1
+    fi
+    ui_ok "Конфиг применён, запускаю install.sh"
   fi
-
-  ui_ok "Конфиг применён, запускаю install.sh"
   # install.sh продолжит оформление без повторной рамки (UI_CONTINUE) и
   # допишет в тот же журнал; env переживает exec.
   export UI_CONTINUE=1 UI_LOG

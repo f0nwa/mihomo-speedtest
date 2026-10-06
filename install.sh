@@ -857,6 +857,34 @@ warn_regex_block() {
   } | ui_note warn
 }
 
+# В конфиге нет ни подписок, ни своих нод: ядро без них не запускают, а
+# подписку или WireGuard-ноду добавляют уже из веб-интерфейса (вкладка
+# «Конфиг»). Провайдер fast (файл с победителями спидтеста) нодами не
+# считается. Код 0 - нод нет.
+config_no_nodes() {
+  awk '
+    /^[A-Za-z0-9_-]+:/ { sect = ($0 ~ /^proxy-providers:/) ? 1 : (($0 ~ /^proxies:/) ? 2 : 0); next }
+    sect == 1 && /^  [A-Za-z0-9_-]+:[ ]*$/ { if ($1 != "fast:") found = 1 }
+    sect == 2 && /^  - / { found = 1 }
+    END { exit found ? 1 : 0 }
+  ' "$1" 2>/dev/null
+}
+
+# Слова гео-фильтра из exclude-filter: &geofilter конфига (без префикса (?i)).
+config_geofilter_block() {
+  sed -n "s/.*exclude-filter: &geofilter '\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1 | sed 's/^(?i)//'
+}
+
+# Проверка окружения: пока нет конфига или в нём нет нод, ядро не обязано
+# работать (так и задумано - его не запускают без нод), нужны только версии.
+install_env_check() {
+  if [ ! -f "$CONFIG" ] || config_no_nodes "$CONFIG"; then
+    check_versions
+  else
+    check_mihomo_process && check_versions
+  fi
+}
+
 resolve_block() {
   resolve_block_raw || return 1
   BLOCK=$(normalize_block "$BLOCK")
@@ -1477,6 +1505,15 @@ has_fast_group() {
   grep -qE '^[[:space:]]*path:[[:space:]]*[^[:space:]]*/?fast\.yaml[[:space:]]*$' "$1" 2>/dev/null
 }
 
+no_nodes_notice() {
+  {
+    echo "Ядро mihomo не запущено: в конфиге пока нет ни подписок, ни нод."
+    echo "  Откройте веб-интерфейс (адрес ниже), вкладка «Конфиг» -> «Конструктор»:"
+    echo "  добавьте подписку или WireGuard-ноду (из .conf) и нажмите"
+    echo "  «Проверить и применить» - конфиг проверится, и ядро запустится."
+  } | ui_note warn
+}
+
 own_config_notice() {
   # Жёлтый блок; пустые строки по краям не нужны - блок и так отделён чертой.
   {
@@ -1815,10 +1852,10 @@ main() {
   env_err=$TMPROOT/mst-install-check.$$
   env_ok=1
   if : 2>/dev/null >"$env_err"; then
-    { check_mihomo_process && check_versions; } 2>"$env_err" || env_ok=0
+    { install_env_check; } 2>"$env_err" || env_ok=0
   else
     env_err=/dev/null
-    { check_mihomo_process && check_versions; } || env_ok=0
+    { install_env_check; } || env_ok=0
   fi
   env_arch=$(uname -m 2>/dev/null) || env_arch=
   ui_kv "Архитектура" "${env_arch:-?}${VC_KOS:+ · KeeneticOS $VC_KOS}"
@@ -1864,10 +1901,16 @@ main() {
     }
   done
   ui_ok "Файлы проекта на месте"
-  ui_run "Конфиг проходит mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" || {
-    ui_fail "$CONFIG не проходит mihomo -t"
-    return 1
-  }
+  NO_NODES=0
+  if config_no_nodes "$CONFIG"; then NO_NODES=1; fi
+  if [ "$NO_NODES" = 1 ]; then
+    ui_warn "В конфиге нет ни подписок, ни нод: проверка mihomo -t и запуск ядра пропущены"
+  else
+    ui_run "Конфиг проходит mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" || {
+      ui_fail "$CONFIG не проходит mihomo -t"
+      return 1
+    }
+  fi
 
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Конфиг и фильтр"
   # Вопросы о конфиге и гео-фильтре должны читать терминал, а не тело
@@ -1875,13 +1918,20 @@ main() {
   # разбора провайдеров: дальше всё работает уже с итоговым конфигом
   # (в том числе гео-фильтр &geofilter из шаблона).
   reopen_tty
-  resolve_config_mode || return 1
-
-  if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
-    ui_fail "providers.awk не смог разобрать $CONFIG"
-    return 1
+  if [ "$NO_NODES" = 1 ]; then
+    # Нет подписок - нечего разбирать и кэшировать; фильтр - из конфига.
+    SOURCES=
+    BLOCK_COUNT=1
+    BLOCK_1=$(config_geofilter_block "$CONFIG")
+    [ -n "$BLOCK_1" ] || BLOCK_1=$MIN_BLOCK
+  else
+    resolve_config_mode || return 1
+    if ! PARSED=$(awk -v CONFIG="$CONFIG" -v CONFDIR="$MIHOMO_DIR" -f "$SELFDIR/providers.awk" "$CONFIG"); then
+      ui_fail "providers.awk не смог разобрать $CONFIG"
+      return 1
+    fi
+    eval "$PARSED"
   fi
-  eval "$PARSED"
 
   for src in $SOURCES; do
     [ -f "$src" ] && continue
@@ -1963,7 +2013,9 @@ main() {
 
   # Пробный прогон - оформление спиннером в отдельной задаче; пока - как было.
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Пробный прогон"
-  if [ "${SKIP_TRIAL:-0}" != 1 ]; then
+  if [ "$NO_NODES" = 1 ]; then
+    ui_warn "Пробный прогон пропущен: в конфиге нет нод"
+  elif [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
     print_trial_log_tail
   else
@@ -1976,6 +2028,7 @@ main() {
   esac
   # Свой конфиг без быстрого пула - жёлтый блок прямо перед сводкой.
   [ "${MST_OWN_CONFIG:-0}" != 1 ] || own_config_notice
+  [ "$NO_NODES" != 1 ] || no_nodes_notice
   ui_done "mihomo-speedtest ${done_tag}установлен"
   ui_kv "Открыть" "${web_open:-?}"
   ui_kv "Фильтр" "$BLOCK"

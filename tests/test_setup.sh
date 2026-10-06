@@ -770,6 +770,77 @@ rj=$(sed -n 's/^Непринятый конфиг оставлен в \(.*\) д�
 [ -z "$rj" ] || rm -f "$rj"
 rm -rf "$FAKEBIN8" "$WORK8"
 
+# --- Первая установка без нод: подписку можно пропустить. Ядро не запущено
+# (pidof его не видит), setup.sh не требует процесс, собирает конфиг без
+# нод, не гоняет mihomo -t и не перезапускает ядро - веб-интерфейс
+# (install.sh) поднимется до запуска ядра, ноды добавят оттуда.
+FAKEBIN9=$(mktemp -d)
+WORK9=$(mktemp -d)
+MARK9=$(mktemp -d)
+cat > "$FAKEBIN9/pidof" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+cat > "$FAKEBIN9/xkeen" <<EOF
+#!/bin/sh
+case "\$1" in
+  -v) printf 'Версия XKeen 2.0 Stable (время сборки: 2026-06-06 08:53:30 MSK)
+  Ядро проксирования Mihomo версии 1.19.29
+' ;;
+  -restart) echo restart > "$MARK9/restart" ;;
+esac
+EOF
+cat > "$FAKEBIN9/ndmc" <<'EOF'
+#!/bin/sh
+printf '  version: (unassigned)
+  ndm.core.version: "5.1.4 (KeeneticOS)"
+'
+EOF
+cat > "$FAKEBIN9/mihomo" <<EOF
+#!/bin/sh
+echo "\$@" > "$MARK9/mihomo"
+exit 0
+EOF
+chmod +x "$FAKEBIN9"/*
+cp "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" \
+   "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/setup.sh" "$WORK9/"
+cat > "$WORK9/install.sh" <<'EOF'
+#!/bin/sh
+echo "install.sh (заглушка): запущен" >&2
+exit 0
+EOF
+chmod +x "$WORK9/install.sh" "$WORK9/setup.sh"
+run_setup9() {
+  # $1 - файл со входом, остальное - дополнительное окружение; конфиг каждый раз новый
+  rm -f "$WORK9/config.yaml" "$MARK9/restart" "$MARK9/mihomo"
+  inp=$1; shift
+  env PATH="$FAKEBIN9:$PATH" DIR="$WORK9" MIHOMO_DIR="$WORK9/mh" BIN=mihomo CONFIG="$WORK9/config.yaml" \
+    TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK9" API_MAIN=127.0.0.1:9090 \
+    SKIP_CONFIRM=1 "$@" sh "$WORK9/setup.sh" >"$WORK9/run.log" 2>&1 < "$inp"
+}
+check_nonodes9() {
+  [ -f "$WORK9/config.yaml" ] || { echo "FAIL: ($1) config.yaml не создан" >&2; FAILED=1; return; }
+  grep -q 'sub-names: &sub-names \[\]' "$WORK9/config.yaml" || { echo "FAIL: ($1) sub-names должен быть пустым" >&2; FAILED=1; }
+  grep -q '^  provider-a:' "$WORK9/config.yaml" && { echo "FAIL: ($1) в конфиге остались подписки шаблона" >&2; FAILED=1; }
+  [ ! -e "$MARK9/restart" ] || { echo "FAIL: ($1) ядро перезапускалось без нод" >&2; FAILED=1; }
+  [ ! -e "$MARK9/mihomo" ] || { echo "FAIL: ($1) mihomo -t запускался на конфиге без нод" >&2; FAILED=1; }
+  grep -q 'ядро не запускалось' "$WORK9/run.log" || { echo "FAIL: ($1) нет сообщения, что ядро не запускалось" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+  grep -q 'install.sh (заглушка): запущен' "$WORK9/run.log" || { echo "FAIL: ($1) install.sh не запущен после мастера" >&2; FAILED=1; }
+}
+# а) Enter на вопросе о подписке (терминал) - пропуск
+printf '\n' > "$WORK9/in_enter"
+run_setup9 "$WORK9/in_enter" || { echo "FAIL: пропуск подписки по Enter должен завершаться успешно" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_nonodes9 "Enter"
+# б) SKIP_SUBSCRIPTION=1 - то же без вопросов (неинтерактивно)
+run_setup9 /dev/null SKIP_SUBSCRIPTION=1 || { echo "FAIL: SKIP_SUBSCRIPTION=1 должен завершаться успешно" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_nonodes9 "SKIP_SUBSCRIPTION"
+# в) нет ввода вовсе (EOF) - не пропуск, как раньше: отказ, конфиг не создан
+rc9=0; run_setup9 /dev/null || rc9=$?
+[ "$rc9" != 0 ] || { echo "FAIL: без ввода и без SKIP_SUBSCRIPTION мастер не должен молча пропускать подписку" >&2; FAILED=1; }
+grep -q 'Нужна хотя бы одна ссылка на подписку' "$WORK9/run.log" || { echo "FAIL: нет отказа 'Нужна хотя бы одна ссылка'" >&2; FAILED=1; }
+[ ! -f "$WORK9/config.yaml" ] || { echo "FAIL: при отказе config.yaml создан" >&2; FAILED=1; }
+rm -rf "$FAKEBIN9" "$WORK9" "$MARK9"
+
 if [ "$FAILED" = 1 ]; then
   echo "test_setup.sh: FAILED" >&2
   exit 1
