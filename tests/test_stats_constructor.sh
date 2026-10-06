@@ -191,6 +191,12 @@ assert_contains 'Status: 400' "$out"
 
 # --- 13: фильтр нод конструктора - и в BLOCK спидтеста
 export ENV=$TMP/speedtest2.env
+printf "%s\n" "BLOCK='old|Берлин'" "TOPN='15'" > "$ENV"
+out=$(cgi read GET '' </dev/null)
+[ "$(printf '%s' "$out" | jget '["block"]')" = "old|Берлин" ] || fail "13: block в чтении"
+rm -f "$ENV"
+out=$(cgi read GET '' </dev/null)
+[ "$(printf '%s' "$out" | jget '["block"]')" = "" ] || fail "13: block без speedtest2.env"
 printf "%s\n" "BLOCK='old'" "TOPN='15'" > "$ENV"
 out=$(cgi read GET '' </dev/null)
 base=$(printf '%s' "$out" | jget '["base"]')

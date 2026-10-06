@@ -308,6 +308,14 @@ export function createModules(data) {
   var proxies = parseProxies(data.proxies);
   var defWords = parseWords(data.geofilter_default);
   var words = data.geofilter ? parseWords(data.geofilter) : null;
+  // Своего фильтра в конструкторе ещё нет, а BLOCK спидтеста (прежний
+  // фильтр из настроек) отличается от слов шаблона - исходный фильтр он.
+  var fromBlock = false;
+  if (!words && data.block) {
+    var bw = parseWords(String(data.block).replace(/\|/g, '\n'));
+    function keyOf(list) { return list.map(function (w) { return w.toLowerCase(); }).sort().join('\n'); }
+    if (bw.length && keyOf(bw) !== keyOf(defWords)) { words = bw; fromBlock = true; }
+  }
   var filterErr = '';
   var present = { subs: data.subscriptions != null, proxies: data.proxies != null };
 
@@ -316,6 +324,8 @@ export function createModules(data) {
 
   var model = {
     available: function () { return present; },
+    // Исходный фильтр взят из BLOCK спидтеста, а не из конструктора/шаблона.
+    fromBlock: function () { return fromBlock; },
     // ----- подписки -----
     subs: function () { return subs.map(function (s) { return { url: s.url, ua: s.ua, name: s.name }; }); },
     addSub: function (url, ua, name) {

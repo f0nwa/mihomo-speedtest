@@ -107,6 +107,21 @@ m.resetWords();
 eq(m.serialize().geofilter, '', 'сброс к шаблону');
 eq(M.createModules({ subscriptions: SUBS, proxies: PROX, geofilter: 'X\n', geofilter_default: 'RU\n' }).words(), ['X'], 'слова из состояния');
 
+// ----- BLOCK спидтеста как исходный фильтр -----
+const base = { subscriptions: SUBS, proxies: PROX, geofilter_default: 'RU\nMoscow\n' };
+let mb = M.createModules({ ...base, geofilter: null, block: 'Russia|Berlin| rU ' });
+eq(mb.fromBlock(), true, 'BLOCK отличается от шаблона - берётся');
+eq(mb.words(), ['Russia', 'Berlin', 'rU'], 'слова из BLOCK');
+eq(mb.serialize().geofilter, 'Russia\nBerlin\nrU\n', 'BLOCK уходит в состояние');
+eq(mb.summary({ ...base, geofilter: mb.serialize().geofilter }), [], 'исходное состояние - без изменений');
+mb.resetWords();
+eq(mb.serialize().geofilter, '', 'сброс к шаблону после BLOCK');
+eq(M.createModules({ ...base, geofilter: null, block: 'moscow|ru' }).fromBlock(), false, 'BLOCK = слова шаблона - не берётся');
+eq(M.createModules({ ...base, geofilter: null, block: '' }).fromBlock(), false, 'BLOCK пуст');
+eq(M.createModules({ ...base, geofilter: null }).fromBlock(), false, 'BLOCK не передан');
+let ms = M.createModules({ ...base, geofilter: 'Own\n', block: 'Russia|Berlin' });
+eq([ms.fromBlock(), ms.words()], [false, ['Own']], 'фильтр конструктора важнее BLOCK');
+
 // ----- прочее -----
 eq(M.createModules({ subscriptions: '', proxies: '', geofilter: null, geofilter_default: '' }).problems(), ['Нужна хотя бы одна подписка или своя нода'], 'ни подписок, ни нод');
 eq(m.problems(), [], 'есть подписки - всё в порядке');

@@ -9,7 +9,7 @@
 # Действие - в MST_CONSTRUCTOR_ACTION:
 #   read     GET  - {"imported","manual_edits","base","defaults","services",
 #                   "geofilter","user_rules","subscriptions","proxies",
-#                   "template_base","report"}: состояние из
+#                   "template_base","block","report"}: состояние из
 #                   $CONFIG_STATE_DIR, а если его нет (или ?import=1) - перенос
 #                   из config.yaml (imported=true, отчёт в report); null -
 #                   файла нет.
@@ -180,10 +180,15 @@ case $action:$method in
     # interval/tolerance, proxies базовых групп и слова фильтра нод.
     awk '/^[A-Za-z0-9_-]+:/ { on = ($0 ~ /^(anchors|proxy-groups):/) } /SERVICE_GROUPS:BEGIN/ { exit } on' \
       "$CONFIG_TEMPLATE" > "$WORK/tbase" 2>/dev/null || : > "$WORK/tbase"
-    printf '{"imported":%s,"manual_edits":%s,"base":"%s","defaults":%s,"services":%s,"geofilter":%s,"user_rules":%s,"subscriptions":%s,"proxies":%s,"template_base":%s,"report":%s}\n' \
+    # Текущий BLOCK спидтеста (прежний гео-фильтр из настроек): пока в
+    # конструкторе нет своего фильтра, он берётся как исходный.
+    block=
+    env_file=${ENV:-$DIR/speedtest2.env}
+    [ ! -f "$env_file" ] || block=$( (. "$env_file" >/dev/null 2>&1; printf '%s' "${BLOCK:-}") 2>/dev/null ) || block=
+    printf '{"imported":%s,"manual_edits":%s,"base":"%s","defaults":%s,"services":%s,"geofilter":%s,"user_rules":%s,"subscriptions":%s,"proxies":%s,"template_base":%s,"block":%s,"report":%s}\n' \
       "$imported" "$manual" "$(fingerprint "$target")" "$(jstr_file "$CONSTRUCTOR_DEFAULTS")" \
       "$(jfile_or_null "$st/services.tsv")" "$(jfile_or_null "$st/geofilter.txt")" \
-      "$(jfile_or_null "$st/user-rules.txt")" "$subs" "$prox" "$(jstr_file "$WORK/tbase")" "$(lines_json "$WORK/report")" > "$WORK/resp"
+      "$(jfile_or_null "$st/user-rules.txt")" "$subs" "$prox" "$(jstr_file "$WORK/tbase")" "$(jstr "$block")" "$(lines_json "$WORK/report")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   catalog:GET|catalog:HEAD)
     [ -f "$CONSTRUCTOR_CATALOG" ] || fail_json 404 no_catalog "Каталог наборов правил не найден - переустановите проект"

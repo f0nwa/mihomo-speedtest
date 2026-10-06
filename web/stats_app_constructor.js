@@ -91,7 +91,7 @@ export function renderConstructor(modeBar, opts) {
     var model = createModel(data.defaults || '', data.services || '', data.user_rules || '', data.template_base || '');
     var mods = createModules({
       subscriptions: data.subscriptions, proxies: data.proxies, geofilter: data.geofilter,
-      geofilter_default: parseTemplateBase(data.template_base || '').geofilter.replace(/\|/g, '\n')
+      geofilter_default: parseTemplateBase(data.template_base || '').geofilter.replace(/\|/g, '\n'), block: data.block
     });
     // Перенос (состояния ещё нет или «Перенести в конструктор») - в
     // состоянии пока ничего не записано: всё перенесённое - изменения.
@@ -211,6 +211,7 @@ export function renderConstructor(modeBar, opts) {
       // перенос ещё не сохранён в конструкторе - это изменение, даже если
       // переносить нечего (иначе предупреждение о ручных правках не снять)
       var pending = list.length;
+      if (mods.fromBlock() && mods.serialize().geofilter === initialMods.geofilter) { list.unshift('Исключения нод: взят текущий список спидтеста (BLOCK) - при применении он станет и фильтром подписок'); }
       if (data.imported) { list.unshift('Перенос из config.yaml (настройки ещё не сохранены в конструкторе)'); }
       clear(chList);
       list.forEach(function (t) { chList.appendChild(el('li', null, t)); });
