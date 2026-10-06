@@ -11,7 +11,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 grep -q '"app-constructor.js": "stats_app_constructor.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor.js"
 grep -q '"app-constructor-model.js": "stats_app_constructor_model.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor-model.js"
 grep -q 'for m in .*constructor constructor_model' "$ROOT/install.sh" || fail "install.sh: цикл stats_app_\$m без constructor"
-for f in stats_app_constructor.js stats_app_constructor_model.js; do
+for f in stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js; do
   grep -q "web/$f|/opt/etc/mihomo-speedtest/$f|0644|none" "$ROOT/release/components.txt" || fail "components.txt: $f"
   grep -q "$f" "$ROOT/uninstall.sh" || fail "uninstall.sh: $f"
   case " $(sed -n 's/^ALL_PROJECT_FILES="\(.*\)"$/\1/p' "$ROOT/install.sh") " in *" $f "*) ;; *) fail "ALL_PROJECT_FILES: $f" ;; esac
@@ -52,10 +52,29 @@ grep -q 'перехват' "$UI" || fail "нет предупреждения о
 grep -q 'findByName' "$UI" || fail "имя существующей группы - подключение к ней, а не ошибка"
 grep -q 'checkSource' "$UI" || fail "наборы проверяются до добавления"
 
+# Блоки порции 5: подписки, свои прокси, исключения нод, базовые группы
+MOD="$ROOT/web/stats_app_constructor_modules.js"
+grep -q '"app-constructor-modules.js": "stats_app_constructor_modules.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor-modules.js"
+grep -q '"app-constructor-modules-model.js": "stats_app_constructor_modules_model.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor-modules-model.js"
+grep -q 'for m in .*constructor_modules constructor_modules_model' "$ROOT/install.sh" || fail "install.sh: цикл stats_app_\$m без модулей"
+for f in stats_app_constructor_modules.js stats_app_constructor_modules_model.js; do
+  grep -q "web/$f|/opt/etc/mihomo-speedtest/$f|0644|none" "$ROOT/release/components.txt" || fail "components.txt: $f"
+  grep -q "$f" "$ROOT/uninstall.sh" || fail "uninstall.sh: $f"
+  case " $(sed -n 's/^ALL_PROJECT_FILES="\(.*\)"$/\1/p' "$ROOT/install.sh") " in *" $f "*) ;; *) fail "ALL_PROJECT_FILES: $f" ;; esac
+done
+for t in "card('Подписки')" "card('Свои прокси')" "card('Исключения нод')" "card('Базовые группы')"; do
+  grep -qF "$t" "$MOD" || fail "нет карточки $t"
+done
+grep -q "createModuleCards" "$UI" || fail "UI не подключает блоки"
+grep -q "mods.serialize()" "$UI" || fail "подписки, ноды и фильтр не уходят в состояние"
+grep -q "mods.problems()" "$UI" || fail "применение не проверяет, что есть подписки или ноды"
+grep -q "/api/constructor/wgconf" "$MOD" || fail "нет импорта WireGuard .conf"
+grep -q "hostOf" "$MOD" || fail "адрес подписки показывается целиком (в нём ключ доступа)"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-  for f in stats_app_constructor.js stats_app_constructor_model.js stats_app_config.js; do
+  for f in stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_app_settings.js stats_app_config.js; do
     cp "$ROOT/web/$f" "$T/${f%.js}.mjs"
     node --check "$T/${f%.js}.mjs" || fail "синтаксис $f"
   done

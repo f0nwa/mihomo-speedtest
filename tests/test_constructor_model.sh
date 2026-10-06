@@ -174,6 +174,42 @@ eq(m.findByName('Bad'), null, 'route: ошибка не оставляет се�
 eq(M.parseCatalogDate('# x\n# собран: 2026-10-06\na'), '2026-10-06', 'дата каталога');
 eq(M.parseCatalogDate('# собран: вчера'), '', 'дата каталога: мусор');
 
+// базовые группы: interval/tolerance и куда смотрят по умолчанию
+const TB = [
+  'anchors:',
+  "  http-provider: &http-provider { type: http, exclude-filter: &geofilter '(?i)RU|Moscow' }",
+  "  select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual'] }",
+  'proxy-groups:',
+  "  - name: '⚡ Быстрый пул'", '    interval: 60', '    tolerance: 50',
+  "  - name: '⚙️Manual'", '    proxies: [DIRECT]',
+  "  - name: 'Заблок. сервисы'", "    proxies: ['⚡ Самые быстрые', DIRECT]", ''].join('\n');
+const pt = M.parseTemplateBase(TB);
+eq(pt.geofilter, 'RU|Moscow', 'фильтр шаблона');
+eq(pt.selectDefault, ['DIRECT', 'Заблок. сервисы', '⚙️Manual'], 'select-default');
+eq(M.proxyTokens("    proxies: ['a, b', c, 'it''s']"), ['a, b', 'c', "it's"], 'токены с запятой и кавычкой');
+let mb = M.createModel(D, '', '', TB);
+eq(mb.baseGroups(), [{ name: '⚡ Быстрый пул', interval: { def: 60, value: 60 }, tolerance: { def: 50, value: 50 } }], 'базовые группы');
+eq(mb.routes().map(r => [r.name, r.def, r.value]), [['*', 'DIRECT', 'DIRECT'], ['Заблок. сервисы', '⚡ Самые быстрые', '⚡ Самые быстрые']], 'маршруты');
+mb.setBase('⚡ Быстрый пул', 'interval', '120');
+mb.setRoute('*', '⚙️Manual');
+eq(mb.serialize().services, ['bset', '⚡ Быстрый пул', 'interval', '120'].join(T) + '\n' + ['bfirst', '*', '⚙️Manual'].join(T) + '\n', 'bset/bfirst сериализуются');
+eq(mb.summary({ services: '', user_rules: '' }), ['Группа ⚡ Быстрый пул: interval = 120', 'Сервисные группы: по умолчанию ⚙️Manual'], 'сводка базовых групп');
+const before = mb.serialize();
+mb.setBase('⚡ Быстрый пул', 'interval', '90');
+eq(mb.summary(before), ['Группа ⚡ Быстрый пул: interval = 90'], 'смена значения - одна строка');
+mb.setBase('⚡ Быстрый пул', 'interval', '60');
+mb.setRoute('*', 'DIRECT');
+eq(mb.serialize().services, '', 'значение шаблона - отличий нет');
+throws(() => mb.setBase('⚡ Быстрый пул', 'interval', '5'), 'interval < 10');
+throws(() => mb.setBase('⚡ Быстрый пул', 'interval', 'abc'), 'interval не число');
+throws(() => mb.setBase('⚡ Быстрый пул', 'tolerance', '99999'), 'tolerance велик');
+throws(() => mb.setBase('нет', 'interval', '60'), 'нет группы');
+throws(() => mb.setRoute('*', 'нет-такого'), 'значения нет в списке');
+eq(M.createModel(D, ['bset', '⚡ Быстрый пул', 'tolerance', '70'].join(T) + '\n', '', TB).baseGroups()[0].tolerance, { def: 50, value: 70 }, 'отличия из состояния');
+eq(M.createModel(D, ['bset', '⚡ Быстрый пул', 'tolerance', '70'].join(T) + '\n', '', TB).serialize().services, ['bset', '⚡ Быстрый пул', 'tolerance', '70'].join(T) + '\n', 'отличия из состояния сериализуются как были');
+eq(M.stateBody({ services: '', user_rules: '', subscriptions: 'u\tua\tn\n', proxies: '' }), '### MST-STATE services.tsv\n### MST-STATE subscriptions.tsv\nu\tua\tn\n### MST-STATE proxies.yaml\n', 'stateBody: подписки и ноды');
+eq(M.stateBody({ services: '', user_rules: '', subscriptions: null, proxies: null }), '### MST-STATE services.tsv\n', 'stateBody: без модулей');
+
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
 JS

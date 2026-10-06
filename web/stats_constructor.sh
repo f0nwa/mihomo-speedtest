@@ -8,19 +8,23 @@
 #
 # Действие - в MST_CONSTRUCTOR_ACTION:
 #   read     GET  - {"imported","manual_edits","base","defaults","services",
-#                   "geofilter","user_rules","report"}: состояние из
+#                   "geofilter","user_rules","subscriptions","proxies",
+#                   "template_base","report"}: состояние из
 #                   $CONFIG_STATE_DIR, а если его нет (или ?import=1) - перенос
 #                   из config.yaml (imported=true, отчёт в report); null -
 #                   файла нет.
 #   preview  POST - собрать кандидата из присланного состояния, без записи:
 #                   {"ok","text","report","check"}.
+#   wgconf   POST - перевод одного WireGuard/AmneziaWG .conf в ноду mihomo
+#                   (тело: строка "### MST-WG <имя ноды>" и текст .conf):
+#                   {"ok":true,"yaml":"  - name: ...","report":[...]}.
 #   catalog  GET  - {"text"}: каталог наборов правил для поиска
 #                   (rule-catalog.tsv, release/build_rule_catalog.sh).
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
 #                   состояние и managed.sig пишутся только после успешного
 #                   применения.
 # Тело preview/apply - блоки "### MST-STATE <файл>" (services.tsv,
-# geofilter.txt, user-rules.txt), за строкой блока - содержимое файла; нет
+# geofilter.txt, user-rules.txt, subscriptions.tsv, proxies.yaml), за строкой блока - содержимое файла; нет
 # блока - нет файла.
 #
 # managed.sig - отпечаток разделов anchors, proxy-groups, rule-providers и
@@ -35,7 +39,8 @@ CONSTRUCTOR_DEFAULTS=${CONSTRUCTOR_DEFAULTS:-$DIR/services.default.tsv}
 CONFIG_TO_STATE_AWK=${CONFIG_TO_STATE_AWK:-$DIR/config_to_state.awk}
 CONSTRUCTOR_CATALOG=${CONSTRUCTOR_CATALOG:-$DIR/rule-catalog.tsv}
 APPLY_LOG=${CONSTRUCTOR_APPLY_LOG:-$APPLY_LOG}
-STATE_FILES="services.tsv geofilter.txt user-rules.txt"
+STATE_FILES="services.tsv geofilter.txt user-rules.txt subscriptions.tsv proxies.yaml"
+WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
 
 # Файл JSON-строкой или null, если файла нет.
 jfile_or_null() {
@@ -124,25 +129,64 @@ case $action:$method in
     [ -f "$CONSTRUCTOR_DEFAULTS" ] || fail_json 500 no_tools "services.default.tsv не найден - переустановите проект"
     imported=false manual=false
     : > "$WORK/report"
+    # Разбор config.yaml - всегда: из него берётся недостающее в сохранённом
+    # состоянии (подписки и свои прокси появились позже сервисов).
+    imp=$WORK/imp; mkdir "$imp"
+    awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$imp" \
+        -v report="$WORK/imp.report" -f "$CONFIG_TO_STATE_AWK" "$target" 2> "$WORK/err" \
+      || fail_json 422 import_failed "Не удалось разобрать config.yaml: $(head -n 1 "$WORK/err")"
     # ?import=1 - «Перенести в конструктор»: перенос из config.yaml даже при
     # сохранённом состоянии (оно заменится только при применении).
     if [ "$(query_param import)" != 1 ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
       st=$CONFIG_STATE_DIR
       if [ -f "$st/managed.sig" ] && [ "$(cat "$st/managed.sig")" != "$(managed_sig "$target")" ]; then manual=true; fi
     else
-      st=$WORK/state; mkdir "$st"; imported=true
-      awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$st" \
-          -v report="$WORK/report" -f "$CONFIG_TO_STATE_AWK" "$target" 2> "$WORK/err" \
-        || fail_json 422 import_failed "Не удалось разобрать config.yaml: $(head -n 1 "$WORK/err")"
+      st=$imp; imported=true
+      cp "$WORK/imp.report" "$WORK/report"
     fi
-    printf '{"imported":%s,"manual_edits":%s,"base":"%s","defaults":%s,"services":%s,"geofilter":%s,"user_rules":%s,"report":%s}\n' \
+    subs=null prox=null
+    if [ -f "$st/subscriptions.tsv" ]; then subs=$(jstr_file "$st/subscriptions.tsv")
+    elif [ -f "$imp/subscriptions.tsv" ]; then subs=$(jstr_file "$imp/subscriptions.tsv"); fi
+    if [ -f "$st/proxies.yaml" ]; then prox=$(jstr_file "$st/proxies.yaml")
+    elif [ -f "$imp/proxies.yaml" ]; then prox=$(jstr_file "$imp/proxies.yaml"); fi
+    # Базовая часть шаблона (anchors и группы до сервисных): значения
+    # interval/tolerance, proxies базовых групп и слова фильтра нод.
+    awk '/^[A-Za-z0-9_-]+:/ { on = ($0 ~ /^(anchors|proxy-groups):/) } /SERVICE_GROUPS:BEGIN/ { exit } on' \
+      "$CONFIG_TEMPLATE" > "$WORK/tbase" 2>/dev/null || : > "$WORK/tbase"
+    printf '{"imported":%s,"manual_edits":%s,"base":"%s","defaults":%s,"services":%s,"geofilter":%s,"user_rules":%s,"subscriptions":%s,"proxies":%s,"template_base":%s,"report":%s}\n' \
       "$imported" "$manual" "$(fingerprint "$target")" "$(jstr_file "$CONSTRUCTOR_DEFAULTS")" \
       "$(jfile_or_null "$st/services.tsv")" "$(jfile_or_null "$st/geofilter.txt")" \
-      "$(jfile_or_null "$st/user-rules.txt")" "$(lines_json "$WORK/report")" > "$WORK/resp"
+      "$(jfile_or_null "$st/user-rules.txt")" "$subs" "$prox" "$(jstr_file "$WORK/tbase")" "$(lines_json "$WORK/report")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   catalog:GET|catalog:HEAD)
     [ -f "$CONSTRUCTOR_CATALOG" ] || fail_json 404 no_catalog "Каталог наборов правил не найден - переустановите проект"
     printf '{"text":%s}\n' "$(jstr_file "$CONSTRUCTOR_CATALOG")" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  wgconf:POST)
+    [ -f "$WG_IMPORT_AWK" ] || fail_json 500 no_tools "wg_import.awk не найден - переустановите проект"
+    read_body "$WORK/body"
+    mkdir "$WORK/wg"
+    # первая строка - "### MST-WG <имя>", остальное - текст .conf
+    if ! LC_ALL=C awk -v D="$WORK/wg" '
+      function chars(t) { gsub(/[\200-\277]/, "", t); return length(t) }
+      { line = $0; sub(/\r$/, "", line) }
+      NR == 1 {
+        if (line !~ /^### MST-WG /) exit 3
+        name = substr(line, 12)
+        if (name == "" || name ~ /[\001-\037\177|]/ || name ~ /^[ \t]/ || name ~ /[ \t]$/ || chars(name) > 64) exit 4
+        printf "%s/in.conf\t%s\n", D, name > (D "/list"); next
+      }
+      { print > (D "/in.conf") }' "$WORK/body"; then
+      fail_json 400 bad_body "Первая строка тела: ### MST-WG <имя ноды> (до 64 символов, без | и пробелов по краям)"
+    fi
+    [ -f "$WORK/wg/in.conf" ] || : > "$WORK/wg/in.conf"
+    : > "$WORK/report"
+    awk -v MODE=nodes -v LIST="$WORK/wg/list" -v REPORT="$WORK/report" -f "$WG_IMPORT_AWK" /dev/null > "$WORK/nodes.yaml" \
+      || fail_json 422 import_failed "Не удалось перевести .conf"
+    if [ ! -s "$WORK/nodes.yaml" ]; then
+      fail_json 422 bad_conf "$(sed -n 's/^ERROR|[^|]*|//p' "$WORK/report" | head -n 1)"
+    fi
+    printf '{"ok":true,"yaml":%s,"report":%s}\n' "$(jstr_file "$WORK/nodes.yaml")" "$(lines_json "$WORK/report")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   preview:POST)
     read_state_body

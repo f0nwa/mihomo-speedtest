@@ -9,7 +9,8 @@
 #   sh constructor_build.sh (--state DIR | --import) --source CONFIG \
 #      --output OUT --report REPORT
 #
-# --state DIR - каталог состояния (services.tsv, geofilter.txt,
+# --state DIR - каталог состояния (services.tsv, subscriptions.tsv,
+#   proxies.yaml, geofilter.txt,
 #   user-rules.txt; любого файла может не быть).
 # --import - состояния ещё нет: оно выводится из --source
 #   (config_to_state.awk) во временный каталог, отчёт импорта дописывается
@@ -51,7 +52,9 @@ if [ "$import" = 1 ]; then
     || fail "Не удалось разобрать текущий конфиг: $(head -n 1 "$WORK/err")"
   state=$WORK/state
 fi
-ov= geo= ur=
+ov= geo= ur= subs= prox=
+[ ! -f "$state/subscriptions.tsv" ] || subs=$state/subscriptions.tsv
+[ ! -f "$state/proxies.yaml" ] || prox=$state/proxies.yaml
 [ ! -f "$state/services.tsv" ] || ov=$state/services.tsv
 [ ! -f "$state/geofilter.txt" ] || geo=$state/geofilter.txt
 [ ! -f "$state/user-rules.txt" ] || ur=$state/user-rules.txt
@@ -59,7 +62,8 @@ awk -v services_file="$DIR/services.default.tsv" -v overlay_file="$ov" -v geofil
     -v user_rules_file="$ur" -f "$DIR/render_services.awk" "$DIR/config.example.yaml" \
     > "$WORK/template.yaml" 2> "$WORK/err" \
   || fail "Ошибка в настройках конструктора: $(sed 's/^render_services.awk: //' "$WORK/err" | head -n 1)"
-sh "$DIR/migrate_config.sh" --source "$source_file" --template "$WORK/template.yaml" \
+set -- ; [ -z "$subs" ] || set -- "$@" --subs "$subs"; [ -z "$prox" ] || set -- "$@" --proxies "$prox"
+sh "$DIR/migrate_config.sh" "$@" --source "$source_file" --template "$WORK/template.yaml" \
   --output "$output_file" --report "$report_file" > "$WORK/migrate.log" 2>&1 \
   || fail "$(sed -n 's/^ERROR: //p' "$WORK/migrate.log" | head -n 1)"
 [ "$import" = 0 ] || cat "$WORK/import.report" >> "$report_file"

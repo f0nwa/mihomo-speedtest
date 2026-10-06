@@ -262,5 +262,47 @@ printf '%s\n' ' ' > "$WORK/g.txt"
 rc=0; awk -v services_file="$D" -v geofilter_file="$WORK/g.txt" -f "$SCRIPT" "$G" > /dev/null 2>&1 || rc=$?
 [ "$rc" = 2 ] || fail "фильтр из пробела должен давать ошибку"
 
+# test_base_groups: bset/bfirst на базовых группах шаблона
+B="$WORK/b.yaml"
+cat > "$B" <<'Y'
+anchors:
+  select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual'] }
+proxy-groups:
+  - name: '🚀 Авто'
+    type: url-test
+    interval: 600
+    tolerance: 50
+  - name: 'Заблок. сервисы'
+    type: select
+    proxies: ['⚡ Самые быстрые', DIRECT, '⚙️Manual']
+  # --- SERVICE_GROUPS:BEGIN ---
+  # --- SERVICE_GROUPS:END ---
+rule-providers:
+  # --- SERVICE_PROVIDERS:BEGIN ---
+  # --- SERVICE_PROVIDERS:END ---
+rules:
+  # --- SERVICE_RULES:BEGIN ---
+  # --- SERVICE_RULES:END ---
+  - MATCH,DIRECT
+Y
+renderb() { awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$B"; }
+printf 'bset\t🚀 Авто\tinterval\t300\nbset\t🚀 Авто\ttolerance\t0\nbfirst\tЗаблок. сервисы\tDIRECT\nbfirst\t*\t⚙️Manual\n' > "$WORK/o.tsv"
+OB=$(renderb) || fail "base: ошибка сборки"
+assert_contains "    interval: 300${NL}    tolerance: 0${NL}" "$OB" "bset: значения"
+assert_contains "proxies: [DIRECT, '⚡ Самые быстрые', '⚙️Manual']" "$OB" "bfirst: группа"
+assert_contains "proxies: ['⚙️Manual', DIRECT, 'Заблок. сервисы'] }" "$OB" "bfirst *: якорь"
+printf '%s\n' "$OB" > "$WORK/b2.yaml"
+OB2=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/b2.yaml")
+[ "$OB2" = "$OB" ] || fail "base: повторная сборка меняет результат"
+# устаревшее (нет группы, ключа, значения) молча пропускается
+printf 'bset\tнет\tinterval\t300\nbfirst\tЗаблок. сервисы\tнет-такого\nbfirst\tнет\tx\n' > "$WORK/o.tsv"
+OB=$(renderb) || fail "base: устаревшее роняет сборку"
+assert_contains "    interval: 600${NL}" "$OB" "base: устаревшее не меняет шаблон"
+for bad in 'bset	🚀 Авто	interval	5' 'bset	🚀 Авто	interval	abc' 'bset	🚀 Авто	tolerance	99999' 'bset	🚀 Авто	url	1' 'bset	🚀 Авто	interval	70|bset	🚀 Авто	interval	80' 'bfirst	*	a|bfirst	*	b' 'bset	🚀 Авто	interval'; do
+  printf '%s\n' "$bad" | tr '|' '\n' > "$WORK/o.tsv"
+  rc=0; renderb > /dev/null 2>&1 || rc=$?
+  [ "$rc" = 2 ] || fail "base '$bad' должен давать ошибку (код $rc)"
+done
+
 [ "$FAILED" = 0 ] && echo "OK test_render_services"
 exit "$FAILED"

@@ -319,3 +319,10 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-desc{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cx-add{color:var(--accent);font-size:12.5px}
 @media (max-width:520px){.cx-cols{grid-template-columns:1fr}}
+.cx-editor{display:flex;flex-direction:column;gap:6px;margin:8px 0;padding:8px;background:var(--bg);border:1px solid var(--border)}
+.cx-editor input[type=text],.cx-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
+.cx-editor .xk-add input,.cx-editor .xk-add select{width:auto}
+.cx-ua{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.cx-ua select,.cx-ua input{font:inherit;font-size:13px}
+.cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
+.cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}

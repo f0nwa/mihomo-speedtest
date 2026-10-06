@@ -18,7 +18,7 @@ function geoCountry(code, flag, ru, en, extra, common) {
 // столица/хаб): голые 2-3-буквенные коды совпадали бы внутри чужих
 // имён ("RU" - Brussels, Peru; "USA" - Jerusalem). У России - ещё
 // привычные метки нод из шаблона (MSK/SPB оставлены сознательно).
-var GEO_CATALOG = [
+export var GEO_CATALOG = [
   geoCountry('RU', '🇷🇺', 'Россия', 'Russia', ['RU-', 'RU_', 'Moscow', 'Москва', 'MSK', 'МСК', 'SPB', 'СПб'], true),
   geoCountry('UA', '🇺🇦', 'Украина', 'Ukraine', [], true),
   geoCountry('KZ', '🇰🇿', 'Казахстан', 'Kazakhstan', [], true),
@@ -105,7 +105,7 @@ function geoCustomList(text) {
 
 // Страна отмечена, если в строке есть её флаг; все её слова уходят из
 // "своих", остальные слова остаются как есть.
-function geoParse(s) {
+export function geoParse(s) {
   var tokens = geoSplit(s);
   var have = {}, sel = {}, used = {};
   tokens.forEach(function (t) { have[geoLc(t)] = true; });
@@ -124,7 +124,7 @@ function geoParse(s) {
 
 // Слова отмеченных стран (в порядке каталога), затем свои; дубликаты
 // без учёта регистра убираются.
-function geoBuild(sel, customList) {
+export function geoBuild(sel, customList) {
   var seen = {}, out = [];
   function add(t) {
     var k = geoLc(t);

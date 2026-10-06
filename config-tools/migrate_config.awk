@@ -204,7 +204,39 @@ function render(text, section, a,n,j,s,subsection,proxies,dns,listeners) {
     print ((section=="proxy-groups" || section=="anchors") ? remap_refs(s) : s) > OUT
   }
 }
+# Подписки и свои ноды из состояния конструктора (SUBS_FILE: строки
+# "url<TAB>User-Agent<TAB>имя"; PROXIES_FILE: блок нод без заголовка)
+# подставляются вместо секций источника - дальше идёт обычный перенос.
+function override_from_state(  line,f,text,ok) {
+  if(SUBS_FILE!="") {
+    text="proxy-providers:\n"
+    while((getline line < SUBS_FILE)>0) {
+      if(line=="") continue
+      split(line,f,"\t")
+      if(f[3] !~ /^[A-Za-z0-9_-]+$/) bad("подписки: имя подписки - латиница, цифры, - и _")
+      if(f[1] !~ /^https?:\/\/[^ "\\]+$/) bad("подписки: адрес подписки " f[3] " должен начинаться с http(s):// без пробелов и кавычек")
+      if(f[2] ~ /["\\]/) bad("подписки: User-Agent подписки " f[3] " с кавычкой или обратной косой чертой")
+      text=text "  " f[3] ":\n    url: \"" f[1] "\"\n"
+      if(f[2]!="") text=text "    header:\n      User-Agent:\n        - \"" f[2] "\"\n"
+    }
+    close(SUBS_FILE)
+    seen[1,"proxy-providers"]=1;sections[1,"proxy-providers"]=text
+  }
+  if(PROXIES_FILE!="") {
+    text=""
+    while((getline line < PROXIES_FILE)>0) {
+      if(line ~ /\t/) bad("свои прокси: табуляция - YAML допускает только пробелы")
+      if(line ~ /^[ ]*$/ || line ~ /^[ ]*#/) continue
+      if(line !~ /^  /) bad("свои прокси: строки нод - с отступом 2 пробела (\"  - name: ...\")")
+      text=text line "\n"
+    }
+    close(PROXIES_FILE)
+    seen[1,"proxies"]=1;sections[1,"proxies"]=(text=="" ? "proxies: []\n" : "proxies:\n" text)
+  }
+}
 END {
+  if(failed) exit 1
+  override_from_state()
   if(failed) exit 1
   if(!seen[1,"proxy-providers"]) bad("в конфиге нет секции proxy-providers: - миграция переносит подписки оттуда")
   if(sections[1,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/) bad("proxy-providers: поддерживается только блочная запись (proxy-providers: и провайдеры на следующих строках), не { ... }")

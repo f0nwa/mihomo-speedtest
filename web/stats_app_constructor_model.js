@@ -71,8 +71,62 @@ function routeLine(id, route) {
   return ['gkey', id, 'proxies: [' + list.map(function (r) { return /^[A-Za-z]+$/.test(r) ? r : "'" + r + "'"; }).join(', ') + ']'].join(TAB);
 }
 
-export function createModel(defaultsText, servicesText, userRulesText) {
+// Базовая часть шаблона (anchors и proxy-groups до сервисных групп, ответ
+// /api/constructor, поле template_base): значения interval/tolerance и
+// список proxies базовых групп, слова exclude-filter.
+function unquote(v) {
+  v = String(v).trim();
+  if (/^'.*'$/.test(v)) { return v.slice(1, -1).replace(/''/g, "'"); }
+  if (/^".*"$/.test(v)) { return v.slice(1, -1); }
+  return v;
+}
+
+export function proxyTokens(line) {
+  var st = String(line).indexOf('proxies: [');
+  if (st < 0) { return []; }
+  var out = [], tok = '', q = '';
+  for (var j = st + 10; j < line.length; j++) {
+    var ch = line.charAt(j);
+    if (q) {
+      tok += ch;
+      if (ch === q) { if (q === "'" && line.charAt(j + 1) === "'") { tok += "'"; j++; } else { q = ''; } }
+    } else if (ch === "'" || ch === '"') { q = ch; tok += ch; }
+    else if (ch === ',' || ch === ']') {
+      if (tok.trim()) { out.push(unquote(tok)); }
+      tok = '';
+      if (ch === ']') { break; }
+    } else { tok += ch; }
+  }
+  return out;
+}
+
+export function parseTemplateBase(text) {
+  var res = { groups: {}, order: [], selectDefault: [], geofilter: '' };
+  var sect = '', cur = null;
+  lines(text).forEach(function (l) {
+    if (/^[A-Za-z0-9_-]+:/.test(l)) { sect = l.replace(/:.*/, ''); cur = null; return; }
+    var gm = /exclude-filter: &geofilter '([^']*)'/.exec(l);
+    if (gm) { res.geofilter = gm[1].replace(/^\(\?i\)/, ''); }
+    if (sect === 'anchors' && /^  select-default: &select-default /.test(l)) { res.selectDefault = proxyTokens(l); }
+    if (sect !== 'proxy-groups') { return; }
+    var nm = /^  - name:\s*(.*)$/.exec(l);
+    if (nm) {
+      cur = { interval: null, tolerance: null, tokens: [] };
+      var name = unquote(nm[1]);
+      res.groups[name] = cur; res.order.push(name);
+      return;
+    }
+    if (!cur) { return; }
+    var kv = /^    (interval|tolerance):\s*([0-9]+)\s*$/.exec(l);
+    if (kv) { cur[kv[1]] = Number(kv[2]); }
+    else if (/^    proxies: \[/.test(l)) { cur.tokens = proxyTokens(l); }
+  });
+  return res;
+}
+
+export function createModel(defaultsText, servicesText, userRulesText, templateBase) {
   var d = parseDefaults(defaultsText);
+  var tb = parseTemplateBase(templateBase);
   var deleted = {};          // id встроенного -> true
   var unruled = [];          // [{owner, text}] в порядке
   var users = [];            // свои сервисы [{id,name,section,extra:[строки icon/gkey]}]
@@ -80,6 +134,8 @@ export function createModel(defaultsText, servicesText, userRulesText) {
   var doms = [];             // [{owner,type,value}]
   var provLines = [];        // строки prov как есть
   var userRules = [];
+  var bsets = [];            // [{group,key,value}] отличия базовых групп
+  var bfirsts = [];          // [{group,value}] первое значение proxies
 
   lines(servicesText).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
@@ -92,6 +148,8 @@ export function createModel(defaultsText, servicesText, userRulesText) {
       if (u) { u.extra.push(line); } else { srcLines.push(line); }
     } else if (f[0] === 'src') { srcLines.push(line); }
     else if (f[0] === 'dom') { doms.push({ owner: f[1], type: f[2], value: f[3] }); }
+    else if (f[0] === 'bset') { bsets.push({ group: f[1], key: f[2], value: Number(f[3]) }); }
+    else if (f[0] === 'bfirst') { bfirsts.push({ group: f[1], value: f.slice(2).join(TAB) }); }
     else { provLines.push(line); }
   });
   lines(userRulesText).forEach(function (l) { l = l.trim(); if (l) { userRules.push(l); } });
@@ -266,6 +324,55 @@ export function createModel(defaultsText, servicesText, userRulesText) {
     restoreRule: function (id, text) {
       unruled = unruled.filter(function (u) { return !(u.owner === id && u.text === text); });
     },
+    // Базовые группы шаблона: interval и tolerance (если есть у группы),
+    // def - значение шаблона, value - с учётом отличий.
+    baseGroups: function () {
+      var out = [];
+      tb.order.forEach(function (name) {
+        var g = tb.groups[name];
+        if (g.interval == null && g.tolerance == null) { return; }
+        var row = { name: name, interval: null, tolerance: null };
+        ['interval', 'tolerance'].forEach(function (k) {
+          if (g[k] == null) { return; }
+          var o = bsets.filter(function (x) { return x.group === name && x.key === k; })[0];
+          row[k] = { def: g[k], value: o ? o.value : g[k] };
+        });
+        out.push(row);
+      });
+      return out;
+    },
+    setBase: function (name, key, value) {
+      var g = tb.groups[name];
+      if (!g || g[key] == null) { throw new Error('У группы ' + name + ' нет параметра ' + key); }
+      var n = Number(value);
+      if (String(value).trim() === '' || !/^[0-9]+$/.test(String(value).trim())) { throw new Error(key + ' - целое число'); }
+      if (key === 'interval' && (n < 10 || n > 86400)) { throw new Error('interval - от 10 до 86400 секунд'); }
+      if (key === 'tolerance' && n > 10000) { throw new Error('tolerance - от 0 до 10000 мс'); }
+      bsets = bsets.filter(function (x) { return !(x.group === name && x.key === key); });
+      if (n !== g[key]) { bsets.push({ group: name, key: key, value: n }); }
+    },
+    // Куда по умолчанию смотрят группы: «*» - сервисные группы шаблона
+    // (якорь select-default), прочие - базовые группы с выбором. def -
+    // первое значение шаблона, tokens - из чего выбирать.
+    routes: function () {
+      var out = [];
+      function row(name, label, tokens) {
+        var o = bfirsts.filter(function (x) { return x.group === name; })[0];
+        out.push({ name: name, label: label, tokens: tokens, def: tokens[0], value: o ? o.value : tokens[0] });
+      }
+      if (tb.selectDefault.length) { row('*', 'Все сервисные группы', tb.selectDefault); }
+      ['Заблок. сервисы'].forEach(function (n) {
+        if (tb.groups[n] && tb.groups[n].tokens.length) { row(n, n, tb.groups[n].tokens); }
+      });
+      return out;
+    },
+    setRoute: function (name, token) {
+      var r = model.routes().filter(function (x) { return x.name === name; })[0];
+      if (!r) { throw new Error('Нет группы ' + name); }
+      if (r.tokens.indexOf(token) < 0) { throw new Error('«' + token + '» нет в списке группы ' + name); }
+      bfirsts = bfirsts.filter(function (x) { return x.group !== name; });
+      if (token !== r.def) { bfirsts.push({ group: name, value: token }); }
+    },
     userRules: function () { return userRules.join('\n'); },
     setUserRules: function (text) {
       var out = [];
@@ -291,6 +398,8 @@ export function createModel(defaultsText, servicesText, userRulesText) {
       // пропускает) - «Вернуть» сервис возвращает и их
       doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
       provLines.forEach(function (l) { out.push(l); });
+      bsets.forEach(function (x) { out.push(['bset', x.group, x.key, x.value].join(TAB)); });
+      bfirsts.forEach(function (x) { out.push(['bfirst', x.group, x.value].join(TAB)); });
       return {
         services: out.length ? out.join('\n') + '\n' : '',
         user_rules: userRules.length ? userRules.join('\n') + '\n' : ''
@@ -313,15 +422,27 @@ export function createModel(defaultsText, servicesText, userRulesText) {
         if (f[0] === 'svc') { return (added ? 'Новый сервис ' : 'Удалить свой сервис ') + f[2]; }
         if (f[0] === 'dom') { return added ? '+ домен ' + f[3] + ' → ' + nameOf(f[1]) : 'Убрать домен ' + f[3] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'src') { return added ? '+ набор ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать набор ' + f[2] + ' (' + nameOf(f[1]) + ')'; }
+        if (f[0] === 'bset') { return added ? 'Группа ' + f[1] + ': ' + f[2] + ' = ' + f[3] : 'Группа ' + f[1] + ': ' + f[2] + ' как в шаблоне'; }
+        if (f[0] === 'bfirst') {
+          return added ? (f[1] === '*' ? 'Сервисные группы: по умолчанию ' : 'Группа ' + f[1] + ': по умолчанию ') + f[2]
+            : (f[1] === '*' ? 'Сервисные группы' : 'Группа ' + f[1]) + ': по умолчанию как в шаблоне';
+        }
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }
-      ['del', 'unrule', 'svc', 'src', 'dom', ''].forEach(function (kind) {
+      ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bfirst', ''].forEach(function (kind) {
         function mine(l) {
           var k = l.split(TAB)[0];
-          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom'].indexOf(k) < 0;
+          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bfirst'].indexOf(k) < 0;
         }
-        before.filter(mine).forEach(function (l) { if (after.indexOf(l) < 0) { res.push(text(l, false)); } });
+        // изменённое значение базовой группы - одна строка («стало»), без «было»
+        function replaced(l) {
+          var f = l.split(TAB);
+          if (f[0] !== 'bset' && f[0] !== 'bfirst') { return false; }
+          var n = f[0] === 'bset' ? 3 : 2;
+          return after.some(function (a) { return a.split(TAB).slice(0, n).join(TAB) === f.slice(0, n).join(TAB); });
+        }
+        before.filter(mine).forEach(function (l) { if (after.indexOf(l) < 0 && !replaced(l)) { res.push(text(l, false)); } });
         after.filter(mine).forEach(function (l) { if (before.indexOf(l) < 0) { res.push(text(l, true)); } });
       });
       if ((initial.user_rules || '') !== cur.user_rules) { res.push('Свои правила изменены'); }
@@ -338,6 +459,10 @@ export function stateBody(state) {
   var out = '### MST-STATE services.tsv\n' + (state.services || '');
   if (state.user_rules) { out += '### MST-STATE user-rules.txt\n' + state.user_rules; }
   if (state.geofilter) { out += '### MST-STATE geofilter.txt\n' + state.geofilter; }
+  // подписки и свои ноды - блок передаётся и пустым (пустой список - тоже
+  // состояние); null - сервер этого не отдал, состояние не трогаем
+  if (state.subscriptions != null) { out += '### MST-STATE subscriptions.tsv\n' + state.subscriptions; }
+  if (state.proxies != null) { out += '### MST-STATE proxies.yaml\n' + state.proxies; }
   return out;
 }
 

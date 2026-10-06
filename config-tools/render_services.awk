@@ -39,8 +39,16 @@
 #                                        classical) и RULE-SET на группу
 #   dom<TAB>id<TAB>тип<TAB>домен         свой домен (тип suffix|full|keyword)
 #   prov<TAB>-<TAB>строка provider       provider для своих правил
-# del/unrule того, чего во встроенных нет, и icon/gkey/src/dom на сервис,
-# которого больше нет (убрали в новом шаблоне), молча пропускаются - иначе
+#   bset<TAB>группа<TAB>ключ<TAB>число   базовая группа шаблона: interval
+#                                        (10..86400 с) или tolerance (0..10000 мс)
+#   bfirst<TAB>группа|*<TAB>значение     поставить значение первым в
+#                                        proxies: [...] базовой группы
+#                                        (по умолчанию выбирается первое);
+#                                        * - у всех сервисных групп
+#                                        (якорь select-default)
+# del/unrule того, чего во встроенных нет, icon/gkey/src/dom на сервис,
+# которого больше нет (убрали в новом шаблоне), и bset/bfirst на группу,
+# ключ или значение, которых в шаблоне нет, молча пропускаются - иначе
 # обновление шаблона ломало бы сборку.
 #
 # geofilter_file: слова фильтра нод по одному в строке -> значение якоря
@@ -103,6 +111,40 @@ function rx_escape(w,  out, i, c) {
     out = out c
   }
   return out
+}
+function unq(v) {
+  sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v)
+  if (v ~ /^'.*'$/) { v = substr(v, 2, length(v) - 2); gsub(/''/, "'", v) }
+  else if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
+  return v
+}
+# В строке с "proxies: [...]" поставить значение val первым; пустая строка -
+# в списке такого значения нет (строка остаётся как была).
+function reorder(l, val,  st, j, ch, q, tok, n, i, pre, post, hit, res, tk, t) {
+  st = index(l, "proxies: [")
+  if (!st) return ""
+  pre = substr(l, 1, st + 9)
+  n = 0; tok = ""; q = ""
+  for (j = st + 10; j <= length(l); j++) {
+    ch = substr(l, j, 1)
+    if (q != "") {
+      tok = tok ch
+      if (ch == q) { if (q == "'" && substr(l, j + 1, 1) == "'") { tok = tok "'"; j++ } else q = "" }
+    } else if (ch == "'" || ch == "\"") { q = ch; tok = tok ch }
+    else if (ch == "," || ch == "]") {
+      t = tok; sub(/^[ ]+/, "", t); sub(/[ ]+$/, "", t)
+      if (t != "") tk[++n] = t
+      tok = ""
+      if (ch == "]") break
+    } else tok = tok ch
+  }
+  post = substr(l, j)
+  hit = 0
+  for (i = 1; i <= n; i++) if (unq(tk[i]) == val) { hit = i; break }
+  if (!hit) return ""
+  res = tk[hit]
+  for (i = 1; i <= n; i++) if (i != hit) res = res ", " tk[i]
+  return pre res post
 }
 function provname(text, t) {
   t = text
@@ -222,8 +264,21 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       need(n, 3, kind)
       if (id != "-") err(at() "в отличиях prov бывает только с владельцем -")
       nuprov++; uprov_text[nuprov] = f[3]
+    } else if (kind == "bset") {
+      need(n, 4, kind)
+      if (f[3] != "interval" && f[3] != "tolerance") err(at() "у базовой группы можно менять interval или tolerance, не " f[3])
+      if (f[4] !~ /^[0-9]+$/) err(at() f[3] " - целое число")
+      if (f[3] == "interval" && (f[4] + 0 < 10 || f[4] + 0 > 86400)) err(at() "interval - от 10 до 86400 секунд")
+      if (f[3] == "tolerance" && f[4] + 0 > 10000) err(at() "tolerance - от 0 до 10000 мс")
+      if ((id SUBSEP f[3]) in bset) err(at() f[3] " группы " id " задан повторно")
+      bset[id SUBSEP f[3]] = f[4] + 0
+    } else if (kind == "bfirst") {
+      need(n, 3, kind)
+      if (f[3] == "" || f[3] ~ /[\r]/) err(at() "bfirst: пустое значение")
+      if (id in bfirst) err(at() "bfirst для " id " задан повторно")
+      bfirst[id] = f[3]
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom или prov)")
+      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset или bfirst)")
     }
   }
   if (rc < 0) err("не удалось прочитать " overlay_file)
@@ -318,7 +373,7 @@ BEGIN {
   if (user_rules_file != "") read_user_rules()
   mk[1] = "SERVICE_GROUPS"; mk[2] = "SERVICE_PROVIDERS"; mk[3] = "SERVICE_RULES"
   body[1] = gen_groups(); body[2] = gen_providers(); body[3] = gen_rules()
-  inside = 0; out = ""; geohits = 0
+  inside = 0; out = ""; geohits = 0; sect = ""; curg = ""
 }
 {
   for (i = 1; i <= 3; i++) {
@@ -340,6 +395,17 @@ BEGIN {
   }
   if (inside) next
   line = $0
+  if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); curg = "" }
+  else if (sect == "proxy-groups" && line ~ /^  - name:/) { curg = line; sub(/^  - name:/, "", curg); curg = unq(curg) }
+  if (sect == "proxy-groups" && curg != "") {
+    if (match(line, /^    (interval|tolerance):/)) {
+      bkey = substr(line, 5, RLENGTH - 5)
+      if ((curg SUBSEP bkey) in bset) line = "    " bkey ": " bset[curg SUBSEP bkey]
+    }
+    if ((curg in bfirst) && line ~ /^    proxies: \[/) { r = reorder(line, bfirst[curg]); if (r != "") line = r }
+  } else if (sect == "anchors" && ("*" in bfirst) && line ~ /^  select-default: &select-default /) {
+    r = reorder(line, bfirst["*"]); if (r != "") line = r
+  }
   if (geoval != "" && match(line, /exclude-filter: &geofilter '[^']*'/)) {
     line = substr(line, 1, RSTART - 1) "exclude-filter: &geofilter '" geoval "'" substr(line, RSTART + RLENGTH)
     geohits++

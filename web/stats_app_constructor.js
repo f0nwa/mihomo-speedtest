@@ -6,7 +6,9 @@
 // См. docs/superpowers/specs/2026-10-05-config-constructor-design.md, п. 3-4.
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
-import { ROUTES, createModel, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
+import { createModules } from './app-constructor-modules-model.js';
+import { createModuleCards } from './app-constructor-modules.js';
+import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
 var catalogPromise = null;   // каталог наборов правил грузится один раз
@@ -43,7 +45,7 @@ function routeLabel(r, i) { return i === 0 ? 'Напрямую - DIRECT' : r; }
 // Имя группы из названия набора: без пометки источника в скобках и
 // символов, недопустимых в имени группы.
 function suggestName(title) {
-  return String(title || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/[,#:'"]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(title || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/,.*$/, '').replace(/[,#:'"]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function constructorDirty() { return !!(view && view.dirty); }
@@ -86,17 +88,22 @@ export function renderConstructor(modeBar, opts) {
     if (!alive()) { return; }
     clearApp();
     app.appendChild(modeBar);
-    var model = createModel(data.defaults || '', data.services || '', data.user_rules || '');
-    var geofilter = data.geofilter || '';
+    var model = createModel(data.defaults || '', data.services || '', data.user_rules || '', data.template_base || '');
+    var mods = createModules({
+      subscriptions: data.subscriptions, proxies: data.proxies, geofilter: data.geofilter,
+      geofilter_default: parseTemplateBase(data.template_base || '').geofilter.replace(/\|/g, '\n')
+    });
     // Перенос (состояния ещё нет или «Перенести в конструктор») - в
     // состоянии пока ничего не записано: всё перенесённое - изменения.
+    // Подписки, свои ноды и фильтр при переносе тоже берутся из config.yaml.
     var initial = data.imported ? { services: '', user_rules: '' } : model.serialize();
+    var initialMods = mods.serialize();
     var expanded = {};
 
     var head = card('Конструктор конфига');
-    head.appendChild(el('p', 'hint', 'Сервисы, свои домены и правила без правки YAML. Подписки, свои прокси, dns и ' +
-      'прочие настройки config.yaml переносятся при применении как есть. Перед применением конфиг собирается ' +
-      'на роутере и проверяется mihomo -t, текущая версия уходит в бэкап.'));
+    head.appendChild(el('p', 'hint', 'Подписки, свои прокси, сервисы, домены, правила, исключения нод и базовые группы - ' +
+      'без правки YAML. dns, listeners и прочие настройки config.yaml переносятся при применении как есть. ' +
+      'Перед применением конфиг собирается на роутере и проверяется mihomo -t, текущая версия уходит в бэкап.'));
     var msgBox = el('div');
     head.appendChild(msgBox);
     if (opts.flash) { msgBox.appendChild(el('p', 'msg-ok', opts.flash)); }
@@ -132,6 +139,10 @@ export function renderConstructor(modeBar, opts) {
     }
     app.appendChild(head);
 
+    var modCards = createModuleCards({ mods: mods, model: model, edit: edit, msg: msg, redraw: draw, changed: refreshChanges });
+    app.appendChild(modCards.cards.subs);
+    app.appendChild(modCards.cards.proxies);
+
     var svcCard = card('Сервисы');
     svcCard.appendChild(el('p', 'hint', 'Сервис - группа в Mihomo и правила, по которым в неё попадает трафик. ' +
       'Куда направить группу (прокси, напрямую), выбирается как обычно в панели Mihomo.'));
@@ -161,6 +172,9 @@ export function renderConstructor(modeBar, opts) {
       refreshChanges();
     });
 
+    app.appendChild(modCards.cards.filter);
+    app.appendChild(modCards.cards.base);
+
     var chCard = card('Изменения');
     chCard.className += ' config-apply';
     var chStatus = el('p', 'hint config-status');
@@ -189,17 +203,19 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function refreshChanges() {
-      var list = model.summary(initial);
+      var list = model.summary(initial).concat(mods.summary(initialMods));
+      var problems = mods.problems();
       // перенос ещё не сохранён в конструкторе - это изменение, даже если
       // переносить нечего (иначе предупреждение о ручных правках не снять)
       if (data.imported) { list.unshift('Перенос из config.yaml (настройки ещё не сохранены в конструкторе)'); }
       if (rulesErr.textContent) { list.push('Свои правила: исправьте ошибку'); }
+      problems.forEach(function (t) { list.push(t); });
       v.dirty = list.length > 0;
       clear(chList);
       list.forEach(function (t) { chList.appendChild(el('li', null, t)); });
       chStatus.textContent = list.length ? ('Не применено изменений: ' + list.length) : 'Изменений нет.';
       chStatus.className = 'hint config-status' + (list.length ? ' config-dirty' : '');
-      applyBtn.disabled = !list.length || !!rulesErr.textContent;
+      applyBtn.disabled = !list.length || !!rulesErr.textContent || problems.length > 0;
       diffBtn.disabled = !!rulesErr.textContent;
     }
 
@@ -459,6 +475,7 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function draw() {
+      modCards.render();
       var services = model.services();
       clear(svcHost);
       var top = el('div', 'btn-row');
@@ -513,8 +530,10 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function body() {
-      var st = model.serialize();
-      st.geofilter = geofilter;
+      var st = model.serialize(), ms = mods.serialize();
+      st.geofilter = ms.geofilter;
+      st.subscriptions = ms.subscriptions;
+      st.proxies = ms.proxies;
       return stateBody(st);
     }
     function post(url) {

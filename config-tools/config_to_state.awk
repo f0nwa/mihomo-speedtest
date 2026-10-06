@@ -13,7 +13,14 @@
 #   geofilter.txt   - слова фильтра нод, если exclude-filter: &geofilter
 #                     отличается от шаблона;
 #   user-rules.txt  - правила, которые не укладываются в сервисы, в
-#                     исходном порядке (если есть).
+#                     исходном порядке (если есть);
+#   (в services.tsv также bset/bfirst - отличия базовых групп от шаблона:
+#   interval, tolerance и первое значение proxies, см. render_services.awk);
+#   subscriptions.tsv - подписки (если есть): url<TAB>User-Agent<TAB>имя,
+#                     как providers_file в render_config.awk (type: file и
+#                     fast не берутся);
+#   proxies.yaml    - блок своих нод proxies: без заголовка и комментариев
+#                     (всегда, может быть пустым).
 # report: строки "IMPORTED|вид|имя" и "REVIEW|вид|имя" - без значений
 # (ссылок, паролей), как отчёт migrate_config.awk.
 #
@@ -64,6 +71,46 @@ function unescape(w,  out, i, c) {
   }
   return out
 }
+function flush_sub() {
+  if (sub_name != "" && sub_name != "fast" && !sub_file && sub_url != "")
+    subs_out = subs_out sub_url "\t" sub_ua "\t" sub_name "\n"
+  sub_name = ""; sub_url = ""; sub_ua = ""; sub_file = 0; in_ua = 0
+}
+# Значения списка "proxies: [a, 'b c']" в глобальный PT[1..n] (без кавычек);
+# возвращает n, 0 - списка в строке нет.
+function ptoks(l,  st, j, ch, q, tok, n, t) {
+  st = index(l, "proxies: [")
+  if (!st) return 0
+  n = 0; tok = ""; q = ""
+  for (j = st + 10; j <= length(l); j++) {
+    ch = substr(l, j, 1)
+    if (q != "") {
+      tok = tok ch
+      if (ch == q) { if (q == "'" && substr(l, j + 1, 1) == "'") { tok = tok "'"; j++ } else q = "" }
+    } else if (ch == "'" || ch == "\"") { q = ch; tok = tok ch }
+    else if (ch == "," || ch == "]") {
+      t = trim(tok)
+      if (t != "") PT[++n] = unq(t)
+      tok = ""
+      if (ch == "]") break
+    } else tok = tok ch
+  }
+  return n
+}
+# Ключи базовой группы g (interval, tolerance, proxies) из строки в массивы
+# префикса: pfx "t" - шаблон, "c" - config.
+function note_group_line(pfx, g, l,  k, n, i) {
+  if (match(l, /^    (interval|tolerance):[ ]*[0-9]+[ ]*$/)) {
+    k = l; sub(/^    /, "", k); v = k; sub(/:.*/, "", k); sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+$/, "", v)
+    if (pfx == "t") tmpl_set[g SUBSEP k] = v + 0
+    else { if (!((g SUBSEP k) in cfg_set)) cfg_order[++ncfg_order] = g SUBSEP k; cfg_set[g SUBSEP k] = v + 0 }
+  } else if (l ~ /^    proxies: \[/ || l ~ /^  select-default: &select-default /) {
+    n = ptoks(l)
+    if (!n) return
+    if (pfx == "t") { tmpl_first[g] = PT[1]; for (i = 1; i <= n; i++) tmpl_has[g SUBSEP PT[i]] = 1 }
+    else { if (!(g in cfg_first)) cfg_first_order[++ncfg_first] = g; cfg_first[g] = PT[1] }
+  }
+}
 function rep(kind, name) { printf "%s|%s\n", kind, name > report }
 function out_line(s) { svc_out = svc_out s "\n" }
 function read_defaults(  rc, line, n, f) {
@@ -79,15 +126,17 @@ function read_defaults(  rc, line, n, f) {
   close(defaults)
 }
 function read_template(  rc, line, sect, inside, v, nm) {
-  sect = ""; inside = 0
+  sect = ""; inside = 0; tg = ""
   while ((rc = (getline line < template)) > 0) {
     sub(/\r$/, "", line)
     if (index(line, "# --- SERVICE_") && index(line, ":BEGIN ---")) { inside = 1; continue }
     if (index(line, "# --- SERVICE_") && index(line, ":END ---")) { inside = 0; continue }
     if (inside) continue
     v = geo_value(line); if (v != "") tmpl_geo = v
-    if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); continue }
-    if (sect == "proxy-groups" && line ~ /^  - name:/) { nm = line; sub(/^  - name:/, "", nm); base_group[unq(nm)] = 1 }
+    if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); tg = ""; continue }
+    if (sect == "anchors") note_group_line("t", "*", line)
+    if (sect == "proxy-groups" && line ~ /^  - name:/) { nm = line; sub(/^  - name:/, "", nm); tg = unq(nm); base_group[tg] = 1 }
+    else if (sect == "proxy-groups" && tg != "") note_group_line("t", tg, line)
     else if (sect == "rule-providers" && line ~ /^  [^ #-][^:]*:/) { nm = line; sub(/^  /, "", nm); sub(/:.*/, "", nm); tmpl_prov[nm] = 1 }
     else if (sect == "rules" && line ~ /^  - /) { nm = line; sub(/^  - /, "", nm); tmpl_rule[body(nm)] = 1 }
   }
@@ -130,8 +179,26 @@ BEGIN {
   if (index(line, "# --- SERVICE_") && index(line, ":BEGIN ---")) next
   if (index(line, "# --- SERVICE_") && index(line, ":END ---")) next
   v = geo_value(line); if (v != "") cfg_geo = v
-  if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); cur_group = ""; next }
+  if (line ~ /^[A-Za-z0-9_-]+:/) { flush_sub(); sect = line; sub(/:.*/, "", sect); cur_group = ""; next }
+  if (sect == "proxy-providers") {
+    if (line ~ /^  [A-Za-z0-9_-]+:[ ]*$/) {
+      flush_sub(); sub_name = line; sub(/^  /, "", sub_name); sub(/:.*/, "", sub_name)
+    } else if (sub_name != "") {
+      if (line ~ /^    url:/) { v = line; sub(/^    url:[ ]*/, "", v); sub_url = unq(body(v)) }
+      else if (line ~ /^    type:[ ]*file/) sub_file = 1
+      else if (line ~ /^      User-Agent:[ ]*$/) in_ua = 1
+      else if (in_ua && line ~ /^        - /) { v = line; sub(/^        - /, "", v); if (sub_ua == "") sub_ua = unq(body(v)) }
+      else if (line !~ /^        /) in_ua = 0
+    }
+    next
+  }
+  if (sect == "proxies") {
+    if (line ~ /^  [^ #]/ || line ~ /^    /) prox_out = prox_out line "\n"
+    next
+  }
+  if (sect == "anchors") { note_group_line("c", "*", line); next }
   if (sect == "proxy-groups") {
+    if (cur_group != "" && !(line ~ /^  - name:/)) note_group_line("c", gr_name[cur_group], line)
     if (line ~ /^  - name:/) {
       nm = line; sub(/^  - name:/, "", nm); nm = unq(nm)
       ngr++; gr_name[ngr] = nm; cfg_group[nm] = ngr; cur_group = ngr
@@ -155,6 +222,9 @@ BEGIN {
 }
 END {
   if (failed) exit 2
+  flush_sub()
+  printf "%s", prox_out > (out_dir "/proxies.yaml"); close(out_dir "/proxies.yaml")
+  if (subs_out != "") { printf "%s", subs_out > (out_dir "/subscriptions.tsv"); close(out_dir "/subscriptions.tsv") }
   svc_out = ""; src_out = ""; dom_out = ""; prov_out = ""; user_out = ""
   # Встроенные сервисы, которых нет в config.yaml -> del.
   for (i = 1; i <= nds; i++) {
@@ -213,7 +283,23 @@ END {
     out_line("unrule\t" dr_owner[i] "\t" dr_text[i])
     rep("IMPORTED", "unrule|" dr_owner[i])
   }
-  printf "%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, prov_out > (out_dir "/services.tsv")
+  # Базовые группы: отличия interval/tolerance и первого значения proxies.
+  base_out = ""
+  for (i = 1; i <= ncfg_order; i++) {
+    split(cfg_order[i], f, SUBSEP)
+    if (!(cfg_order[i] in tmpl_set) || cfg_set[cfg_order[i]] == tmpl_set[cfg_order[i]]) continue
+    if ((f[2] == "interval" && (cfg_set[cfg_order[i]] < 10 || cfg_set[cfg_order[i]] > 86400)) || (f[2] == "tolerance" && cfg_set[cfg_order[i]] > 10000)) { rep("REVIEW", "base-" f[2] "|" f[1]); continue }
+    base_out = base_out "bset\t" f[1] "\t" f[2] "\t" cfg_set[cfg_order[i]] "\n"
+    rep("IMPORTED", "bset|" f[1])
+  }
+  for (i = 1; i <= ncfg_first; i++) {
+    g = cfg_first_order[i]
+    if (!(g in tmpl_first) || cfg_first[g] == tmpl_first[g]) continue
+    if (!((g SUBSEP cfg_first[g]) in tmpl_has)) { rep("REVIEW", "base-proxies|" g); continue }
+    base_out = base_out "bfirst\t" g "\t" cfg_first[g] "\n"
+    rep("IMPORTED", "bfirst|" g)
+  }
+  printf "%s%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, prov_out, base_out > (out_dir "/services.tsv")
   close(out_dir "/services.tsv")
   if (user_out != "") { printf "%s", user_out > (out_dir "/user-rules.txt"); close(out_dir "/user-rules.txt") }
   if (cfg_geo != "" && cfg_geo != tmpl_geo) {

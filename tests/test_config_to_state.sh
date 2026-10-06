@@ -158,5 +158,44 @@ import "$WORK/c10.yaml" || fail "импорт плохого имени"
 assert_eq "$(cat "$WORK/st/services.tsv")" "" "плохое имя не импортируется"
 grep -q 'REVIEW|custom-group-name' "$WORK/report" || fail "плохое имя - в отчёт"
 
+# test_import_base_groups: отличия базовых групп - bset/bfirst, круг через render_services
+BT="$WORK/bt.yaml"
+cat > "$BT" <<'Y'
+anchors:
+  select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual'] }
+proxy-groups:
+  - name: '🚀 Авто'
+    type: url-test
+    interval: 600
+    tolerance: 50
+  - name: 'Заблок. сервисы'
+    type: select
+    proxies: ['⚡ Самые быстрые', DIRECT, '⚙️Manual']
+  # --- SERVICE_GROUPS:BEGIN ---
+  # --- SERVICE_GROUPS:END ---
+rule-providers:
+  # --- SERVICE_PROVIDERS:BEGIN ---
+  # --- SERVICE_PROVIDERS:END ---
+rules:
+  # --- SERVICE_RULES:BEGIN ---
+  # --- SERVICE_RULES:END ---
+  - MATCH,DIRECT
+Y
+: > "$WORK/empty.tsv"
+BO="$WORK/bo.tsv"
+printf 'bset\t🚀 Авто\tinterval\t300\nbfirst\tЗаблок. сервисы\tDIRECT\nbfirst\t*\t⚙️Manual\n' > "$BO"
+awk -v services_file="$WORK/empty.tsv" -v overlay_file="$BO" -f "$TOOLS/render_services.awk" "$BT" > "$WORK/bcfg.yaml" 2>/dev/null || fail "base: сборка"
+mkdir "$WORK/bst"
+awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$WORK/bcfg.yaml" || fail "base: импорт"
+assert_eq "$(sort "$WORK/bst/services.tsv")" "$(sort "$BO")" "base: круг bset/bfirst"
+awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$BT"
+assert_eq "$(cat "$WORK/bst/services.tsv")" "" "base: шаблон даёт пустые отличия"
+# значение вне допустимого и список с чужим первым - в отчёт, не в состояние
+sed "s/interval: 600/interval: 3/; s/proxies: \['⚡ Самые быстрые', DIRECT, '⚙️Manual'\]/proxies: [Чужое, DIRECT]/" "$BT" > "$WORK/bad.yaml"
+awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$WORK/bad.yaml"
+assert_eq "$(cat "$WORK/bst/services.tsv")" "" "base: недопустимое не переносится"
+grep -q 'REVIEW|base-interval|' "$WORK/brep" || fail "base: нет REVIEW по interval"
+grep -q 'REVIEW|base-proxies|' "$WORK/brep" || fail "base: нет REVIEW по proxies"
+
 [ "$FAILED" = 0 ] && echo "OK test_config_to_state"
 exit "$FAILED"

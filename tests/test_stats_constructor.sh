@@ -29,7 +29,7 @@ chmod +x "$TMP/bin/mihomo" "$TMP/bin/xkeen" "$TMP/bin/pidof"
 echo up > "$TMP/state"
 for f in config-tools/config.example.yaml config-tools/services.default.tsv config-tools/render_services.awk \
          config-tools/config_to_state.awk config-tools/constructor_build.sh config-tools/migrate_config.sh \
-         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv web/stats_config.sh; do
+         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv config-tools/wg_import.awk web/stats_config.sh; do
   cp "$ROOT/$f" "$D/"
 done
 cp "$D/config.example.yaml" "$M/config.yaml"
@@ -155,5 +155,38 @@ mv "$D/rule-catalog.tsv" "$D/rule-catalog.tsv.off"
 out=$(cgi catalog GET '' </dev/null)
 assert_contains 'Status: 404' "$out"
 mv "$D/rule-catalog.tsv.off" "$D/rule-catalog.tsv"
+
+# --- 11: подписки и свои прокси - в чтении и в применении
+out=$(cgi read GET '' </dev/null)
+subs=$(printf '%s' "$out" | jget '["subscriptions"]')
+assert_contains 'subscription-1.example.com' "$subs"
+assert_contains 'provider-a' "$subs"
+assert_contains "Hysteria2" "$(printf '%s' "$out" | jget '["proxies"]')"
+tb=$(printf '%s' "$out" | jget '["template_base"]')
+assert_contains 'select-default: &select-default' "$tb"
+assert_contains "name: 'Заблок. сервисы'" "$tb"
+assert_contains 'exclude-filter: &geofilter' "$tb"
+assert_not_contains 'SERVICE_GROUPS' "$tb"
+assert_not_contains 'rule-providers' "$tb"
+base=$(printf '%s' "$out" | jget '["base"]')
+body="### MST-STATE services.tsv${NL}### MST-STATE subscriptions.tsv${NL}https://zz.example/SECRET9	clash.meta	zz${NL}### MST-STATE proxies.yaml${NL}  - name: 'Own'${NL}    type: hysteria2${NL}    server: o.example${NL}    port: 443${NL}"
+out=$(printf '%s' "$body" | cgi apply POST "base=$base")
+assert_contains 'Status: 200' "$out"
+grep -q 'SECRET9' "$M/config.yaml" || fail "11: подписка не применилась"
+grep -q "name: 'Own'" "$M/config.yaml" || fail "11: своя нода не применилась"
+grep -q 'zz.example' "$ST/subscriptions.tsv" || fail "11: подписки не в состоянии"
+out=$(cgi read GET '' </dev/null)
+assert_contains 'SECRET9' "$(printf '%s' "$out" | jget '["subscriptions"]')"
+assert_contains "name: 'Own'" "$(printf '%s' "$out" | jget '["proxies"]')"
+
+# --- 12: перевод .conf в ноду
+conf="### MST-WG DE WG${NL}[Interface]${NL}PrivateKey = AAA=${NL}Address = 10.8.0.2/32${NL}[Peer]${NL}PublicKey = BBB=${NL}Endpoint = vpn.example.com:51820${NL}AllowedIPs = 0.0.0.0/0${NL}"
+out=$(printf '%s' "$conf" | cgi wgconf POST '')
+assert_contains 'Status: 200' "$out"
+assert_contains "name: 'DE WG'" "$(printf '%s' "$out" | jget '["yaml"]')"
+out=$(printf '### MST-WG X%s[Interface]%s' "$NL" "$NL" | cgi wgconf POST '')
+assert_contains 'Status: 422' "$out"
+out=$(printf 'мусор%s' "$NL" | cgi wgconf POST '')
+assert_contains 'Status: 400' "$out"
 
 echo "test_stats_constructor.sh: OK"

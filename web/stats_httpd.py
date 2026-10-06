@@ -464,6 +464,8 @@ STATIC_FILES = {
     "app-xkeen.js": "stats_app_xkeen.js",
     "app-constructor.js": "stats_app_constructor.js",
     "app-constructor-model.js": "stats_app_constructor_model.js",
+    "app-constructor-modules.js": "stats_app_constructor_modules.js",
+    "app-constructor-modules-model.js": "stats_app_constructor_modules_model.js",
     "codemirror.js": "stats_codemirror.js",
     "codemirror.css": "stats_codemirror.css",
 }
@@ -512,6 +514,7 @@ API_ROUTES = {
     # проверку ядра и при провале - откат.
     "api/constructor": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "read", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/catalog": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "catalog"}),
+    "api/constructor/wgconf": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "wgconf"}),
     "api/constructor/preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "preview", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/apply": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "apply", "MST_CGI_TIMEOUT": "180"}),
     # Команды XKeen: run запускает команду в фоне и отвечает сразу, вывод

@@ -5,13 +5,14 @@ umask 077
 LC_ALL=C; export LC_ALL
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
-source_file= template_file= output_file= report_file=
+source_file= template_file= output_file= report_file= subs_file= proxies_file=
 while [ $# -gt 0 ]; do
   key=$1; shift
   [ $# -gt 0 ] || fail 'Не задан аргумент'
   case $key in
     --source) source_file=$1 ;; --template) template_file=$1 ;;
     --output) output_file=$1 ;; --report) report_file=$1 ;;
+    --subs) subs_file=$1 ;; --proxies) proxies_file=$1 ;;
     *) fail 'Неизвестный аргумент' ;;
   esac
   shift
@@ -47,7 +48,7 @@ trap 'exit 143' HUP TERM
 # Причину отказа migrate_config.awk пишет в отдельный файл (без значений
 # конфига) - без неё пользователь видел только общую фразу и не мог понять,
 # что поправить.
-if ! (ulimit -f 4096; awk -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -v REASONF="$WORK/reason" -f "$DIR/migrate_config.awk" "$source_file" "$template_file"); then
+if ! (ulimit -f 4096; awk -v SUBS_FILE="$subs_file" -v PROXIES_FILE="$proxies_file" -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -v REASONF="$WORK/reason" -f "$DIR/migrate_config.awk" "$source_file" "$template_file"); then
   reason=
   [ -f "$WORK/reason" ] && reason=$(head -n 1 "$WORK/reason" | cut -c1-300)
   [ -n "$reason" ] || reason='причина не определена'

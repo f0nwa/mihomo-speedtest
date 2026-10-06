@@ -78,7 +78,7 @@ PURGE_DATA=${PURGE_DATA:-0}
 # убирало его и со старых установок.
 FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
 render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
-stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_constructor.js stats_app_constructor_model.js stats_chart.js render_progress.awk stats_init.sh
+stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_chart.js render_progress.awk stats_init.sh
 stats_system.sh stats_config.sh stats_xkeen.sh stats_constructor.sh stats_codemirror.js stats_codemirror.css
 uninstall.sh VERSIONS install.sh version_check.sh ui.sh update_interactive.sh mihomo-speedtest.sh
 migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh rule-catalog.tsv
