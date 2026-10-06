@@ -9,7 +9,7 @@ usage() {
 Команды:
   install       Переустановить/восстановить проект (sh install.sh)
   uninstall     Удалить проект (sh uninstall.sh [аргументы])
-  update        Проверить/применить обновление (sh update.sh <--check|--plan|--apply ...>)
+  update        Обновить проект: проверка, вопросы и установка
   setup         Мастер настройки config.yaml (sh setup.sh)
   recalibrate   Пересчитать порог скорости (install.sh --recalibrate)
   stop-web      Остановить веб-интерфейс статистики навсегда (до start-web)
@@ -25,7 +25,12 @@ cmd=${1:-}
 case "$cmd" in
   install)     exec sh "$DIR/install.sh" "$@" ;;
   uninstall)   exec sh "$DIR/uninstall.sh" "$@" ;;
-  update)      exec sh "$DIR/update.sh" "$@" ;;
+  update)
+    if [ "$#" -eq 0 ]; then
+      [ -t 0 ] || exec sh "$DIR/update.sh" --check
+      exec sh "$DIR/update_interactive.sh"
+    fi
+    exec sh "$DIR/update.sh" "$@" ;;
   setup)       exec sh "$DIR/setup.sh" "$@" ;;
   recalibrate) exec sh "$DIR/install.sh" --recalibrate ;;
   stop-web)    exec sh "$DIR/install.sh" --stop-web ;;
