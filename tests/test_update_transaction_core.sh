@@ -183,12 +183,21 @@ ACTION_LOG=$BASE/actions.log
 export ACTION_LOG
 cat > "$TARGET_ROOT/opt/etc/init.d/S80speedtest-stats" <<'INIT'
 #!/bin/sh
+[ -z "${UPDATE_RELEASE_BASE:-}" ] || {
+  echo 'FAIL: служба унаследовала адрес прошлого релиза' >&2
+  exit 1
+}
 printf '%s\n' "$1" >> "$ACTION_LOG"
 case $1 in restart|check) exit 0 ;; *) exit 1 ;; esac
 INIT
 mkdir "$BASE/action-bundle"
 printf 'restart-web\n' > "$BASE/action-bundle/actions.txt"
+# Закрепление нужно текущей транзакции, но не будущим проверкам панели.
+UPDATE_RELEASE_BASE=https://github.com/f0nwa/mihomo-speedtest/releases/download/1.5.3
+export UPDATE_RELEASE_BASE
 tx_actions "$BASE/action-bundle"
+[ "$UPDATE_RELEASE_BASE" = https://github.com/f0nwa/mihomo-speedtest/releases/download/1.5.3 ]
+unset UPDATE_RELEASE_BASE
 [ "$(cat "$ACTION_LOG")" = "$(printf 'restart\ncheck')" ]
 echo 'PASS one shared restart and native check'
 # Сигнал сразу после атомарной публикации APPLY_PENDING ещё до tx_active=1.

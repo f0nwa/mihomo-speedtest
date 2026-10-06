@@ -145,6 +145,9 @@ tx_bounded_action() (
   # Служба не должна передавать его маркеры следующим запросам панели.
   unset UPDATE_VERIFIED_ENGINE_DIR UPDATE_VERIFIED_PLAN_ID UPDATE_RECOVERY_ENGINE_DIR
   unset UPDATE_BOOTSTRAP_DIR UPDATE_PINNED_MANIFEST
+  # Закреплённый адрес нужен транзакции, но замораживает будущие проверки
+  # панели на установленном релизе, если служба унаследует его при restart.
+  unset UPDATE_RELEASE_BASE
   tx_init=$(target_file /opt/etc/init.d/S80speedtest-stats)
   safe_path "$tx_init"
   [ -f "$tx_init" ] || exit 1
