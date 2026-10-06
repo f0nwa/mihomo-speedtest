@@ -91,6 +91,32 @@ recover_state() {
   fi
 }
 
+# Список нод, которые спидтест не проверяет (BLOCK в speedtest2.env), -
+# тот же фильтр, что exclude-filter подписок: слова из geofilter.txt нового
+# состояния, а без него - слова шаблона. Единственное место правки фильтра -
+# конструктор. Сбой записи - WARN, конфиг уже применён.
+sync_block() {
+  env_file=${ENV:-$DIR/speedtest2.env}
+  [ -f "$env_file" ] || return 0
+  if [ -f "$NEW_STATE/geofilter.txt" ]; then
+    blk=$(awk '{ gsub(/^[ \t]+|[ \t\r]+$/, "") } $0 != "" && !seen[tolower($0)]++ { printf "%s%s", (n++ ? "|" : ""), $0 }' "$NEW_STATE/geofilter.txt")
+  else
+    blk=$(sed -n "s/.*exclude-filter: &geofilter '\([^']*\)'.*/\1/p" "$CONFIG_TEMPLATE" | head -n 1 | sed 's/^(?i)//')
+  fi
+  if [ -z "$blk" ] || [ "${#blk}" -gt 4000 ]; then
+    alog "WARN: фильтр нод не записан в BLOCK (пуст или длиннее 4000 символов)"
+    return 0
+  fi
+  esc=$(printf '%s' "$blk" | sed "s/'/'\\\\''/g")
+  tmp="$env_file.cgi.$$"
+  if { grep -v '^BLOCK=' "$env_file"; printf "BLOCK='%s'\n" "$esc"; } > "$tmp" 2>/dev/null && mv "$tmp" "$env_file"; then
+    alog "Фильтр нод записан в BLOCK спидтеста"
+  else
+    rm -f "$tmp"
+    alog "WARN: не удалось записать BLOCK в $env_file"
+  fi
+}
+
 # Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR: собирается в
 # соседнем .new и меняется местами, managed.sig - от нового config.yaml.
 # Любой сбой - WARN в журнал: конфиг уже применён, ответ должен уйти.
@@ -106,6 +132,7 @@ after_apply_ok() {
       if mv "$ns" "$CONFIG_STATE_DIR"; then
         rm -rf "$CONFIG_STATE_DIR.old" 2>/dev/null || true
         alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
+        sync_block
         return 0
       fi
       recover_state

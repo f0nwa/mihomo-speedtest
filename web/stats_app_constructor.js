@@ -6,8 +6,8 @@
 // См. docs/superpowers/specs/2026-10-05-config-constructor-design.md, п. 3-4.
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
-import { createModules } from './app-constructor-modules-model.js';
-import { block, createModuleCards, plural } from './app-constructor-modules.js';
+import { createModules, parseWords } from './app-constructor-modules-model.js';
+import { createLayout, createModuleCards, plural } from './app-constructor-modules.js';
 import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
@@ -98,6 +98,7 @@ export function renderConstructor(modeBar, opts) {
     // Подписки, свои ноды и фильтр при переносе тоже берутся из config.yaml.
     var initial = data.imported ? { services: '', user_rules: '' } : model.serialize();
     var initialMods = mods.serialize();
+    var savedWords = initialMods.geofilter ? parseWords(initialMods.geofilter) : mods.defaultWords();
     var expanded = {};
 
     var head = card('Конструктор конфига');
@@ -152,24 +153,23 @@ export function renderConstructor(modeBar, opts) {
     head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
-    var modCards = createModuleCards({ mods: mods, model: model, edit: edit, msg: msg, redraw: draw, changed: refreshChanges });
-    app.appendChild(modCards.cards.subs);
-    app.appendChild(modCards.cards.proxies);
+    // слева список модулей, справа выбранный (по умолчанию - «Свои прокси»)
+    var layout = createLayout(2);
+    var modCards = createModuleCards({ layout: layout, mods: mods, model: model, savedWords: savedWords, edit: edit, msg: msg,
+      redraw: draw, changed: refreshChanges });
 
-    var svcBlk = block(3, 'Сервисы', false), svcCard = svcBlk.body;
+    var svcBlk = layout.add(3, 'Сервисы'), svcCard = svcBlk.body;
     svcCard.appendChild(el('p', 'hint', 'Сервис - группа в Mihomo и правила, по которым в неё попадает трафик. ' +
       'Куда направить группу (прокси, напрямую), выбирается как обычно в панели Mihomo.'));
     var svcHost = el('div');
     svcCard.appendChild(svcHost);
-    app.appendChild(svcBlk.root);
 
-    var domBlk = block(4, 'Свои домены', false), domCard = domBlk.body;
+    var domBlk = layout.add(4, 'Свои домены'), domCard = domBlk.body;
     domCard.appendChild(el('p', 'hint', 'Все добавленные вами домены. Свои домены проверяются раньше любых наборов правил.'));
     var domHost = el('div');
     domCard.appendChild(domHost);
-    app.appendChild(domBlk.root);
 
-    var rulesBlk = block(7, 'Свои правила', false), rulesCard = rulesBlk.body;
+    var rulesBlk = layout.add(7, 'Свои правила'), rulesCard = rulesBlk.body;
     rulesCard.appendChild(el('p', 'hint', 'Правила Mihomo как есть, по одному в строке, без «- » (например ' +
       'DOMAIN-SUFFIX,example.com,DIRECT). Проверяются первыми. Сюда попадают и правила, которые не удалось разложить по сервисам при переносе.'));
     var rulesArea = el('textarea', 'xk-text');
@@ -184,9 +184,7 @@ export function renderConstructor(modeBar, opts) {
       refreshChanges();
     });
 
-    app.appendChild(modCards.cards.filter);
-    app.appendChild(modCards.cards.base);
-    app.appendChild(rulesBlk.root);
+    app.appendChild(layout.root);
 
     function msg(text, kind) {
       while (msgBox.firstChild) { msgBox.removeChild(msgBox.firstChild); }

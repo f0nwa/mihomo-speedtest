@@ -329,14 +329,18 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
 .cx-topbar .submit{margin-top:0}
 .cx-status{margin:0}
-.cx-block{margin:10px 0;background:var(--card);border:1px solid var(--card-border)}
-.cx-bhead{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:transparent;border:0;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.cx-layout{display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:12px;align-items:start;margin-top:12px}
+.cx-nav{display:flex;flex-direction:column;gap:6px;position:sticky;top:8px}
+.cx-nitem{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;background:var(--card);border:1px solid var(--card-border);color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.cx-nitem:hover{border-color:var(--muted)}
+.cx-nitem.on{border-color:var(--accent);background:#35c7c714}
 .cx-bnum{flex:0 0 auto;min-width:22px;padding:1px 0;text-align:center;border:1px solid var(--card-border);color:var(--muted);font-size:12px}
-.cx-block.open .cx-bnum{border-color:var(--accent);color:var(--accent)}
+.cx-nitem.on .cx-bnum{border-color:var(--accent);color:var(--accent)}
+.cx-ntext{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
 .cx-btitle{font-weight:600}
-.cx-bsum{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12.5px}
+.cx-bsum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
 .cx-bchg{flex:0 0 auto;color:#e0b060;font-size:12px}
-.cx-barrow{flex:0 0 auto;color:var(--muted);transition:transform .15s}
-.cx-block:not(.open) .cx-barrow{transform:rotate(-90deg)}
-.cx-bbody{padding:2px 14px 14px;border-top:1px solid var(--border)}
-.cx-bbody[hidden]{display:none}
+.cx-pane{min-width:0;background:var(--card);border:1px solid var(--card-border);padding:14px 16px}
+.cx-panel h2{margin:0 0 8px}
+.cx-panel[hidden]{display:none}
+@media (max-width:760px){.cx-layout{grid-template-columns:1fr}.cx-nav{position:static}}

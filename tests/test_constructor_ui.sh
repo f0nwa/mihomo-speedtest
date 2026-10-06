@@ -62,7 +62,7 @@ for f in stats_app_constructor_modules.js stats_app_constructor_modules_model.js
   grep -q "$f" "$ROOT/uninstall.sh" || fail "uninstall.sh: $f"
   case " $(sed -n 's/^ALL_PROJECT_FILES="\(.*\)"$/\1/p' "$ROOT/install.sh") " in *" $f "*) ;; *) fail "ALL_PROJECT_FILES: $f" ;; esac
 done
-for t in "block(1, 'Подписки'" "block(2, 'Свои прокси'" "block(5, 'Исключения нод'" "block(6, 'Базовые группы'"; do
+for t in "layout.add(1, 'Подписки'" "layout.add(2, 'Свои прокси'" "layout.add(5, 'Исключения нод'" "layout.add(6, 'Базовые группы'"; do
   grep -qF "$t" "$MOD" || fail "нет карточки $t"
 done
 grep -q "createModuleCards" "$UI" || fail "UI не подключает блоки"
@@ -71,13 +71,15 @@ grep -q "mods.problems()" "$UI" || fail "применение не провер�
 grep -q "/api/constructor/wgconf" "$MOD" || fail "нет импорта WireGuard .conf"
 grep -q "hostOf" "$MOD" || fail "адрес подписки показывается целиком (в нём ключ доступа)"
 
-# Аккордеон по макету: нумерация, сводки, «изменён», применение сверху
-for t in "block(3, 'Сервисы'" "block(4, 'Свои домены'" "block(7, 'Свои правила'"; do
+# Раскладка по макету: слева список модулей (номер, сводка, «изменён»), справа выбранный; применение сверху
+for t in "layout.add(3, 'Сервисы'" "layout.add(4, 'Свои домены'" "layout.add(7, 'Свои правила'"; do
   grep -qF "$t" "$UI" || fail "нет блока $t"
 done
 grep -q "'изменён'" "$MOD" || fail "нет пометки «изменён»"
 grep -q "cx-topbar" "$UI" || fail "кнопка применения не наверху"
 ! grep -q "card('Изменения')" "$UI" || fail "осталась нижняя карточка «Изменения»"
+grep -q "createLayout" "$UI" || fail "нет раскладки слева-справа"
+grep -q "cx-nav" "$MOD" || fail "нет списка модулей слева"
 grep -q "model.changes(initial)" "$UI" || fail "блоки не помечаются изменёнными"
 # режим по умолчанию - YAML (иначе каждый переход по вкладкам спрашивал бы подтверждение)
 grep -q "=== 'constructor' ? 'constructor' : 'yaml'" "$CFG" || fail "по умолчанию должен открываться YAML"

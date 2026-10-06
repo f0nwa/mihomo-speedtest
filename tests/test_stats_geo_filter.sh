@@ -1,14 +1,20 @@
 #!/bin/sh
-# Логика карточки "Какие ноды не проверять" (гео-фильтр BLOCK) в
-# web/stats_app_settings.js: блок GEO-LOGIC-BEGIN/END вырезается и проверяется в node.
+# Логика блока "Исключения нод" конструктора (бывшая карточка "Какие ноды не
+# проверять" из настроек) в web/stats_app_constructor_modules.js: блок
+# GEO-LOGIC-BEGIN/END вырезается и проверяется в node.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILE="$ROOT/web/stats_app_settings.js"
+FILE="$ROOT/web/stats_app_constructor_modules.js"
+SETTINGS="$ROOT/web/stats_app_settings.js"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 grep -q "GEO-LOGIC-BEGIN" "$FILE" || fail "нет метки GEO-LOGIC-BEGIN"
-grep -q "function buildGeoFilterCard" "$FILE" || fail "нет buildGeoFilterCard"
-grep -q "hidden.name = 'geo_filter'" "$FILE" || fail "готовая строка не уходит в поле geo_filter"
+grep -q "function buildFilterPanel" "$FILE" || fail "нет buildFilterPanel"
+# фильтр правится только в конструкторе: со страницы настроек карточка убрана
+! grep -q "GEO-LOGIC\|buildGeoFilterCard\|geo_filter" "$SETTINGS" || fail "в настройках остался фильтр нод"
+# обе группы стран на виду, как в настройках (не в раскрывающемся списке)
+grep -q "group('Другие страны'" "$FILE" || fail "нет группы «Другие страны»"
+! grep -q "'summary', null, 'Другие страны'" "$FILE" || fail "«Другие страны» спрятаны в раскрывающийся список"
 ! grep -q "Регулярное выражение для исключения нод" "$FILE" || fail "осталась подпись про регулярное выражение"
 grep -q "\.geo-grid" "$ROOT/web/stats_style.css" || fail "нет стилей карточки в stats_style.css"
 

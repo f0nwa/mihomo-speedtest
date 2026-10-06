@@ -189,4 +189,32 @@ assert_contains 'Status: 422' "$out"
 out=$(printf 'мусор%s' "$NL" | cgi wgconf POST '')
 assert_contains 'Status: 400' "$out"
 
+# --- 13: фильтр нод конструктора - и в BLOCK спидтеста
+export ENV=$TMP/speedtest2.env
+printf "%s\n" "BLOCK='old'" "TOPN='15'" > "$ENV"
+out=$(cgi read GET '' </dev/null)
+base=$(printf '%s' "$out" | jget '["base"]')
+body="### MST-STATE services.tsv${NL}### MST-STATE geofilter.txt${NL}Russia${NL} Moscow ${NL}russia${NL}it's-bad${NL}"
+out=$(printf '%s' "$body" | cgi preview POST '')
+assert_contains 'Status: 422' "$out"
+body="### MST-STATE services.tsv${NL}### MST-STATE geofilter.txt${NL}Russia${NL} Moscow ${NL}russia${NL}Берлин${NL}"
+out=$(printf '%s' "$body" | cgi apply POST "base=$base")
+assert_contains 'Status: 200' "$out"
+grep -qxF "BLOCK='Russia|Moscow|Берлин'" "$ENV" || fail "13: BLOCK не обновлён: $(cat "$ENV")"
+grep -qxF "TOPN='15'" "$ENV" || fail "13: остальные настройки потеряны"
+grep -q "exclude-filter: &geofilter '(?i)Russia|Moscow|Берлин'" "$M/config.yaml" || fail "13: exclude-filter в config.yaml"
+# --- 14: без своего фильтра - слова шаблона
+out=$(cgi read GET '' </dev/null)
+base=$(printf '%s' "$out" | jget '["base"]')
+out=$(printf '### MST-STATE services.tsv\n' | cgi apply POST "base=$base")
+assert_contains 'Status: 200' "$out"
+grep -q "^BLOCK='.*Russia|.*'$" "$ENV" && ! grep -q 'Берлин' "$ENV" || fail "14: BLOCK не вернулся к шаблону: $(cat "$ENV")"
+# --- 15: нет speedtest2.env - применение всё равно проходит
+rm -f "$ENV"
+out=$(cgi read GET '' </dev/null)
+base=$(printf '%s' "$out" | jget '["base"]')
+out=$(printf '### MST-STATE services.tsv\n### MST-STATE geofilter.txt\nX\n' | cgi apply POST "base=$base")
+assert_contains 'Status: 200' "$out"
+[ ! -e "$ENV" ] || fail "15: speedtest2.env не должен создаваться конструктором"
+
 echo "test_stats_constructor.sh: OK"

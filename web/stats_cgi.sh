@@ -438,6 +438,12 @@ if [ "$method" = "POST" ]; then
   keep_runs=$(urldecode "$RAW_keep_runs")
   keep_days=$(urldecode "$RAW_keep_days")
   geo_filter=$(normalize_block "$(urldecode "$RAW_geo_filter")")
+  # Фильтр нод правится только в конструкторе конфига (он же пишет BLOCK при
+  # применении); формы настроек поля больше нет - тогда BLOCK остаётся как был.
+  case "&$body" in
+    *'&geo_filter='*) ;;
+    *) geo_filter=$BLOCK ;;
+  esac
   extype=$(urldecode "$RAW_extype")
   size_mb=$(urldecode "$RAW_size_mb")
   dl_timeout=$(urldecode "$RAW_dl_timeout")

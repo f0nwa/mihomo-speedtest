@@ -129,6 +129,11 @@ grep -qF "HISTORY_KEEP_RUNS='50'" "$W/speedtest2.env" || fail "HISTORY_KEEP_RUNS
 grep -qF "HISTORY_KEEP_DAYS='10'" "$W/speedtest2.env" || fail "HISTORY_KEEP_DAYS not saved"
 ! grep -q '^STATS_AUTH_' "$W/speedtest2.env" || fail "settings must not write legacy auth variables"
 grep -qF "BLOCK='ru-block'" "$W/speedtest2.env" || fail "geo_filter (BLOCK) not saved"
+# Формы настроек без поля geo_filter (фильтр правится в конструкторе): BLOCK остаётся как был
+OUT_POST_NOGEO=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&$OK_TUNING&max_tested=12")
+assert_contains '{"ok":true}' "$OUT_POST_NOGEO" "POST без geo_filter принимается"
+grep -qF "BLOCK='ru-block'" "$W/speedtest2.env" || fail "BLOCK изменился при сохранении формы без geo_filter"
+grep -qF "STATS_NODE_CAP='3'" "$W/speedtest2.env" || fail "прочие поля формы без geo_filter не сохранены"
 grep -qF "EXTYPE='custom'" "$W/speedtest2.env" || fail "EXTYPE not saved"
 grep -qF "SIZE='20971520'" "$W/speedtest2.env" || fail "size_mb (SIZE) not converted/saved"
 grep -qF "DL_TIMEOUT='30'" "$W/speedtest2.env" || fail "DL_TIMEOUT not saved"
@@ -172,7 +177,7 @@ assert_contains "целым числом" "$OUT_BAD2" "keep_runs not a number"
 OUT_BAD3=$(run_cgi POST "node_cap=3&keep_runs=0&keep_days=0&geo_filter=x&$OK_TUNING")
 assert_contains "занулить оба лимита" "$OUT_BAD3" "both retention limits zero"
 
-OUT_BAD6=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10")
+OUT_BAD6=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=")
 assert_contains "Гео-фильтр обязателен" "$OUT_BAD6" "empty geo_filter rejected"
 
 OUT_BAD7=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=0&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2")

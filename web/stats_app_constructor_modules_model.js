@@ -308,6 +308,7 @@ export function createModules(data) {
   var proxies = parseProxies(data.proxies);
   var defWords = parseWords(data.geofilter_default);
   var words = data.geofilter ? parseWords(data.geofilter) : null;
+  var filterErr = '';
   var present = { subs: data.subscriptions != null, proxies: data.proxies != null };
 
   function subNames() { return subs.map(function (s) { return s.name; }); }
@@ -372,6 +373,8 @@ export function createModules(data) {
       words = out;
     },
     resetWords: function () { words = null; },
+    // Ошибка, которую панель фильтра нашла сама (пустой фильтр, апостроф).
+    setFilterError: function (msg) { filterErr = msg || ''; },
     isDefaultWords: function () {
       if (!words) { return true; }
       function key(list) { return list.map(function (w) { return w.toLowerCase(); }).sort().join('\n'); }
@@ -383,6 +386,7 @@ export function createModules(data) {
       if (present.subs && present.proxies && !subs.length && !proxies.length) {
         out.push('Нужна хотя бы одна подписка или своя нода');
       }
+      if (filterErr) { out.push('Исключения нод: ' + filterErr); }
       return out;
     },
     serialize: function () {
