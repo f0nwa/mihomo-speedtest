@@ -6,14 +6,15 @@
 // См. docs/superpowers/specs/2026-10-05-config-constructor-design.md, п. 3-4.
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
-import { createModel, parseCatalog, searchCatalog, stateBody } from './app-constructor-model.js';
+import { ROUTES, createModel, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
 var catalogPromise = null;   // каталог наборов правил грузится один раз
+var catalogDate = '';        // дата сборки каталога (шапка файла)
 
 function loadCatalog() {
   if (!catalogPromise) {
-    catalogPromise = fetchJson('/api/constructor/catalog').then(function (d) { return parseCatalog(d.text || ''); })
+    catalogPromise = fetchJson('/api/constructor/catalog').then(function (d) { catalogDate = parseCatalogDate(d.text || ''); return parseCatalog(d.text || ''); })
       ['catch'](function (e) { catalogPromise = null; throw e; });
   }
   return catalogPromise;
@@ -21,6 +22,23 @@ function loadCatalog() {
 
 var SOURCE_LABELS = { metacubex: 'MetaCubeX', 'zxc-rv': 'zxc-rv', itdog: 'itdog', legiz: 'legiz' };
 var KIND_LABELS = { domain: 'домены', ipcidr: 'IP-адреса', classical: 'правила' };
+
+// Чипы-фильтры окна: источник набора или «уже в конфиге».
+var FILTERS = [
+  { id: '', label: 'Все базы' },
+  { id: 'metacubex', label: 'MetaCubeX geosite' },
+  { id: 'zxc-rv', label: 'zxc-rv ipcidr' },
+  { id: 'itdog', label: 'itdog' },
+  { id: 'legiz', label: 'legiz-ru' },
+  { id: 'used', label: 'Уже в конфиге' }
+];
+
+// Короткая метка вида справа в строке результата (как в самой базе).
+function kindTag(e) {
+  return e.source === 'metacubex' && e.kind === 'domain' ? 'geosite' : e.kind;
+}
+
+function routeLabel(r, i) { return i === 0 ? 'Напрямую - DIRECT' : r; }
 
 // Имя группы из названия набора: без пометки источника в скобках и
 // символов, недопустимых в имени группы.
@@ -273,36 +291,57 @@ export function renderConstructor(modeBar, opts) {
     }
 
     // Окно «Добавить сервис из базы» (targetId пуст) или «Подключить набор»
-    // к сервису targetId: поиск по каталогу, отметка наборов, имя и раздел.
+    // к сервису targetId: поиск по каталогу с фильтром по базам, отметка
+    // наборов, имя группы и куда её направить, предпросмотр правок.
     function openAdd(targetId) {
       var target = targetId ? model.services().filter(function (x) { return x.id === targetId; })[0] : null;
       var d = el('dialog', 'xk-dialog');
       var hd = el('div', 'xk-head');
-      hd.appendChild(el('b', null, target ? 'Подключить набор правил к ' + target.name : 'Добавить сервис из базы'));
+      hd.appendChild(el('b', null, target ? 'Подключить набор правил к ' + target.name : 'Добавить сервис'));
+      var dateEl = el('span', 'hint', '');
       var x = el('button', 'xk-x', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Закрыть');
       hd.appendChild(el('span', 'xk-grow'));
+      hd.appendChild(dateEl);
       hd.appendChild(x);
       d.appendChild(hd);
-      d.appendChild(el('div', 'xk-about', 'База наборов правил: MetaCubeX (geosite), zxc-rv, itdog, legiz. ' +
-        'Отметьте нужные наборы: «домены» ловят сайты по адресам, «IP-адреса» - по сетям сервиса.'));
       var bodyBox = el('div', 'cx-dlg-body');
       var q = el('input'); q.type = 'search'; q.placeholder = 'Поиск: netflix, chatgpt, заблокированное...';
       q.setAttribute('aria-label', 'Поиск по базе');
       bodyBox.appendChild(q);
+      var filter = '';
+      var chips = el('div', 'cx-chips');
+      var chipEls = {};
+      FILTERS.forEach(function (f) {
+        var c = button(f.label, 'cx-chip' + (f.id === filter ? ' on' : ''));
+        chipEls[f.id] = c;
+        c.addEventListener('click', function () {
+          filter = f.id;
+          Object.keys(chipEls).forEach(function (k) { chipEls[k].className = 'cx-chip' + (k === filter ? ' on' : ''); });
+          if (catalog) { show(catalog); }
+        });
+        chips.appendChild(c);
+      });
+      bodyBox.appendChild(chips);
       var results = el('div', 'cx-results');
       bodyBox.appendChild(results);
       var picked = {};   // имя@вид -> запись каталога
-      var nameRow = null, nameIn = null, secSel = null;
+      var catalog = null;
+      var nameIn = null, routeSel = null;
       if (!target) {
-        nameRow = el('div', 'xk-add');
-        nameIn = el('input'); nameIn.type = 'text'; nameIn.placeholder = 'Имя группы';
+        var cols = el('div', 'cx-cols');
+        var c1 = el('div'), c2 = el('div');
+        c1.appendChild(el('label', null, 'Имя группы'));
+        nameIn = el('input'); nameIn.type = 'text';
         nameIn.setAttribute('aria-label', 'Имя группы');
-        secSel = el('select'); secSel.setAttribute('aria-label', 'Раздел');
-        model.sections().forEach(function (sec) { var o = el('option', null, sec.title); o.value = sec.id; secSel.appendChild(o); });
-        secSel.value = 'other';
-        nameRow.appendChild(nameIn); nameRow.appendChild(secSel);
-        bodyBox.appendChild(el('label', null, 'Новая группа'));
-        bodyBox.appendChild(nameRow);
+        c1.appendChild(nameIn);
+        c2.appendChild(el('label', null, 'Куда отправлять'));
+        routeSel = el('select'); routeSel.setAttribute('aria-label', 'Куда отправлять');
+        var def = el('option', null, 'Как у остальных сервисов'); def.value = '';
+        routeSel.appendChild(def);
+        ROUTES.forEach(function (r, i) { var o = el('option', null, routeLabel(r, i)); o.value = r; routeSel.appendChild(o); });
+        c2.appendChild(routeSel);
+        cols.appendChild(c1); cols.appendChild(c2);
+        bodyBox.appendChild(cols);
       }
       var preview = el('div', 'geo-summary');
       var err = el('p', 'xk-err');
@@ -311,6 +350,7 @@ export function renderConstructor(modeBar, opts) {
       var ft = el('div', 'xk-foot');
       var ok = button(target ? 'Подключить' : 'Добавить', 'submit');
       var cancel = button('Отмена', 'submit secondary');
+      ft.appendChild(el('span', 'hint', target ? '' : 'Можно и без базы - вписать домены вручную на следующем шаге'));
       ft.appendChild(el('span', 'xk-grow'));
       ft.appendChild(cancel); ft.appendChild(ok);
       d.appendChild(ft);
@@ -324,15 +364,20 @@ export function renderConstructor(modeBar, opts) {
       function updatePreview() {
         clear(preview);
         var ks = keys();
-        ok.disabled = !ks.length;
-        if (!ks.length) { preview.appendChild(el('span', 'hint', 'Отметьте хотя бы один набор.')); return; }
+        // без набора - пустая группа, домены вписываются вручную
+        ok.disabled = target ? !ks.length : !ks.length && !nameIn.value.trim();
+        if (!ks.length && target) { preview.appendChild(el('span', 'hint', 'Отметьте хотя бы один набор.')); return; }
         var group = target ? target.name : (nameIn.value.trim() || '...');
         preview.appendChild(el('div', 'geo-group-title', 'Что появится в конфиге'));
-        if (!target) { preview.appendChild(el('div', null, '+ группа ' + group + ' (как у остальных сервисов)')); }
+        if (!target) {
+          var rt = routeSel.value ? ', по умолчанию - ' + routeSel.value : ' (как у остальных сервисов)';
+          preview.appendChild(el('div', 'cx-add', '+ группа ' + group + rt));
+        }
         var used = model.usedSources(), taken = [];
         ks.forEach(function (k) {
           var e = picked[k];
-          preview.appendChild(el('div', null, '+ набор ' + e.name + ' (' + (SOURCE_LABELS[e.source] || e.source) + ', ' + KIND_LABELS[e.kind] + ') → ' + group));
+          preview.appendChild(el('div', 'cx-add', '+ база правил ' + e.name + '@' + e.kind + ' (' + (SOURCE_LABELS[e.source] || e.source) + ')'));
+          preview.appendChild(el('div', 'cx-add', '+ правило: ' + e.name + ' → ' + group + ', перед встроенными сервисами'));
           (used[k] || []).forEach(function (n) { if (n !== group && taken.indexOf(n) < 0) { taken.push(n); } });
         });
         if (taken.length) {
@@ -347,14 +392,16 @@ export function renderConstructor(modeBar, opts) {
       function show(cat) {
         clear(results);
         var used = model.usedSources();
-        var groups = searchCatalog(cat, q.value, 30);
         if (!q.value.trim()) { results.appendChild(el('p', 'hint', 'Начните вводить название сервиса.')); return; }
+        var pool = cat.filter(function (e) {
+          return !filter || (filter === 'used' ? !!used[e.name + '@' + e.kind] : e.source === filter);
+        });
+        var groups = searchCatalog(pool, q.value, 30);
         if (!groups.length) {
           results.appendChild(el('p', 'hint', 'Ничего не нашлось. Можно создать свой сервис и добавить ему домены вручную.'));
           return;
         }
         groups.forEach(function (g) {
-          results.appendChild(el('div', 'geo-group-title', g.title));
           g.items.forEach(function (e) {
             var k = e.name + '@' + e.kind;
             var lab = el('label', 'geo-country' + (picked[k] ? ' on' : ''));
@@ -368,17 +415,19 @@ export function renderConstructor(modeBar, opts) {
               updatePreview();
             });
             lab.appendChild(cb);
-            lab.appendChild(el('span', 'geo-name', e.name + ' · ' + KIND_LABELS[e.kind]));
-            lab.appendChild(el('span', 'geo-code', (SOURCE_LABELS[e.source] || e.source) +
-              (usedBy.length ? ' · уже в: ' + usedBy.join(', ') : '')));
+            lab.appendChild(el('span', 'geo-name', e.name));
+            lab.appendChild(el('span', 'hint cx-desc', e.title + (usedBy.length ? ' · уже в: ' + usedBy.join(', ') : '')));
+            lab.appendChild(el('span', 'geo-code', kindTag(e)));
             results.appendChild(lab);
           });
         });
       }
-      if (nameIn) { nameIn.addEventListener('input', updatePreview); }
+      if (nameIn) { nameIn.addEventListener('input', updatePreview); routeSel.addEventListener('change', updatePreview); }
       updatePreview();
       results.appendChild(el('p', 'hint', 'Загружаю базу...'));
       loadCatalog().then(function (cat) {
+        catalog = cat;
+        if (catalogDate) { dateEl.textContent = 'базы обновлены ' + catalogDate.slice(8) + '.' + catalogDate.slice(5, 7); }
         show(cat);
         q.addEventListener('input', function () { show(cat); });
       })['catch'](function (e) { clear(results); results.appendChild(el('p', 'msg-err', 'База не загрузилась: ' + errText(e))); });
@@ -391,7 +440,7 @@ export function renderConstructor(modeBar, opts) {
             // имя занято существующей группой - подключить наборы к ней
             var existing = model.findByName(nameIn.value.trim());
             if (existing) { id = existing; note = 'Группа ' + nameIn.value.trim() + ' уже есть - наборы подключены к ней.'; }
-            else { id = model.addService(nameIn.value.trim(), secSel.value); created = true; }
+            else { id = model.addService(nameIn.value.trim(), 'other', routeSel.value); created = true; }
           }
           // сначала проверить все отмеченные наборы, потом добавлять - без «половины»
           keys().forEach(function (k) { var e = picked[k]; model.checkSource(id, e.name, e.kind, e.url); });

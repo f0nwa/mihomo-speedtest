@@ -162,6 +162,17 @@ eq(M.parseCatalog(['a', 'regex', 's', 'https://x', 'A'].join(T) + '\n' + ['b', '
 eq(m.findByName('Netflix'), nf, 'поиск сервиса по имени');
 eq(m.findByName('Нет такого'), null, 'нет сервиса');
 eq(m.sources('kinopub'), [], 'набор убран');
+// направление новой группы: выбранное - первым в proxies
+const rid = m.addService('Routed', 'other', '🚀 Авто по пингу');
+const rs = m.serialize().services;
+eq(rs.includes(['gkey', rid, "proxies: ['🚀 Авто по пингу', DIRECT, 'Заблок. сервисы', '🛡️Fallback-Stable', '⚙️Manual']"].join(T)), true, 'route: gkey с выбранным первым');
+const rid2 = m.addService('Plain', 'other', 'DIRECT');
+eq(m.serialize().services.includes(['gkey', rid2, "proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']"].join(T)), true, 'route: DIRECT без кавычек');
+let eroute = ''; try { m.addService('Bad', 'other', 'nowhere'); } catch (e) { eroute = e.message; }
+eq(/направление/.test(eroute), true, 'route: неизвестное - ошибка');
+eq(m.findByName('Bad'), null, 'route: ошибка не оставляет сервис');
+eq(M.parseCatalogDate('# x\n# собран: 2026-10-06\na'), '2026-10-06', 'дата каталога');
+eq(M.parseCatalogDate('# собран: вчера'), '', 'дата каталога: мусор');
 
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');

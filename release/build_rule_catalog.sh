@@ -25,7 +25,8 @@
 #
 # CATALOG_FIXTURES=DIR - брать ответы API из файлов DIR/metacubex-tree.json,
 # DIR/zxc-ipcidr-release.json, DIR/itdog-release.json (тесты; начальный
-# каталог в репозитории). GITHUB_TOKEN - необязательный токен API.
+# каталог в репозитории). CATALOG_DATE - дата в шапке (по умолчанию
+# сегодня; окно конструктора показывает её как «базы обновлены»). GITHUB_TOKEN - необязательный токен API.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 TITLES=$ROOT/release/rule-catalog-titles.tsv
@@ -87,6 +88,7 @@ n_meta=$(grep -c "	metacubex	" "$WORK/cand" || true)
 {
 printf '# rule-catalog.tsv - наборы правил для поиска в конструкторе конфига.\n'
 printf '# Собирается release/build_rule_catalog.sh, руками не править.\n'
+printf '# собран: %s\n' "${CATALOG_DATE:-$(date +%F)}"
 printf '# имя<TAB>вид<TAB>источник<TAB>адрес<TAB>название\n'
 # Апостроф в адресе отсекается index() - без \047 в регулярке (BSD awk).
 awk -F'\t' -v titles="$TITLES" -v q="'" '

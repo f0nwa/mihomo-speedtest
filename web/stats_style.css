@@ -311,3 +311,11 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-dlg-body input[type=search]{width:100%;padding:7px 9px;border:1px solid var(--accent);background:var(--bg);color:var(--text);font:inherit;font-size:14px}
 .cx-results{max-height:45vh;overflow:auto;display:flex;flex-direction:column;gap:4px}
 .cx-results label.geo-country{flex-wrap:wrap}
+.cx-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cx-chip{font:inherit;font-size:12px;padding:3px 8px;background:transparent;color:var(--text);border:1px solid var(--border);cursor:pointer}
+.cx-chip.on{border-color:var(--accent);color:var(--accent)}
+.cx-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cx-cols input,.cx-cols select{width:100%;box-sizing:border-box}
+.cx-desc{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cx-add{color:var(--accent);font-size:12.5px}
+@media (max-width:520px){.cx-cols{grid-template-columns:1fr}}

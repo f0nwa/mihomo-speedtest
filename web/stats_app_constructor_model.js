@@ -61,6 +61,16 @@ export function parseDefaults(text) {
   return d;
 }
 
+// Куда группа смотрит по умолчанию: первым в списке proxies ставится
+// выбранное, остальные - как у select-default шаблона (порядок и состав -
+// те же, что в anchors config.example.yaml).
+export var ROUTES = ['DIRECT', 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'];
+
+function routeLine(id, route) {
+  var list = [route].concat(ROUTES.filter(function (r) { return r !== route; }));
+  return ['gkey', id, 'proxies: [' + list.map(function (r) { return /^[A-Za-z]+$/.test(r) ? r : "'" + r + "'"; }).join(', ') + ']'].join(TAB);
+}
+
 export function createModel(defaultsText, servicesText, userRulesText) {
   var d = parseDefaults(defaultsText);
   var deleted = {};          // id встроенного -> true
@@ -213,8 +223,9 @@ export function createModel(defaultsText, servicesText, userRulesText) {
       }
       delete deleted[id];
     },
-    addService: function (name, section) {
+    addService: function (name, section, route) {
       name = String(name || '');
+      if (route && ROUTES.indexOf(route) < 0) { throw new Error('Неизвестное направление ' + route); }
       checkName(name);
       if (!d.sections.some(function (x) { return x.id === section; })) { throw new Error('Нет раздела ' + section); }
       if (allNames()[name]) { throw new Error('Группа ' + name + ' уже есть'); }
@@ -226,7 +237,7 @@ export function createModel(defaultsText, servicesText, userRulesText) {
       var taken = function (x) { return !!d.byId[x] || !!findUser(x); };
       var id = base, k = base ? 2 : 1;
       while (!id || taken(id)) { id = (base || 'svc') + k; k++; }
-      users.push({ id: id, name: name, section: section, extra: [] });
+      users.push({ id: id, name: name, section: section, extra: route ? [routeLine(id, route)] : [] });
       return id;
     },
     removeUserService: function (id) {
@@ -344,6 +355,12 @@ export function parseCatalog(text) {
     out.push({ name: f[0], kind: f[1], source: f[2], url: f[3], title: f[4] });
   });
   return out;
+}
+
+// Дата сборки каталога из строки «# собран: ГГГГ-ММ-ДД», или ''.
+export function parseCatalogDate(text) {
+  var m = /^# собран: (\d{4}-\d{2}-\d{2})\s*$/m.exec(String(text || ''));
+  return m ? m[1] : '';
 }
 
 // Поиск без учёта регистра по имени и названию. Результат - группы по

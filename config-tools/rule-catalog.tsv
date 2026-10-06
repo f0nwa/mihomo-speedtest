@@ -1,5 +1,6 @@
 # rule-catalog.tsv - наборы правил для поиска в конструкторе конфига.
 # Собирается release/build_rule_catalog.sh, руками не править.
+# собран: 2026-10-06
 # имя<TAB>вид<TAB>источник<TAB>адрес<TAB>название
 adlist	domain	zxc-rv	https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs	Реклама (zxc-rv)
 akamai	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs	Akamai (CDN)
