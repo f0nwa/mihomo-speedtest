@@ -79,5 +79,6 @@ FILE|config-tools|config-tools/render_services.awk|/opt/etc/mihomo-speedtest/ren
 FILE|config-tools|config-tools/services.default.tsv|/opt/etc/mihomo-speedtest/services.default.tsv|0644|none
 FILE|config-tools|config-tools/config_to_state.awk|/opt/etc/mihomo-speedtest/config_to_state.awk|0644|awk
 FILE|config-tools|config-tools/constructor_build.sh|/opt/etc/mihomo-speedtest/constructor_build.sh|0755|sh
+FILE|config-tools|config-tools/rule-catalog.tsv|/opt/etc/mihomo-speedtest/rule-catalog.tsv|0644|none
 
 ACTION|web|restart-web

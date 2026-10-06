@@ -21,7 +21,8 @@ function lines(text) {
 function ruleBody(text) { return String(text).replace(/[ \t]+#.*$/, '').trim(); }
 
 export function checkName(name) {
-  if (!name || /[,#:'"]/.test(name) || /^ /.test(name) || / $/.test(name)) {
+  if (!name) { throw new Error('Введите имя группы'); }
+  if ( /[,#:'"]/.test(name) || /^ /.test(name) || / $/.test(name)) {
     throw new Error('Имя группы: нельзя запятую, #, двоеточие, кавычки и пробелы по краям');
   }
 }
@@ -158,10 +159,50 @@ export function createModel(defaultsText, servicesText, userRulesText) {
       });
       return out;
     },
-    // Наборы правил своего сервиса (строки src) - только для показа.
+    // Наборы правил, подключённые к сервису (строки src).
     sources: function (id) {
       return srcLines.filter(function (l) { var f = l.split(TAB); return f[0] === 'src' && f[1] === id; })
-        .map(function (l) { var f = l.split(TAB); return f[2] + '@' + f[3]; });
+        .map(function (l) { var f = l.split(TAB); return { name: f[2], kind: f[3], url: f[4] }; });
+    },
+    // Какие наборы (имя@вид) уже используются и какими сервисами:
+    // встроенные правила RULE-SET и подключённые src.
+    usedSources: function () {
+      var used = {};
+      function add(key, name) { (used[key] = used[key] || []).indexOf(name) < 0 && used[key].push(name); }
+      d.rules.forEach(function (r) {
+        if (r.owner === '-' || deleted[r.owner] || isUnruled(r.owner, r.text)) { return; }
+        var s = service(r.owner), re = /RULE-SET,([^,)]+)/g, m;
+        while ((m = re.exec(r.text))) { add(m[1], s ? s.name : r.owner); }
+      });
+      srcLines.forEach(function (l) {
+        var f = l.split(TAB);
+        if (f[0] === 'src') { var s = service(f[1]); add(f[2] + '@' + f[3], s ? s.name : f[1]); }
+      });
+      return used;
+    },
+    // Свой или живой встроенный сервис с таким именем группы, или null.
+    findByName: function (name) {
+      var hit = model.services().filter(function (x) { return !x.deleted && x.name === name; })[0];
+      return hit ? hit.id : null;
+    },
+    // Проверка набора без добавления (чтобы проверить все отмеченные заранее).
+    checkSource: function (id, name, kind, url) {
+      var s = needService(id);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._!-]*$/.test(name)) { throw new Error('Имя набора: только латиница, цифры и . _ ! -'); }
+      if (['domain', 'ipcidr', 'classical'].indexOf(kind) < 0) { throw new Error('Вид набора: domain, ipcidr или classical'); }
+      if (!/^https?:\/\/[^ "'#]+$/.test(url)) { throw new Error('Адрес набора должен начинаться с http(s):// без пробелов и кавычек'); }
+      var users = model.usedSources()[name + '@' + kind] || [];
+      if (users.indexOf(s.name) >= 0) { throw new Error('Набор ' + name + ' уже подключён к ' + s.name); }
+    },
+    addSource: function (id, name, kind, url) {
+      model.checkSource(id, name, kind, url);
+      srcLines.push(['src', id, name, kind, url].join(TAB));
+    },
+    removeSource: function (id, name, kind) {
+      srcLines = srcLines.filter(function (l) {
+        var f = l.split(TAB);
+        return !(f[0] === 'src' && f[1] === id && f[2] === name && f[3] === kind);
+      });
     },
     deleteService: function (id) { if (d.byId[id] && !findUser(id)) { deleted[id] = true; } },
     restoreService: function (id) {
@@ -260,13 +301,14 @@ export function createModel(defaultsText, servicesText, userRulesText) {
         }
         if (f[0] === 'svc') { return (added ? 'Новый сервис ' : 'Удалить свой сервис ') + f[2]; }
         if (f[0] === 'dom') { return added ? '+ домен ' + f[3] + ' → ' + nameOf(f[1]) : 'Убрать домен ' + f[3] + ' (' + nameOf(f[1]) + ')'; }
+        if (f[0] === 'src') { return added ? '+ набор ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать набор ' + f[2] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }
-      ['del', 'unrule', 'svc', 'dom', ''].forEach(function (kind) {
+      ['del', 'unrule', 'svc', 'src', 'dom', ''].forEach(function (kind) {
         function mine(l) {
           var k = l.split(TAB)[0];
-          return kind ? k === kind : ['del', 'unrule', 'svc', 'dom'].indexOf(k) < 0;
+          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom'].indexOf(k) < 0;
         }
         before.filter(mine).forEach(function (l) { if (after.indexOf(l) < 0) { res.push(text(l, false)); } });
         after.filter(mine).forEach(function (l) { if (before.indexOf(l) < 0) { res.push(text(l, true)); } });
@@ -286,4 +328,43 @@ export function stateBody(state) {
   if (state.user_rules) { out += '### MST-STATE user-rules.txt\n' + state.user_rules; }
   if (state.geofilter) { out += '### MST-STATE geofilter.txt\n' + state.geofilter; }
   return out;
+}
+
+// ----- каталог наборов правил (config-tools/rule-catalog.tsv) -----
+
+// Строки каталога -> [{name, kind, source, url, title}]; битые строки
+// пропускаются.
+export function parseCatalog(text) {
+  var out = [];
+  lines(text).forEach(function (l) {
+    if (!l || l.charAt(0) === '#') { return; }
+    var f = l.split(TAB);
+    if (f.length !== 5 || !/^[A-Za-z0-9][A-Za-z0-9._!-]*$/.test(f[0]) || ['domain', 'ipcidr', 'classical'].indexOf(f[1]) < 0 ||
+        !/^https?:\/\/[^ "'#]+$/.test(f[3])) { return; }
+    out.push({ name: f[0], kind: f[1], source: f[2], url: f[3], title: f[4] });
+  });
+  return out;
+}
+
+// Поиск без учёта регистра по имени и названию. Результат - группы по
+// имени без префикса источника (youtube: MetaCubeX, zxc-rv, itdog), лучшие
+// совпадения первыми; не больше limit групп.
+export function searchCatalog(entries, query, limit) {
+  var q = String(query || '').trim().toLowerCase();
+  if (!q) { return []; }
+  var groups = {}, order = [];
+  entries.forEach(function (e) {
+    var key = e.name.replace(/^(itdog|legiz)-/, '');
+    var hay = (e.name + ' ' + e.title).toLowerCase();
+    if (hay.indexOf(q) < 0) { return; }
+    if (!groups[key]) { groups[key] = { key: key, title: e.title, items: [], score: 9 }; order.push(key); }
+    var g = groups[key];
+    g.items.push(e);
+    var score = key === q ? 0 : (key.indexOf(q) === 0 ? 1 : (e.title.toLowerCase().indexOf(q) === 0 ? 2 : 3));
+    if (score < g.score) { g.score = score; }
+  });
+  return order.map(function (k) { return groups[k]; })
+    .sort(function (a, b) { return a.score - b.score || (a.key < b.key ? -1 : (a.key > b.key ? 1 : 0)); })
+    .slice(0, limit || 30)
+    .map(function (g) { return { key: g.key, title: g.title, items: g.items }; });
 }

@@ -34,6 +34,20 @@ grep -q "nextView()" "$UI" || fail "перерисовка конструкто�
 grep -q "Перенос из config.yaml" "$UI" || fail "перенос не считается изменением"
 grep -q "conflict" "$UI" && grep -q "ещё раз" "$UI" || fail "409: правки должны сохраняться, нужно применить ещё раз"
 
+# порция 4: база правил
+grep -q '/api/constructor/catalog' "$UI" || fail "UI не загружает каталог"
+grep -q 'Добавить сервис из базы' "$UI" || fail "нет кнопки «Добавить сервис из базы»"
+grep -q 'showModal' "$UI" || fail "окно добавления не модальное"
+grep -q 'searchCatalog' "$UI" || fail "UI не ищет через модель"
+grep -q '"api/constructor/catalog": ("stats_constructor.sh"' "$ROOT/web/stats_httpd.py" || fail "маршрут каталога"
+grep -q 'config-tools/rule-catalog.tsv|/opt/etc/mihomo-speedtest/rule-catalog.tsv' "$ROOT/release/components.txt" || fail "components: rule-catalog.tsv"
+grep -q 'rule-catalog.tsv' "$ROOT/uninstall.sh" || fail "uninstall: rule-catalog.tsv"
+grep -q '^PROJECT_TOOLS=.*rule-catalog.tsv' "$ROOT/install.sh" || fail "PROJECT_TOOLS: rule-catalog.tsv"
+
+grep -q 'перехват' "$UI" || fail "нет предупреждения о перехвате трафика встроенного сервиса"
+grep -q 'findByName' "$UI" || fail "имя существующей группы - подключение к ней, а не ошибка"
+grep -q 'checkSource' "$UI" || fail "наборы проверяются до добавления"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

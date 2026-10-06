@@ -116,6 +116,53 @@ try { m.addDomain('kinopub', 'suffix', 'сайт.рф'); } catch (e) { eq(/punyc
 // своё имя не может совпасть с группами шаблона и спеццелями
 throws(() => M.createModel(D, '', '').addService('DIRECT', 'other'), 'имя DIRECT');
 
+// ===== порция 4: каталог и наборы =====
+const CAT = ['# заголовок', '',
+  ['youtube', 'domain', 'metacubex', 'https://m/youtube.mrs', 'YouTube'].join(T),
+  ['youtube', 'ipcidr', 'zxc-rv', 'https://z/youtube@ipcidr.mrs', 'YouTube'].join(T),
+  ['itdog-youtube', 'domain', 'itdog', 'https://i/youtube_domain.mrs', 'YouTube (itdog)'].join(T),
+  ['netflix', 'domain', 'metacubex', 'https://m/netflix.mrs', 'Netflix'].join(T),
+  ['openai', 'domain', 'metacubex', 'https://m/openai.mrs', 'ChatGPT, OpenAI'].join(T),
+  ['itdog-russia-inside', 'domain', 'itdog', 'https://i/russia_inside_domain.mrs', 'Заблокированное в РФ (itdog)'].join(T),
+  'битая строка' + T + 'x',
+  ['bad name', 'domain', 'x', 'https://x', 'X'].join(T)].join('\n');
+const cat = M.parseCatalog(CAT);
+eq(cat.length, 6, 'каталог: битые строки пропущены');
+eq(M.searchCatalog(cat, '').length, 0, 'пустой запрос - ничего');
+let g = M.searchCatalog(cat, 'YouTu');
+eq(g.map(x => [x.key, x.title, x.items.map(i => i.name + '@' + i.kind)]),
+  [['youtube', 'YouTube', ['youtube@domain', 'youtube@ipcidr', 'itdog-youtube@domain']]], 'группа youtube');
+eq(M.searchCatalog(cat, 'chatgpt').map(x => x.key), ['openai'], 'поиск по названию');
+eq(M.searchCatalog(cat, 'заблок').map(x => x.key), ['russia-inside'], 'поиск по-русски');
+// наборы у сервиса
+m = M.createModel(D, '', '');
+const nf = m.addService('Netflix', 'media');
+m.addSource(nf, 'netflix', 'domain', 'https://m/netflix.mrs');
+eq(m.sources(nf), [{ name: 'netflix', kind: 'domain', url: 'https://m/netflix.mrs' }], 'набор своего сервиса');
+throws(() => m.addSource(nf, 'netflix', 'domain', 'https://m/netflix.mrs'), 'набор уже подключён');
+throws(() => m.addSource(nf, 'bad name', 'domain', 'https://x'), 'имя набора');
+throws(() => m.addSource(nf, 'x', 'regex', 'https://x'), 'вид набора');
+throws(() => m.addSource(nf, 'x', 'domain', 'ftp://x'), 'адрес набора');
+throws(() => m.addSource('youtube', 'youtube', 'domain', 'https://m/youtube.mrs'), 'встроенный уже использует youtube@domain');
+m.addSource('kinopub', 'itdog-russia-inside', 'domain', 'https://i/russia_inside_domain.mrs');
+eq(m.usedSources()['youtube@domain'], ['YouTube'], 'используемые наборы: встроенный');
+eq(m.usedSources()['netflix@domain'], ['Netflix'], 'используемые наборы: свой');
+eq(m.serialize().services, ['svc' + T + 'netflix' + T + 'Netflix' + T + 'media',
+  'src' + T + 'netflix' + T + 'netflix' + T + 'domain' + T + 'https://m/netflix.mrs',
+  'src' + T + 'kinopub' + T + 'itdog-russia-inside' + T + 'domain' + T + 'https://i/russia_inside_domain.mrs'].join('\n') + '\n', 'сериализация наборов');
+eq(m.summary({ services: '', user_rules: '' }), ['Новый сервис Netflix', '+ набор netflix → Netflix', '+ набор itdog-russia-inside → KinoPub'], 'сводка наборов');
+m.removeSource('kinopub', 'itdog-russia-inside', 'domain');
+// проверка до добавления: ничего не меняет
+throws(() => m.checkSource(nf, 'bad name', 'domain', 'https://x'), 'checkSource: имя');
+m.checkSource(nf, 'openai', 'domain', 'https://m/openai.mrs');
+eq(m.sources(nf).length, 1, 'checkSource ничего не добавляет');
+// каталог: неизвестный вид и плохой адрес пропускаются
+eq(M.parseCatalog(['a', 'regex', 's', 'https://x', 'A'].join(T) + '\n' + ['b', 'domain', 's', 'https://x y', 'B'].join(T)).length, 0, 'каталог: вид и адрес');
+// сервис по имени
+eq(m.findByName('Netflix'), nf, 'поиск сервиса по имени');
+eq(m.findByName('Нет такого'), null, 'нет сервиса');
+eq(m.sources('kinopub'), [], 'набор убран');
+
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
 JS

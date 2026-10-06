@@ -1,0 +1,136 @@
+# rule-catalog.tsv - наборы правил для поиска в конструкторе конфига.
+# Собирается release/build_rule_catalog.sh, руками не править.
+# имя<TAB>вид<TAB>источник<TAB>адрес<TAB>название
+adlist	domain	zxc-rv	https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs	Реклама (zxc-rv)
+akamai	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs	Akamai (CDN)
+amazon	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs	Amazon, AWS
+arelion	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/arelion@ipcidr.mrs	arelion
+azure	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/azure@ipcidr.mrs	azure
+bunnycdn	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/bunnycdn@ipcidr.mrs	bunnycdn
+cdn77	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs	cdn77
+cloudflare	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs	Cloudflare (CDN)
+cn	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cn@ipcidr.mrs	cn
+cogent	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cogent@ipcidr.mrs	cogent
+colocrossing	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/colocrossing@ipcidr.mrs	colocrossing
+contabo	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/contabo@ipcidr.mrs	contabo
+datacamp	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/datacamp@ipcidr.mrs	datacamp
+digitalocean	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs	DigitalOcean
+discord	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/discord@ipcidr.mrs	Discord
+fastly	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs	Fastly (CDN)
+frantech	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/frantech@ipcidr.mrs	frantech
+gcore	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs	gcore
+google	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs	Google
+hetzner	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs	Hetzner
+leaseweb	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/leaseweb@ipcidr.mrs	leaseweb
+linode	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/linode@ipcidr.mrs	linode
+liquidweb	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/liquidweb@ipcidr.mrs	liquidweb
+mega	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/mega@ipcidr.mrs	mega
+melbicom	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/melbicom@ipcidr.mrs	melbicom
+meta	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs	Meta (Facebook, Instagram, WhatsApp)
+oracle	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs	Oracle Cloud
+ovh	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs	ovh
+ru	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ru@ipcidr.mrs	ru
+scaleway	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs	scaleway
+telegram	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs	Telegram
+vodafone	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs	vodafone
+vultr	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs	vultr
+youtube	ipcidr	zxc-rv	https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/youtube@ipcidr.mrs	YouTube
+akamai	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs	Akamai (CDN)
+amazon	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs	Amazon, AWS
+apple	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs	Apple
+category-ai-!cn	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs	AI-сервисы (ChatGPT, Claude, Gemini и др.)
+category-ru	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs	Российские сайты
+cloudflare	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs	Cloudflare (CDN)
+dell	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/dell.mrs	Dell
+digitalocean	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs	DigitalOcean
+fastly	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs	Fastly (CDN)
+google	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs	Google
+hetzner	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs	Hetzner
+intel	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs	Intel
+meta	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs	Meta (Facebook, Instagram, WhatsApp)
+microsoft	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs	Microsoft
+oracle	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs	Oracle Cloud
+playstation	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs	PlayStation
+reddit	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs	Reddit
+spotify	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs	Spotify
+steam	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs	Steam
+speedtest	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs	Speedtest
+telegram	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs	Telegram
+tmdb	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tmdb.mrs	TMDB
+twitch	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs	Twitch
+twitter	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs	Twitter / X
+youtube	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs	YouTube
+netflix	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.mrs	Netflix
+openai	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs	ChatGPT, OpenAI
+anthropic	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/anthropic.mrs	Claude, Anthropic
+disney	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/disney.mrs	Disney+
+github	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs	GitHub
+tiktok	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs	TikTok
+instagram	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/instagram.mrs	Instagram
+linkedin	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/linkedin.mrs	LinkedIn
+notion	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/notion.mrs	Notion
+hbo	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hbo.mrs	HBO Max
+primevideo	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/primevideo.mrs	Prime Video
+whatsapp	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/whatsapp.mrs	WhatsApp
+facebook	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/facebook.mrs	Facebook
+huggingface	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/huggingface.mrs	Hugging Face
+nvidia	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/nvidia.mrs	NVIDIA
+epicgames	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/epicgames.mrs	Epic Games
+deepseek	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/deepseek.mrs	DeepSeek
+perplexity	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/perplexity.mrs	Perplexity
+docker	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/docker.mrs	Docker
+gitlab	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gitlab.mrs	GitLab
+figma	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/figma.mrs	Figma
+adobe	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/adobe.mrs	Adobe
+signal	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/signal.mrs	Signal
+xbox	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/xbox.mrs	Xbox
+nintendo	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/nintendo.mrs	Nintendo
+patreon	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/patreon.mrs	Patreon
+dropbox	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/dropbox.mrs	Dropbox
+soundcloud	domain	metacubex	https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/soundcloud.mrs	SoundCloud
+itdog-anime	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/anime_domain.mrs	Аниме (itdog)
+itdog-block	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/block_domain.mrs	Заблокированное в РФ, короткий список (itdog)
+itdog-cloudflare	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/cloudflare_domain.mrs	itdog-cloudflare
+itdog-cloudflare	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/cloudflare_ipcidr.mrs	itdog-cloudflare
+itdog-cloudfront	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/cloudfront_domain.mrs	itdog-cloudfront
+itdog-cloudfront	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/cloudfront_ipcidr.mrs	itdog-cloudfront
+itdog-digitalocean	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/digitalocean_domain.mrs	itdog-digitalocean
+itdog-digitalocean	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/digitalocean_ipcidr.mrs	itdog-digitalocean
+itdog-discord	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/discord_domain.mrs	itdog-discord
+itdog-discord	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/discord_ipcidr.mrs	itdog-discord
+itdog-geoblock	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/geoblock_domain.mrs	Сайты, блокирующие РФ (itdog)
+itdog-google-ai	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/google_ai_domain.mrs	Google AI, Gemini (itdog)
+itdog-google-meet	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/google_meet_domain.mrs	Google Meet (itdog)
+itdog-google-meet	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/google_meet_ipcidr.mrs	Google Meet (itdog)
+itdog-google-play	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/google_play_domain.mrs	Google Play (itdog)
+itdog-hdrezka	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/hdrezka_domain.mrs	HDRezka (itdog)
+itdog-hetzner	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/hetzner_domain.mrs	itdog-hetzner
+itdog-hetzner	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/hetzner_ipcidr.mrs	itdog-hetzner
+itdog-hodca	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/hodca_domain.mrs	itdog-hodca
+itdog-meta	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/meta_domain.mrs	itdog-meta
+itdog-meta	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/meta_ipcidr.mrs	itdog-meta
+itdog-news	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/news_domain.mrs	Новости (itdog)
+itdog-ovh	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/ovh_domain.mrs	itdog-ovh
+itdog-ovh	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/ovh_ipcidr.mrs	itdog-ovh
+itdog-porn	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/porn_domain.mrs	18+ (itdog)
+itdog-roblox	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/roblox_domain.mrs	Roblox (itdog)
+itdog-roblox	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/roblox_ipcidr.mrs	Roblox (itdog)
+itdog-russia-inside	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/russia_inside_domain.mrs	Заблокированное в РФ (itdog, Russia inside)
+itdog-russia-outside	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/russia_outside_domain.mrs	Российское, закрытое для зарубежа (itdog, Russia outside)
+itdog-telegram	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/telegram_domain.mrs	itdog-telegram
+itdog-telegram	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/telegram_ipcidr.mrs	itdog-telegram
+itdog-tiktok	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/tiktok_domain.mrs	itdog-tiktok
+itdog-twitter	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/twitter_domain.mrs	itdog-twitter
+itdog-twitter	ipcidr	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/twitter_ipcidr.mrs	itdog-twitter
+itdog-ukraine-inside	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/ukraine_inside_domain.mrs	Заблокированное в Украине (itdog)
+itdog-youtube	domain	itdog	https://github.com/itdoginfo/allow-domains/releases/latest/download/youtube_domain.mrs	itdog-youtube
+legiz-ru-bundle	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/ru-bundle/rule.mrs	Заблокированное в РФ, сводный (legiz)
+legiz-rknasnblock	ipcidr	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/ru-bundle/rknasnblock.mrs	Сети, заблокированные РКН (legiz)
+legiz-re-filter	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs	re:filter - заблокированное в РФ (legiz)
+legiz-re-filter-ip	ipcidr	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/ip-rule.mrs	re:filter, сети (legiz)
+legiz-oisd-big	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/oisd/big.mrs	Реклама и трекеры, полный (OISD big)
+legiz-oisd-small	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/oisd/small.mrs	Реклама и трекеры (OISD small)
+legiz-oisd-nsfw	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/oisd/nsfw.mrs	18+ (OISD nsfw)
+legiz-torrent-trackers	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/other/torrent-trackers.mrs	Торрент-трекеры (legiz)
+legiz-torrent-websites	domain	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/other/torrent-websites.mrs	Торрент-сайты (legiz)
+legiz-discord-voice	ipcidr	legiz	https://github.com/legiz-ru/mihomo-rule-sets/raw/main/other/discord-voice-ip-list.mrs	Discord: голосовые серверы (legiz)

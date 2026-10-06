@@ -29,7 +29,7 @@ chmod +x "$TMP/bin/mihomo" "$TMP/bin/xkeen" "$TMP/bin/pidof"
 echo up > "$TMP/state"
 for f in config-tools/config.example.yaml config-tools/services.default.tsv config-tools/render_services.awk \
          config-tools/config_to_state.awk config-tools/constructor_build.sh config-tools/migrate_config.sh \
-         config-tools/migrate_config.awk config-tools/fast_wg.awk web/stats_config.sh; do
+         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv web/stats_config.sh; do
   cp "$ROOT/$f" "$D/"
 done
 cp "$D/config.example.yaml" "$M/config.yaml"
@@ -146,5 +146,14 @@ out=$(cgi read GET 'import=1' </dev/null)
 [ "$(printf '%s' "$out" | jget '["imported"]')" = True ] || fail "9: imported"
 [ "$(printf '%s' "$out" | jget '["manual_edits"]')" = False ] || fail "9: manual_edits при переносе"
 assert_contains 'hand.example' "$(printf '%s' "$out" | jget '["user_rules"]')"
+
+# --- 10: каталог наборов правил
+out=$(cgi catalog GET '' </dev/null)
+assert_contains 'Status: 200' "$out"
+assert_contains 'netflix' "$(printf '%s' "$out" | jget '["text"]')"
+mv "$D/rule-catalog.tsv" "$D/rule-catalog.tsv.off"
+out=$(cgi catalog GET '' </dev/null)
+assert_contains 'Status: 404' "$out"
+mv "$D/rule-catalog.tsv.off" "$D/rule-catalog.tsv"
 
 echo "test_stats_constructor.sh: OK"

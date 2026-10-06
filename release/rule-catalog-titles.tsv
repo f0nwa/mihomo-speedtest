@@ -1,0 +1,81 @@
+# Читаемые названия наборов правил для поиска в конструкторе конфига
+# (release/build_rule_catalog.sh). Имя<TAB>название; имени нет - в поиске
+# показывается само имя.
+adlist	Реклама (zxc-rv)
+akamai	Akamai (CDN)
+amazon	Amazon, AWS
+anthropic	Claude, Anthropic
+adobe	Adobe
+apple	Apple
+category-ai-!cn	AI-сервисы (ChatGPT, Claude, Gemini и др.)
+category-ru	Российские сайты
+cloudflare	Cloudflare (CDN)
+deepseek	DeepSeek
+dell	Dell
+digitalocean	DigitalOcean
+discord	Discord
+disney	Disney+
+docker	Docker
+dropbox	Dropbox
+epicgames	Epic Games
+facebook	Facebook
+fastly	Fastly (CDN)
+figma	Figma
+github	GitHub
+gitlab	GitLab
+google	Google
+hbo	HBO Max
+hetzner	Hetzner
+huggingface	Hugging Face
+instagram	Instagram
+intel	Intel
+linkedin	LinkedIn
+meta	Meta (Facebook, Instagram, WhatsApp)
+microsoft	Microsoft
+netflix	Netflix
+nintendo	Nintendo
+notion	Notion
+nvidia	NVIDIA
+openai	ChatGPT, OpenAI
+oracle	Oracle Cloud
+patreon	Patreon
+perplexity	Perplexity
+playstation	PlayStation
+primevideo	Prime Video
+reddit	Reddit
+signal	Signal
+soundcloud	SoundCloud
+speedtest	Speedtest
+spotify	Spotify
+steam	Steam
+telegram	Telegram
+tiktok	TikTok
+tmdb	TMDB
+twitch	Twitch
+twitter	Twitter / X
+whatsapp	WhatsApp
+xbox	Xbox
+youtube	YouTube
+itdog-anime	Аниме (itdog)
+itdog-block	Заблокированное в РФ, короткий список (itdog)
+itdog-geoblock	Сайты, блокирующие РФ (itdog)
+itdog-google-ai	Google AI, Gemini (itdog)
+itdog-google-meet	Google Meet (itdog)
+itdog-google-play	Google Play (itdog)
+itdog-hdrezka	HDRezka (itdog)
+itdog-news	Новости (itdog)
+itdog-porn	18+ (itdog)
+itdog-roblox	Roblox (itdog)
+itdog-russia-inside	Заблокированное в РФ (itdog, Russia inside)
+itdog-russia-outside	Российское, закрытое для зарубежа (itdog, Russia outside)
+itdog-ukraine-inside	Заблокированное в Украине (itdog)
+legiz-re-filter	re:filter - заблокированное в РФ (legiz)
+legiz-re-filter-ip	re:filter, сети (legiz)
+legiz-ru-bundle	Заблокированное в РФ, сводный (legiz)
+legiz-rknasnblock	Сети, заблокированные РКН (legiz)
+legiz-oisd-big	Реклама и трекеры, полный (OISD big)
+legiz-oisd-small	Реклама и трекеры (OISD small)
+legiz-oisd-nsfw	18+ (OISD nsfw)
+legiz-torrent-trackers	Торрент-трекеры (legiz)
+legiz-torrent-websites	Торрент-сайты (legiz)
+legiz-discord-voice	Discord: голосовые серверы (legiz)

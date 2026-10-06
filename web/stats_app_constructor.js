@@ -6,9 +6,27 @@
 // См. docs/superpowers/specs/2026-10-05-config-constructor-design.md, п. 3-4.
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
-import { createModel, stateBody } from './app-constructor-model.js';
+import { createModel, parseCatalog, searchCatalog, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
+var catalogPromise = null;   // каталог наборов правил грузится один раз
+
+function loadCatalog() {
+  if (!catalogPromise) {
+    catalogPromise = fetchJson('/api/constructor/catalog').then(function (d) { return parseCatalog(d.text || ''); })
+      ['catch'](function (e) { catalogPromise = null; throw e; });
+  }
+  return catalogPromise;
+}
+
+var SOURCE_LABELS = { metacubex: 'MetaCubeX', 'zxc-rv': 'zxc-rv', itdog: 'itdog', legiz: 'legiz' };
+var KIND_LABELS = { domain: 'домены', ipcidr: 'IP-адреса', classical: 'правила' };
+
+// Имя группы из названия набора: без пометки источника в скобках и
+// символов, недопустимых в имени группы.
+function suggestName(title) {
+  return String(title || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/[,#:'"]/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 export function constructorDirty() { return !!(view && view.dirty); }
 export function leaveConstructor() { view = null; }
@@ -206,7 +224,7 @@ export function renderConstructor(modeBar, opts) {
       var box = el('div');
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off' : ''));
       var doms = model.domains(s.id).filter(function (d) { return !d.removed; }).length;
-      var rules = s.user ? model.sources(s.id).length : model.rules(s.id).filter(function (x) { return !x.removed; }).length;
+      var rules = model.sources(s.id).length + (s.user ? 0 : model.rules(s.id).filter(function (x) { return !x.removed; }).length);
       r.appendChild(el('span', 'xk-val', s.name));
       r.appendChild(el('span', 'geo-code', (s.user ? 'свой · ' : '') + 'доменов: ' + doms + ', наборов и правил: ' + rules));
       if (!s.deleted) {
@@ -239,16 +257,167 @@ export function renderConstructor(modeBar, opts) {
           });
           chips.appendChild(c);
         });
-        model.sources(s.id).forEach(function (src) { chips.appendChild(el('span', 'geo-chip', 'набор ' + src)); });
+        var addSrc = button('+ набор из базы', 'small muted');
+        addSrc.addEventListener('click', function () { openAdd(s.id); });
+        chips.appendChild(addSrc);
+        model.sources(s.id).forEach(function (src) {
+          var c = button('набор ' + src.name + (src.kind === 'ipcidr' ? ' (IP)' : '') + '  ×', 'geo-chip');
+          c.title = 'Отключить набор';
+          c.addEventListener('click', function () { edit(function () { model.removeSource(s.id, src.name, src.kind); }); });
+          chips.appendChild(c);
+        });
         if (chips.firstChild) { p.appendChild(chips); }
         box.appendChild(p);
       }
       return box;
     }
 
+    // Окно «Добавить сервис из базы» (targetId пуст) или «Подключить набор»
+    // к сервису targetId: поиск по каталогу, отметка наборов, имя и раздел.
+    function openAdd(targetId) {
+      var target = targetId ? model.services().filter(function (x) { return x.id === targetId; })[0] : null;
+      var d = el('dialog', 'xk-dialog');
+      var hd = el('div', 'xk-head');
+      hd.appendChild(el('b', null, target ? 'Подключить набор правил к ' + target.name : 'Добавить сервис из базы'));
+      var x = el('button', 'xk-x', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Закрыть');
+      hd.appendChild(el('span', 'xk-grow'));
+      hd.appendChild(x);
+      d.appendChild(hd);
+      d.appendChild(el('div', 'xk-about', 'База наборов правил: MetaCubeX (geosite), zxc-rv, itdog, legiz. ' +
+        'Отметьте нужные наборы: «домены» ловят сайты по адресам, «IP-адреса» - по сетям сервиса.'));
+      var bodyBox = el('div', 'cx-dlg-body');
+      var q = el('input'); q.type = 'search'; q.placeholder = 'Поиск: netflix, chatgpt, заблокированное...';
+      q.setAttribute('aria-label', 'Поиск по базе');
+      bodyBox.appendChild(q);
+      var results = el('div', 'cx-results');
+      bodyBox.appendChild(results);
+      var picked = {};   // имя@вид -> запись каталога
+      var nameRow = null, nameIn = null, secSel = null;
+      if (!target) {
+        nameRow = el('div', 'xk-add');
+        nameIn = el('input'); nameIn.type = 'text'; nameIn.placeholder = 'Имя группы';
+        nameIn.setAttribute('aria-label', 'Имя группы');
+        secSel = el('select'); secSel.setAttribute('aria-label', 'Раздел');
+        model.sections().forEach(function (sec) { var o = el('option', null, sec.title); o.value = sec.id; secSel.appendChild(o); });
+        secSel.value = 'other';
+        nameRow.appendChild(nameIn); nameRow.appendChild(secSel);
+        bodyBox.appendChild(el('label', null, 'Новая группа'));
+        bodyBox.appendChild(nameRow);
+      }
+      var preview = el('div', 'geo-summary');
+      var err = el('p', 'xk-err');
+      bodyBox.appendChild(preview); bodyBox.appendChild(err);
+      d.appendChild(bodyBox);
+      var ft = el('div', 'xk-foot');
+      var ok = button(target ? 'Подключить' : 'Добавить', 'submit');
+      var cancel = button('Отмена', 'submit secondary');
+      ft.appendChild(el('span', 'xk-grow'));
+      ft.appendChild(cancel); ft.appendChild(ok);
+      d.appendChild(ft);
+      document.body.appendChild(d);
+      function close() { d.close(); if (d.parentNode) { d.parentNode.removeChild(d); } }
+      x.addEventListener('click', close);
+      cancel.addEventListener('click', close);
+      d.addEventListener('cancel', function (e) { e.preventDefault(); close(); });
+
+      function keys() { return Object.keys(picked); }
+      function updatePreview() {
+        clear(preview);
+        var ks = keys();
+        ok.disabled = !ks.length;
+        if (!ks.length) { preview.appendChild(el('span', 'hint', 'Отметьте хотя бы один набор.')); return; }
+        var group = target ? target.name : (nameIn.value.trim() || '...');
+        preview.appendChild(el('div', 'geo-group-title', 'Что появится в конфиге'));
+        if (!target) { preview.appendChild(el('div', null, '+ группа ' + group + ' (как у остальных сервисов)')); }
+        var used = model.usedSources(), taken = [];
+        ks.forEach(function (k) {
+          var e = picked[k];
+          preview.appendChild(el('div', null, '+ набор ' + e.name + ' (' + (SOURCE_LABELS[e.source] || e.source) + ', ' + KIND_LABELS[e.kind] + ') → ' + group));
+          (used[k] || []).forEach(function (n) { if (n !== group && taken.indexOf(n) < 0) { taken.push(n); } });
+        });
+        if (taken.length) {
+          var w = el('div', 'geo-warn warn');
+          w.appendChild(el('span', 'geo-warn-tag', 'ПЕРЕХВАТ'));
+          w.appendChild(el('div', null, 'Эти наборы уже работают в: ' + taken.join(', ') + '. Правила ' + group +
+            ' проверяются раньше, поэтому группа ' + group + ' заберёт (перехватит) этот трафик себе. ' +
+            'Если нужно просто поменять, куда идёт трафик сервиса, - выберите это в панели Mihomo, новая группа не нужна.'));
+          preview.appendChild(w);
+        }
+      }
+      function show(cat) {
+        clear(results);
+        var used = model.usedSources();
+        var groups = searchCatalog(cat, q.value, 30);
+        if (!q.value.trim()) { results.appendChild(el('p', 'hint', 'Начните вводить название сервиса.')); return; }
+        if (!groups.length) {
+          results.appendChild(el('p', 'hint', 'Ничего не нашлось. Можно создать свой сервис и добавить ему домены вручную.'));
+          return;
+        }
+        groups.forEach(function (g) {
+          results.appendChild(el('div', 'geo-group-title', g.title));
+          g.items.forEach(function (e) {
+            var k = e.name + '@' + e.kind;
+            var lab = el('label', 'geo-country' + (picked[k] ? ' on' : ''));
+            var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!picked[k];
+            var usedBy = used[k] || [];
+            if (target && usedBy.indexOf(target.name) >= 0) { cb.disabled = true; }
+            cb.addEventListener('change', function () {
+              if (cb.checked) { picked[k] = e; } else { delete picked[k]; }
+              lab.className = 'geo-country' + (cb.checked ? ' on' : '');
+              if (nameIn && cb.checked && !nameIn.value.trim()) { nameIn.value = suggestName(g.title); }
+              updatePreview();
+            });
+            lab.appendChild(cb);
+            lab.appendChild(el('span', 'geo-name', e.name + ' · ' + KIND_LABELS[e.kind]));
+            lab.appendChild(el('span', 'geo-code', (SOURCE_LABELS[e.source] || e.source) +
+              (usedBy.length ? ' · уже в: ' + usedBy.join(', ') : '')));
+            results.appendChild(lab);
+          });
+        });
+      }
+      if (nameIn) { nameIn.addEventListener('input', updatePreview); }
+      updatePreview();
+      results.appendChild(el('p', 'hint', 'Загружаю базу...'));
+      loadCatalog().then(function (cat) {
+        show(cat);
+        q.addEventListener('input', function () { show(cat); });
+      })['catch'](function (e) { clear(results); results.appendChild(el('p', 'msg-err', 'База не загрузилась: ' + errText(e))); });
+
+      ok.addEventListener('click', function () {
+        err.textContent = '';
+        var id = targetId, created = false, note = '';
+        try {
+          if (!target) {
+            // имя занято существующей группой - подключить наборы к ней
+            var existing = model.findByName(nameIn.value.trim());
+            if (existing) { id = existing; note = 'Группа ' + nameIn.value.trim() + ' уже есть - наборы подключены к ней.'; }
+            else { id = model.addService(nameIn.value.trim(), secSel.value); created = true; }
+          }
+          // сначала проверить все отмеченные наборы, потом добавлять - без «половины»
+          keys().forEach(function (k) { var e = picked[k]; model.checkSource(id, e.name, e.kind, e.url); });
+          keys().forEach(function (k) { var e = picked[k]; model.addSource(id, e.name, e.kind, e.url); });
+        } catch (e) {
+          if (created) { model.removeUserService(id); }
+          err.textContent = e.message; return;
+        }
+        close();
+        expanded[id] = true;
+        msg(note, note ? 'ok' : null);
+        draw();
+      });
+      d.showModal();
+      q.focus();
+    }
+
     function draw() {
       var services = model.services();
       clear(svcHost);
+      var top = el('div', 'btn-row');
+      var addFromBase = button('+ Добавить сервис из базы', 'submit');
+      addFromBase.style.marginTop = '0';
+      addFromBase.addEventListener('click', function () { openAdd(null); });
+      top.appendChild(addFromBase);
+      svcHost.appendChild(top);
       model.sections().forEach(function (sec) {
         var inSec = services.filter(function (s) { return s.section === sec.id; });
         if (!inSec.length) { return; }
@@ -257,8 +426,8 @@ export function renderConstructor(modeBar, opts) {
         inSec.forEach(function (s) { rows.appendChild(serviceRow(s)); });
         svcHost.appendChild(rows);
       });
-      // свой сервис (порция 4 добавит поиск по базе правил)
-      svcHost.appendChild(el('div', 'geo-group-title', 'Свой сервис'));
+      // свой сервис без набора из базы - только с доменами
+      svcHost.appendChild(el('div', 'geo-group-title', 'Свой сервис вручную'));
       var add = el('div', 'xk-add');
       var name = el('input'); name.type = 'text'; name.placeholder = 'Имя группы, например Netflix';
       name.setAttribute('aria-label', 'Имя своего сервиса');

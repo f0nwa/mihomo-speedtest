@@ -1,0 +1,104 @@
+{
+ "tag_name": "lists-20261004-042851-144dbc4",
+ "assets": [
+  {
+   "name": "akamai@ipcidr.mrs"
+  },
+  {
+   "name": "amazon@ipcidr.mrs"
+  },
+  {
+   "name": "arelion@ipcidr.mrs"
+  },
+  {
+   "name": "azure@ipcidr.mrs"
+  },
+  {
+   "name": "bunnycdn@ipcidr.mrs"
+  },
+  {
+   "name": "cdn77@ipcidr.mrs"
+  },
+  {
+   "name": "cloudflare@ipcidr.mrs"
+  },
+  {
+   "name": "cn@ipcidr.mrs"
+  },
+  {
+   "name": "cogent@ipcidr.mrs"
+  },
+  {
+   "name": "colocrossing@ipcidr.mrs"
+  },
+  {
+   "name": "contabo@ipcidr.mrs"
+  },
+  {
+   "name": "datacamp@ipcidr.mrs"
+  },
+  {
+   "name": "digitalocean@ipcidr.mrs"
+  },
+  {
+   "name": "discord@ipcidr.mrs"
+  },
+  {
+   "name": "fastly@ipcidr.mrs"
+  },
+  {
+   "name": "frantech@ipcidr.mrs"
+  },
+  {
+   "name": "gcore@ipcidr.mrs"
+  },
+  {
+   "name": "google@ipcidr.mrs"
+  },
+  {
+   "name": "hetzner@ipcidr.mrs"
+  },
+  {
+   "name": "leaseweb@ipcidr.mrs"
+  },
+  {
+   "name": "linode@ipcidr.mrs"
+  },
+  {
+   "name": "liquidweb@ipcidr.mrs"
+  },
+  {
+   "name": "mega@ipcidr.mrs"
+  },
+  {
+   "name": "melbicom@ipcidr.mrs"
+  },
+  {
+   "name": "meta@ipcidr.mrs"
+  },
+  {
+   "name": "oracle@ipcidr.mrs"
+  },
+  {
+   "name": "ovh@ipcidr.mrs"
+  },
+  {
+   "name": "ru@ipcidr.mrs"
+  },
+  {
+   "name": "scaleway@ipcidr.mrs"
+  },
+  {
+   "name": "telegram@ipcidr.mrs"
+  },
+  {
+   "name": "vodafone@ipcidr.mrs"
+  },
+  {
+   "name": "vultr@ipcidr.mrs"
+  },
+  {
+   "name": "youtube@ipcidr.mrs"
+  }
+ ]
+}

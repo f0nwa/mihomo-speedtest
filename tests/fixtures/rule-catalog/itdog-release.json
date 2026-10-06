@@ -1,0 +1,120 @@
+{
+ "tag_name": "2026-10-05_17-18",
+ "name": "2026-10-05_17-18",
+ "assets": [
+  {
+   "name": "anime_domain.mrs"
+  },
+  {
+   "name": "block_domain.mrs"
+  },
+  {
+   "name": "cloudflare_domain.mrs"
+  },
+  {
+   "name": "cloudflare_ipcidr.mrs"
+  },
+  {
+   "name": "cloudfront_domain.mrs"
+  },
+  {
+   "name": "cloudfront_ipcidr.mrs"
+  },
+  {
+   "name": "digitalocean_domain.mrs"
+  },
+  {
+   "name": "digitalocean_ipcidr.mrs"
+  },
+  {
+   "name": "discord_domain.mrs"
+  },
+  {
+   "name": "discord_ipcidr.mrs"
+  },
+  {
+   "name": "geoblock_domain.mrs"
+  },
+  {
+   "name": "google_ai_domain.mrs"
+  },
+  {
+   "name": "google_meet_domain.mrs"
+  },
+  {
+   "name": "google_meet_ipcidr.mrs"
+  },
+  {
+   "name": "google_play_domain.mrs"
+  },
+  {
+   "name": "hdrezka_domain.mrs"
+  },
+  {
+   "name": "hetzner_domain.mrs"
+  },
+  {
+   "name": "hetzner_ipcidr.mrs"
+  },
+  {
+   "name": "hodca_domain.mrs"
+  },
+  {
+   "name": "meta_domain.mrs"
+  },
+  {
+   "name": "meta_ipcidr.mrs"
+  },
+  {
+   "name": "news_domain.mrs"
+  },
+  {
+   "name": "ovh_domain.mrs"
+  },
+  {
+   "name": "ovh_ipcidr.mrs"
+  },
+  {
+   "name": "porn_domain.mrs"
+  },
+  {
+   "name": "roblox_domain.mrs"
+  },
+  {
+   "name": "roblox_ipcidr.mrs"
+  },
+  {
+   "name": "russia_inside_domain.mrs"
+  },
+  {
+   "name": "russia_outside_domain.mrs"
+  },
+  {
+   "name": "telegram_domain.mrs"
+  },
+  {
+   "name": "telegram_ipcidr.mrs"
+  },
+  {
+   "name": "tiktok_domain.mrs"
+  },
+  {
+   "name": "twitter_domain.mrs"
+  },
+  {
+   "name": "twitter_ipcidr.mrs"
+  },
+  {
+   "name": "ukraine_inside_domain.mrs"
+  },
+  {
+   "name": "youtube_domain.mrs"
+  },
+  {
+   "name": "youtube.srs"
+  },
+  {
+   "name": "geosite.dat"
+  }
+ ]
+}

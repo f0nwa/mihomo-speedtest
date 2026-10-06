@@ -306,3 +306,8 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-row .xk-val{flex:1 1 160px;min-width:0;overflow-wrap:anywhere}
 .cx-row .geo-code{margin-left:0;flex:0 1 auto}
 .cx-row button{white-space:nowrap}
+/* Окно «Добавить сервис из базы» (openAdd() в stats_app_constructor.js) */
+.cx-dlg-body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.cx-dlg-body input[type=search]{width:100%;padding:7px 9px;border:1px solid var(--accent);background:var(--bg);color:var(--text);font:inherit;font-size:14px}
+.cx-results{max-height:45vh;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.cx-results label.geo-country{flex-wrap:wrap}

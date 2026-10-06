@@ -1,0 +1,225 @@
+{
+ "sha": "fixture",
+ "tree": [
+  {
+   "path": "geo/geosite/akamai.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/amazon.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/apple.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/category-ai-!cn.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/category-ru.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/cloudflare.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/dell.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/digitalocean.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/fastly.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/google.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/hetzner.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/intel.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/meta.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/microsoft.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/oracle.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/playstation.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/reddit.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/spotify.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/steam.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/speedtest.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/telegram.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/tmdb.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/twitch.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/twitter.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/youtube.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/netflix.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/openai.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/anthropic.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/disney.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/github.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/tiktok.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/instagram.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/linkedin.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/notion.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/hbo.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/primevideo.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/whatsapp.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/facebook.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/huggingface.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/nvidia.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/epicgames.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/deepseek.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/perplexity.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/docker.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/gitlab.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/figma.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/adobe.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/signal.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/xbox.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/nintendo.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/patreon.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/dropbox.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/soundcloud.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/steam@cn.mrs",
+   "type": "blob"
+  },
+  {
+   "path": "geo/geosite/youtube.list",
+   "type": "blob"
+  }
+ ]
+}
