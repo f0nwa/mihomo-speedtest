@@ -4,7 +4,7 @@
 // сервисов); здесь только отрисовка. Применяется вместе с остальным
 // конструктором (см. app-constructor.js): сборка на роутере, mihomo -t.
 
-import { card, el, fetchJson } from './app-core.js';
+import { el, fetchJson } from './app-core.js';
 import { GEO_CATALOG, geoBuild, geoParse } from './app-settings.js';
 import { UA_PRESETS } from './app-constructor-modules-model.js';
 
@@ -12,6 +12,42 @@ function button(text, cls) {
   var b = el('button', cls || 'small', text);
   b.type = 'button';
   return b;
+}
+
+// Русское число с существительным: plural(3, 'подписка', 'подписки', 'подписок').
+export function plural(n, one, few, many) {
+  var m10 = n % 10, m100 = n % 100;
+  var w = m10 === 1 && m100 !== 11 ? one : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many);
+  return n + ' ' + w;
+}
+
+// Сворачиваемый блок конструктора: номер, название, краткая сводка в
+// свёрнутом виде и пометка «изменён». body - куда класть содержимое.
+export function block(num, title, open) {
+  var root = el('section', 'cx-block');
+  var head = el('button', 'cx-bhead');
+  head.type = 'button';
+  var badge = el('span', 'cx-bnum', String(num));
+  var ttl = el('span', 'cx-btitle', title);
+  var sum = el('span', 'cx-bsum', '');
+  var chg = el('span', 'cx-bchg', 'изменён'); chg.hidden = true;
+  var arrow = el('span', 'cx-barrow', '▾');
+  [badge, ttl, sum, chg, arrow].forEach(function (n) { head.appendChild(n); });
+  var body = el('div', 'cx-bbody');
+  function set(on) {
+    body.hidden = !on;
+    head.setAttribute('aria-expanded', on ? 'true' : 'false');
+    root.className = 'cx-block' + (on ? ' open' : '');
+  }
+  head.addEventListener('click', function () { set(body.hidden); });
+  set(!!open);
+  root.appendChild(head); root.appendChild(body);
+  return {
+    root: root, body: body,
+    summary: function (t) { sum.textContent = t; },
+    changed: function (on) { chg.hidden = !on; },
+    open: set
+  };
 }
 
 function clear(n) { while (n.firstChild) { n.removeChild(n.firstChild); } }
@@ -48,13 +84,15 @@ function uaField(value) {
   return wrap;
 }
 
-// ctx: {mods, model, edit(fn), msg(text, kind), redraw(), changed()}. Возвращает {cards, render}:
-// карточки созданы один раз, render() перерисовывает их содержимое.
+// ctx: {mods, model, edit(fn), msg(text, kind), redraw(), changed()}.
+// Возвращает {cards, blocks, render, markChanged}: блоки созданы один раз,
+// render() перерисовывает содержимое и сводки, markChanged(ch) - пометки
+// «изменён» ({subs, proxies, filter}).
 export function createModuleCards(ctx) {
   var mods = ctx.mods, model = ctx.model;
 
   // ----- подписки -----
-  var subsCard = card('Подписки');
+  var subsBlk = block(1, 'Подписки', false), subsCard = subsBlk.body;
   subsCard.appendChild(el('p', 'hint', 'Ссылки на подписки с нодами. Адрес содержит ключ доступа, поэтому в списке виден только домен. ' +
     'User-Agent выбирает формат ответа панели: для Mihomo нужен clash-YAML (v2rayNG и clash.meta обычно подходят).'));
   var subsHost = el('div');
@@ -118,7 +156,7 @@ export function createModuleCards(ctx) {
   }
 
   // ----- свои прокси -----
-  var proxCard = card('Свои прокси');
+  var proxBlk = block(2, 'Свои прокси', true), proxCard = proxBlk.body;
   proxCard.appendChild(el('p', 'hint', 'Свои ноды (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
     'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются.'));
   var proxHost = el('div');
@@ -221,7 +259,7 @@ export function createModuleCards(ctx) {
   }
 
   // ----- исключения нод -----
-  var filtCard = card('Исключения нод');
+  var filtBlk = block(5, 'Исключения нод', false), filtCard = filtBlk.body;
   filtCard.appendChild(el('p', 'hint', 'Ноды, в имени которых есть любое из этих слов, не попадают в группы «Авто по пингу» и Fallback ' +
     '(exclude-filter подписок). Регистр не важен. Обязательно исключите Россию - иначе российская нода может выиграть замер по пингу.'));
   var filtHost = el('div');
@@ -282,7 +320,7 @@ export function createModuleCards(ctx) {
   }
 
   // ----- базовые группы -----
-  var baseCard = card('Базовые группы');
+  var baseBlk = block(6, 'Базовые группы', false), baseCard = baseBlk.body;
   baseCard.appendChild(el('p', 'hint', 'Автовыбор нод и общий режим для сервисов. interval - как часто проверять ноды (секунды), ' +
     'tolerance - на сколько мс текущая нода может отставать от лучшей, прежде чем группа переключится. ' +
     'Для групп со всеми нодами подписок interval ниже 300 не ставьте (при 100+ нодах - 600).'));
@@ -338,10 +376,21 @@ export function createModuleCards(ctx) {
 
   function render() {
     renderSubs(); renderProxies(); renderFilter(); renderBase();
+    subsBlk.summary(plural(mods.subs().length, 'подписка', 'подписки', 'подписок'));
+    proxBlk.summary(plural(mods.proxies().length, 'нода', 'ноды', 'нод'));
+    var countries = Object.keys(geoParse(mods.words().join('|')).sel).length;
+    filtBlk.summary(plural(countries, 'страна', 'страны', 'стран') + ', слов: ' + mods.words().length);
+    baseBlk.summary(plural(model.baseGroups().length, 'группа', 'группы', 'групп'));
+  }
+
+  function markChanged(ch) {
+    subsBlk.changed(ch.subs); proxBlk.changed(ch.proxies); filtBlk.changed(ch.filter);
   }
 
   return {
-    cards: { subs: subsCard, proxies: proxCard, filter: filtCard, base: baseCard },
-    render: render
+    cards: { subs: subsBlk.root, proxies: proxBlk.root, filter: filtBlk.root, base: baseBlk.root },
+    blocks: { subs: subsBlk, proxies: proxBlk, filter: filtBlk, base: baseBlk },
+    render: render,
+    markChanged: markChanged
   };
 }

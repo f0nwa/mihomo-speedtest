@@ -7,7 +7,7 @@
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
 import { createModules } from './app-constructor-modules-model.js';
-import { createModuleCards } from './app-constructor-modules.js';
+import { block, createModuleCards, plural } from './app-constructor-modules.js';
 import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
@@ -137,26 +137,39 @@ export function renderConstructor(modeBar, opts) {
       info.appendChild(it);
       head.appendChild(info);
     }
+    var chStatus = el('span', 'cx-status hint config-status');
+    var chList = el('ul', 'config-fixes');
+    var diffBtn = button('Показать изменения', 'submit secondary');
+    var resetBtn = button('Отменить', 'submit secondary');
+    var applyBtn = button('Проверить и применить', 'submit');
+    var bar = el('div', 'cx-topbar');
+    bar.appendChild(chStatus); bar.appendChild(el('span', 'xk-grow'));
+    bar.appendChild(diffBtn); bar.appendChild(resetBtn); bar.appendChild(applyBtn);
+    var chOut = el('div');
+    head.className += ' config-apply';
+    var actions = el('div');
+    actions.appendChild(bar); actions.appendChild(chList); actions.appendChild(chOut);
+    head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
     var modCards = createModuleCards({ mods: mods, model: model, edit: edit, msg: msg, redraw: draw, changed: refreshChanges });
     app.appendChild(modCards.cards.subs);
     app.appendChild(modCards.cards.proxies);
 
-    var svcCard = card('Сервисы');
+    var svcBlk = block(3, 'Сервисы', false), svcCard = svcBlk.body;
     svcCard.appendChild(el('p', 'hint', 'Сервис - группа в Mihomo и правила, по которым в неё попадает трафик. ' +
       'Куда направить группу (прокси, напрямую), выбирается как обычно в панели Mihomo.'));
     var svcHost = el('div');
     svcCard.appendChild(svcHost);
-    app.appendChild(svcCard);
+    app.appendChild(svcBlk.root);
 
-    var domCard = card('Свои домены');
+    var domBlk = block(4, 'Свои домены', false), domCard = domBlk.body;
     domCard.appendChild(el('p', 'hint', 'Все добавленные вами домены. Свои домены проверяются раньше любых наборов правил.'));
     var domHost = el('div');
     domCard.appendChild(domHost);
-    app.appendChild(domCard);
+    app.appendChild(domBlk.root);
 
-    var rulesCard = card('Свои правила');
+    var rulesBlk = block(7, 'Свои правила', false), rulesCard = rulesBlk.body;
     rulesCard.appendChild(el('p', 'hint', 'Правила Mihomo как есть, по одному в строке, без «- » (например ' +
       'DOMAIN-SUFFIX,example.com,DIRECT). Проверяются первыми. Сюда попадают и правила, которые не удалось разложить по сервисам при переносе.'));
     var rulesArea = el('textarea', 'xk-text');
@@ -166,7 +179,6 @@ export function renderConstructor(modeBar, opts) {
     var rulesErr = el('p', 'xk-err');
     rulesCard.appendChild(rulesArea);
     rulesCard.appendChild(rulesErr);
-    app.appendChild(rulesCard);
     rulesArea.addEventListener('input', function () {
       try { model.setUserRules(rulesArea.value); rulesErr.textContent = ''; } catch (e) { rulesErr.textContent = e.message; }
       refreshChanges();
@@ -174,19 +186,7 @@ export function renderConstructor(modeBar, opts) {
 
     app.appendChild(modCards.cards.filter);
     app.appendChild(modCards.cards.base);
-
-    var chCard = card('Изменения');
-    chCard.className += ' config-apply';
-    var chStatus = el('p', 'hint config-status');
-    var chList = el('ul', 'config-fixes');
-    var chRow = el('div', 'btn-row');
-    var diffBtn = button('Показать изменения config.yaml', 'submit secondary');
-    var applyBtn = button('Проверить и применить', 'submit');
-    var resetBtn = button('Отменить изменения', 'submit secondary');
-    chRow.appendChild(diffBtn); chRow.appendChild(applyBtn); chRow.appendChild(resetBtn);
-    var chOut = el('div');
-    chCard.appendChild(chStatus); chCard.appendChild(chList); chCard.appendChild(chRow); chCard.appendChild(chOut);
-    app.appendChild(chCard);
+    app.appendChild(rulesBlk.root);
 
     function msg(text, kind) {
       while (msgBox.firstChild) { msgBox.removeChild(msgBox.firstChild); }
@@ -205,18 +205,35 @@ export function renderConstructor(modeBar, opts) {
     function refreshChanges() {
       var list = model.summary(initial).concat(mods.summary(initialMods));
       var problems = mods.problems();
-      // перенос ещё не сохранён в конструкторе - это изменение, даже если
-      // переносить нечего (иначе предупреждение о ручных правках не снять)
-      if (data.imported) { list.unshift('Перенос из config.yaml (настройки ещё не сохранены в конструкторе)'); }
       if (rulesErr.textContent) { list.push('Свои правила: исправьте ошибку'); }
       problems.forEach(function (t) { list.push(t); });
+      // правки пользователя; перенос из config.yaml сам по себе уйти со
+      // страницы не мешает (в нём нечего терять - всё лежит в config.yaml)
       v.dirty = list.length > 0;
+      // перенос ещё не сохранён в конструкторе - это изменение, даже если
+      // переносить нечего (иначе предупреждение о ручных правках не снять)
+      var pending = list.length;
+      if (data.imported) { list.unshift('Перенос из config.yaml (настройки ещё не сохранены в конструкторе)'); }
       clear(chList);
       list.forEach(function (t) { chList.appendChild(el('li', null, t)); });
       chStatus.textContent = list.length ? ('Не применено изменений: ' + list.length) : 'Изменений нет.';
-      chStatus.className = 'hint config-status' + (list.length ? ' config-dirty' : '');
+      chStatus.className = 'cx-status hint config-status' + (pending ? ' config-dirty' : '');
       applyBtn.disabled = !list.length || !!rulesErr.textContent || problems.length > 0;
       diffBtn.disabled = !!rulesErr.textContent;
+      // пометки «изменён» и сводки свёрнутых блоков
+      var ch = model.changes(initial);
+      modCards.markChanged(mods.changes(initialMods));
+      modCards.blocks.base.changed(ch.base);
+      svcBlk.changed(ch.services); domBlk.changed(ch.domains); rulesBlk.changed(ch.rules);
+      var live = model.services().filter(function (s) { return !s.deleted; }).length;
+      svcBlk.summary(plural(live, 'группа', 'группы', 'групп'));
+      var ownDoms = 0;
+      model.services().forEach(function (s) {
+        if (!s.deleted) { model.domains(s.id).forEach(function (d) { if (!d.builtin && !d.removed) { ownDoms++; } }); }
+      });
+      domBlk.summary(plural(ownDoms, 'домен', 'домена', 'доменов'));
+      var nr = model.userRules().split('\n').filter(Boolean).length;
+      rulesBlk.summary(nr ? plural(nr, 'правило', 'правила', 'правил') : 'нет');
     }
 
     function domainRow(id, d) {

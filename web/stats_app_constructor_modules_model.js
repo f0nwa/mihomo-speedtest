@@ -392,6 +392,15 @@ export function createModules(data) {
         geofilter: words && !model.isDefaultWords() ? words.join('\n') + '\n' : ''
       };
     },
+    // Какие блоки изменены относительно initial: subs, proxies, filter.
+    changes: function (initial) {
+      var cur = model.serialize();
+      return {
+        subs: cur.subscriptions !== null && cur.subscriptions !== (initial.subscriptions || ''),
+        proxies: cur.proxies !== null && cur.proxies !== (initial.proxies || ''),
+        filter: (initial.geofilter || '') !== cur.geofilter
+      };
+    },
     // Сводка относительно исходного состояния - только имена, без адресов
     // подписок и паролей.
     summary: function (initial) {

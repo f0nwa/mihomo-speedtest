@@ -326,3 +326,17 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
 .cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
 .cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}
+.cx-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}
+.cx-topbar .submit{margin-top:0}
+.cx-status{margin:0}
+.cx-block{margin:10px 0;background:var(--card);border:1px solid var(--card-border)}
+.cx-bhead{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:transparent;border:0;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.cx-bnum{flex:0 0 auto;min-width:22px;padding:1px 0;text-align:center;border:1px solid var(--card-border);color:var(--muted);font-size:12px}
+.cx-block.open .cx-bnum{border-color:var(--accent);color:var(--accent)}
+.cx-btitle{font-weight:600}
+.cx-bsum{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12.5px}
+.cx-bchg{flex:0 0 auto;color:#e0b060;font-size:12px}
+.cx-barrow{flex:0 0 auto;color:var(--muted);transition:transform .15s}
+.cx-block:not(.open) .cx-barrow{transform:rotate(-90deg)}
+.cx-bbody{padding:2px 14px 14px;border-top:1px solid var(--border)}
+.cx-bbody[hidden]{display:none}

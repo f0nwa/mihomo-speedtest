@@ -62,7 +62,7 @@ for f in stats_app_constructor_modules.js stats_app_constructor_modules_model.js
   grep -q "$f" "$ROOT/uninstall.sh" || fail "uninstall.sh: $f"
   case " $(sed -n 's/^ALL_PROJECT_FILES="\(.*\)"$/\1/p' "$ROOT/install.sh") " in *" $f "*) ;; *) fail "ALL_PROJECT_FILES: $f" ;; esac
 done
-for t in "card('Подписки')" "card('Свои прокси')" "card('Исключения нод')" "card('Базовые группы')"; do
+for t in "block(1, 'Подписки'" "block(2, 'Свои прокси'" "block(5, 'Исключения нод'" "block(6, 'Базовые группы'"; do
   grep -qF "$t" "$MOD" || fail "нет карточки $t"
 done
 grep -q "createModuleCards" "$UI" || fail "UI не подключает блоки"
@@ -70,6 +70,17 @@ grep -q "mods.serialize()" "$UI" || fail "подписки, ноды и филь
 grep -q "mods.problems()" "$UI" || fail "применение не проверяет, что есть подписки или ноды"
 grep -q "/api/constructor/wgconf" "$MOD" || fail "нет импорта WireGuard .conf"
 grep -q "hostOf" "$MOD" || fail "адрес подписки показывается целиком (в нём ключ доступа)"
+
+# Аккордеон по макету: нумерация, сводки, «изменён», применение сверху
+for t in "block(3, 'Сервисы'" "block(4, 'Свои домены'" "block(7, 'Свои правила'"; do
+  grep -qF "$t" "$UI" || fail "нет блока $t"
+done
+grep -q "'изменён'" "$MOD" || fail "нет пометки «изменён»"
+grep -q "cx-topbar" "$UI" || fail "кнопка применения не наверху"
+! grep -q "card('Изменения')" "$UI" || fail "осталась нижняя карточка «Изменения»"
+grep -q "model.changes(initial)" "$UI" || fail "блоки не помечаются изменёнными"
+# режим по умолчанию - YAML (иначе каждый переход по вкладкам спрашивал бы подтверждение)
+grep -q "=== 'constructor' ? 'constructor' : 'yaml'" "$CFG" || fail "по умолчанию должен открываться YAML"
 
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then

@@ -19,12 +19,12 @@ export function configDirty() { return !!(configView && configView.dirty) || con
 // Вызывается при уходе с вкладки (render() в app.js).
 export function leaveConfig() { configView = null; leaveConstructor(); }
 
-// Режим вкладки: «Конструктор» (stats_app_constructor.js) или «YAML»
-// (редактор ниже). Выбор запоминается в браузере; миграция с карточки
-// «Обновлений» всегда открывает YAML.
+// Режим вкладки: «YAML» (редактор ниже, по умолчанию) или «Конструктор»
+// (stats_app_constructor.js). Выбор запоминается в браузере; миграция с
+// карточки «Обновлений» всегда открывает YAML.
 var MODE_KEY = 'mst-config-mode';
 function savedMode() {
-  try { return localStorage.getItem(MODE_KEY) === 'yaml' ? 'yaml' : 'constructor'; } catch (e) { return 'constructor'; }
+  try { return localStorage.getItem(MODE_KEY) === 'constructor' ? 'constructor' : 'yaml'; } catch (e) { return 'yaml'; }
 }
 function saveMode(m) { try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* без запоминания */ } }
 
@@ -55,7 +55,7 @@ function modeBar(current) {
 }
 
 export function renderConfig() {
-  if (pendingMigration || savedMode() === 'yaml') { renderYaml(modeBar('yaml')); return; }
+  if (pendingMigration || savedMode() !== 'constructor') { renderYaml(modeBar('yaml')); return; }
   renderConstructor(modeBar('constructor'), { renderDiff: renderDiff });
 }
 

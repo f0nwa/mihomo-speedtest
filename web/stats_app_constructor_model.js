@@ -405,6 +405,23 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         user_rules: userRules.length ? userRules.join('\n') + '\n' : ''
       };
     },
+    // Какие блоки конструктора изменены относительно initial (для пометок
+    // «изменён»): services, domains, base, rules.
+    changes: function (initial) {
+      var cur = model.serialize();
+      var before = lines(initial.services).filter(Boolean), after = lines(cur.services).filter(Boolean);
+      var res = { services: false, domains: false, base: false, rules: (initial.user_rules || '') !== cur.user_rules };
+      function mark(l) {
+        var f = l.split(TAB);
+        if (f[0] === 'bset' || f[0] === 'bfirst') { res.base = true; }
+        else if (f[0] === 'dom') { res.domains = true; }
+        else if (f[0] === 'unrule' && /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD),/.test(ruleBody(f.slice(2).join(TAB)))) { res.domains = true; }
+        else { res.services = true; }
+      }
+      before.forEach(function (l) { if (after.indexOf(l) < 0) { mark(l); } });
+      after.forEach(function (l) { if (before.indexOf(l) < 0) { mark(l); } });
+      return res;
+    },
     // Сводка изменений относительно прежней сериализации - человеческим языком.
     summary: function (initial) {
       var cur = model.serialize();
