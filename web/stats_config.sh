@@ -502,7 +502,7 @@ backup_path() {
   printf '%s\n' "$p"
 }
 
-# Список бэкапов: "kind<TAB>name<TAB>путь", свежие сверху. Сортировка по
+# Список бэкапов: "kind<TAB>name<TAB>путь", от старых к новым. Сортировка по
 # отметке времени в имени (config.yaml.YYYY-MM-DD_HHMMSS[-N].bak) - она
 # одинаковая у своих бэкапов и у бэкапов setup.sh/uninstall.sh.
 list_backups() {
@@ -513,7 +513,7 @@ list_backups() {
     for p in "$CONFIG".*.bak; do
       [ -f "$p" ] && printf 'setup\t%s\t%s\n' "${p##*/}" "$p"
     done
-  } | sort -t "$(printf '\t')" -k2,2r
+  } | LC_ALL=C sort -t "$(printf '\t')" -k2,2
 }
 
 # ----- починка -----

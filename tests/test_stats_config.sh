@@ -118,10 +118,10 @@ assert_contains 'xkeen: core started' "$lg"
 assert_not_contains 'old line' "$lg"
 printf 'mixed-port: 7891\n' > "$M/config.yaml"
 
-# --- 7: список бэкапов содержит свои и setup.sh, свежие сверху
+# --- 7: список бэкапов содержит свои и setup.sh, от старых к новым
 out=$(cgi backups GET '' </dev/null)
 list=$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read().split("\n\n",1)[1]); print(" ".join(b["kind"] for b in d["backups"]))')
-[ "$list" = "edit edit edit setup" ] || fail "7: order $list"
+[ "$list" = "setup edit edit edit" ] || fail "7: order $list"
 
 # --- 8: чтение и restore бэкапа setup.sh; неверное имя - 404
 out=$(cgi backup GET 'kind=setup&name=config.yaml.2026-01-01_000000.bak' </dev/null)
