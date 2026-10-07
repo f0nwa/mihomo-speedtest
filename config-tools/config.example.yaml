@@ -18,7 +18,7 @@ anchors:
   a2: &ipcidr { type: http, format: mrs, behavior: ipcidr, interval: 86400 }
   a3: &classical { type: http, format: text, behavior: classical, interval: 86400 }
   a4: &inline { type: inline, behavior: classical }
-  http-provider: &http-provider { type: http, interval: 3600, exclude-filter: &geofilter '(?i)🇷🇺|Russia|Россия|RU-|RU_|Moscow|Москва|MSK|SPB|СПб|🇺🇦|Ukraine|Украина|🇰🇿|Kazakhstan|Казахстан|🇹🇷|Turkey|Турция|Türkiye|🇮🇱|Israel|Израиль|🇮🇳|India|Индия|🇯🇵|Japan|Япония|🇰🇷|Korea|Корея|🇲🇾|Malaysia|Малайзия|🇦🇺|Australia|Австралия|🇿🇦|South Africa|ЮАР|🇳🇬|Nigeria|Нигерия|🇧🇷|Brazil|Бразилия|🇦🇷|Argentina|Аргентина|🇨🇱|Chile|Чили|🇨🇴|Colombia|Колумбия|🇵🇪|Peru|Перу|🇲🇽|Mexico|Мексика|RU|whitelist|Белые|Auto|Обход' }
+  http-provider: &http-provider { type: http, interval: 3600, exclude-filter: &geofilter '(?i)🇷🇺|Russia|Россия|RU-|RU_|Moscow|Москва|MSK|SPB|СПб|🇺🇦|Ukraine|Украина|🇰🇿|Kazakhstan|Казахстан|🇹🇷|Turkey|Турция|Türkiye|🇮🇱|Israel|Израиль|🇮🇳|India|Индия|🇯🇵|Japan|Япония|🇰🇷|Korea|Корея|🇲🇾|Malaysia|Малайзия|🇦🇺|Australia|Австралия|🇿🇦|South Africa|ЮАР|🇳🇬|Nigeria|Нигерия|🇧🇷|Brazil|Бразилия|🇦🇷|Argentina|Аргентина|🇨🇱|Chile|Чили|🇨🇴|Colombia|Колумбия|🇵🇪|Peru|Перу|🇲🇽|Mexico|Мексика|whitelist|Белые|Auto|Обход' }
   gstatic-health-check: &gstatic-health-check { enable: true, url: "http://www.gstatic.com/generate_204", interval: 300, timeout: 5000, lazy: true }
   sub-names: &sub-names [provider-a, provider-b, provider-c]
   select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Заблок. сервисы', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'] }
