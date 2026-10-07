@@ -13,7 +13,7 @@ UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 # среди последних релизов любого вида, включая pre-release). См.
 # read_update_channel и resolve_channel_base.
 UPDATE_ENV_FILE=${UPDATE_ENV_FILE:-/opt/etc/mihomo-speedtest/speedtest2.env}
-UPDATE_RELEASES_API=${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10}
+UPDATE_RELEASES_API=${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
 UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-/opt/etc/mihomo-speedtest/.update}
 MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
@@ -237,7 +237,7 @@ resolve_channel_base() {
   [ -z "${UPDATE_BOOTSTRAP_DIR:-}${UPDATE_VERIFIED_ENGINE_DIR:-}${UPDATE_RECOVERY_ENGINE_DIR:-}" ] || return 0
   [ "$(read_update_channel)" = dev ] || return 0
   case $UPDATE_RELEASE_BASE in */releases/latest/download) ;; *) return 0 ;; esac
-  download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 1048576
+  download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 4194304
   # Не первый релиз по дате, а наибольший тег x.y.z среди последних
   # релизов: стабильный hotfix (1.2.1), вышедший после dev 1.3.0, не должен
   # откатывать канал dev. Теги не вида x.y.z (старые v1..v26.x) пропускаются.
