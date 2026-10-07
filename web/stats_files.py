@@ -378,3 +378,23 @@ def delete(path, recursive=False, confirm=None):
     except OSError as exc:
         raise _oserror(exc)
     return {"path": norm}
+
+
+def open_regular(path):
+    """Открывает обычный файл для скачивания: (файл, размер, имя)."""
+    norm = normalize(path)
+    try:
+        # сначала stat: open() на FIFO блокируется, пока нет писателя
+        if not stat.S_ISREG(os.stat(norm).st_mode):
+            raise FileError(415, "not_regular")
+        f = open(norm, "rb")
+    except OSError as exc:
+        raise _oserror(exc)
+    try:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise FileError(415, "not_regular")
+    except BaseException:
+        f.close()
+        raise
+    return f, st.st_size, _display(posixpath.basename(norm))

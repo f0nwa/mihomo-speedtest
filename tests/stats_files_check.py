@@ -293,5 +293,21 @@ class StructureTests(Base):
         self.assertEqual(cm.exception.status, 404)
 
 
+class DownloadTests(Base):
+    def test_open_regular(self):
+        p = self.touch("файл.txt", b"12345")
+        f, size, name = sf.open_regular(p)
+        with f:
+            self.assertEqual(f.read(), b"12345")
+        self.assertEqual((size, name), (5, "файл.txt"))
+        for bad in ("/dev/null", self.root):
+            with self.assertRaises(sf.FileError) as cm:
+                sf.open_regular(bad)
+            self.assertEqual((cm.exception.status, cm.exception.code), (415, "not_regular"))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.open_regular(self.path("missing"))
+        self.assertEqual(cm.exception.status, 404)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
