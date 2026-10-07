@@ -14,6 +14,7 @@ import { refreshUpdatesBadge, renderUpdates, stopUpdateJobPolling } from './app-
 import { renderLog, stopLogPolling } from './app-log.js';
 import { configDirty, leaveConfig, renderConfig } from './app-config.js';
 import { renderXkeen, stopXkeenPolling, xkeenDirty } from './app-xkeen.js';
+import { filesDirty, renderFiles, stopFiles } from './app-files.js';
 
 function updateActiveNav(path) {
   var links = document.querySelectorAll('nav a[data-link]');
@@ -30,6 +31,8 @@ function navigate(path) {
       !window.confirm('В редакторе конфига есть несохранённые изменения. Уйти со страницы?')) { return; }
   if (xkeenDirty() && path !== location.pathname &&
       !window.confirm('В списках XKeen есть несохранённые изменения. Уйти со страницы?')) { return; }
+  if (filesDirty() && path !== location.pathname &&
+      !window.confirm('В файловом менеджере есть несохранённые изменения. Уйти со страницы?')) { return; }
   history.pushState(null, '', path);
   render(path);
   updateActiveNav(path);
@@ -61,11 +64,13 @@ function render(path) {
   stopUpdateJobPolling();
   stopLogPolling();
   stopXkeenPolling();
+  stopFiles();
   if (path === '/updates') { renderUpdates(); }
   else if (path === '/settings') { renderSettings(); }
   else if (path === '/log') { renderLog(); }
   else if (path === '/config') { renderConfig(); }
   else if (path === '/xkeen') { renderXkeen(); }
+  else if (path === '/files') { renderFiles(); }
   else { renderStats(); }
   if (path !== '/updates') { refreshUpdatesBadge(); }
 }
