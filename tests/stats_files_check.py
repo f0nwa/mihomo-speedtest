@@ -143,5 +143,155 @@ class ReadTests(Base):
         self.assertEqual((cm.exception.status, cm.exception.code), (415, "not_regular"))
 
 
+class WriteTests(Base):
+    def test_write_text_makes_bak_and_preserves_mode(self):
+        p = self.touch("c.yaml", b"old\n")
+        os.chmod(p, 0o640)
+        res = sf.write_text(p, "new\n")
+        with open(p, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "new\n")
+        with open(p + ".bak", "rb") as f:
+            self.assertEqual(f.read(), b"old\n")
+        self.assertEqual(stat.S_IMODE(os.stat(p).st_mode), 0o640)
+        self.assertEqual(res["size"], 4)
+        self.assertEqual(os.listdir(self.root).count("c.yaml.part"), 0)
+
+    def test_write_text_creates_new_file_without_bak(self):
+        p = self.path("fresh.txt")
+        sf.write_text(p, "x")
+        self.assertTrue(os.path.isfile(p))
+        self.assertFalse(os.path.exists(p + ".bak"))
+
+    def test_write_text_conflict_on_stale_mtime(self):
+        p = self.touch("c.yaml", b"old")
+        mtime = os.stat(p).st_mtime
+        os.utime(p, (mtime + 10, mtime + 10))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.write_text(p, "new", expected_mtime=mtime)
+        self.assertEqual((cm.exception.status, cm.exception.code), (409, "conflict"))
+        with open(p, "rb") as f:
+            self.assertEqual(f.read(), b"old")
+
+    def test_write_text_refuses_panel_files(self):
+        guard = self.path("guard")
+        os.mkdir(guard)
+        os.environ["FM_READONLY"] = guard
+        self.addCleanup(os.environ.pop, "FM_READONLY", None)
+        with self.assertRaises(sf.FileError) as cm:
+            sf.write_text(os.path.join(guard, "x"), "data")
+        self.assertEqual((cm.exception.status, cm.exception.code), (403, "readonly"))
+
+
+class UploadTests(Base):
+    def stream(self, name, data, length=None, **kw):
+        return sf.save_stream(self.root, name, io.BytesIO(data),
+                              len(data) if length is None else length, **kw)
+
+    def test_save_stream_roundtrip_and_replace(self):
+        res = self.stream("a.bin", b"x" * 200000, chunk=4096)
+        self.assertEqual(res["size"], 200000)
+        self.assertEqual(res["path"], self.path("a.bin"))
+        self.stream("a.bin", b"short")
+        with open(self.path("a.bin"), "rb") as f:
+            self.assertEqual(f.read(), b"short")
+        self.assertEqual(os.listdir(self.root), ["a.bin"])
+
+    def test_save_stream_rejects_bad_names(self):
+        for bad in ("../x", "a/b", ".", "..", "", "a\0b"):
+            with self.assertRaises(sf.FileError) as cm:
+                self.stream(bad, b"d")
+            self.assertEqual(cm.exception.code, "bad_name", bad)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_save_stream_too_large(self):
+        with self.assertRaises(sf.FileError) as cm:
+            self.stream("big", b"x" * 20, max_bytes=10)
+        self.assertEqual(cm.exception.status, 413)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_save_stream_truncated_body_cleans_part(self):
+        self.touch("keep", b"original")
+        with self.assertRaises(sf.FileError):
+            self.stream("keep", b"abc", length=100)
+        self.assertEqual(sorted(os.listdir(self.root)), ["keep"])
+        with open(self.path("keep"), "rb") as f:
+            self.assertEqual(f.read(), b"original")
+
+    def test_save_stream_no_space(self):
+        real = os.statvfs
+
+        class V:
+            f_bavail = 0
+            f_frsize = 4096
+
+        os.statvfs = lambda p: V()
+        self.addCleanup(setattr, os, "statvfs", real)
+        with self.assertRaises(sf.FileError) as cm:
+            self.stream("a", b"data")
+        self.assertEqual((cm.exception.status, cm.exception.code), (507, "no_space"))
+        self.assertEqual(os.listdir(self.root), [])
+
+
+class StructureTests(Base):
+    def test_mkdir(self):
+        sf.mkdir(self.path("new"))
+        self.assertTrue(os.path.isdir(self.path("new")))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.mkdir(self.path("new"))
+        self.assertEqual(cm.exception.status, 409)
+
+    def test_rename_refuses_existing(self):
+        a = self.touch("a", b"A")
+        b = self.touch("b", b"B")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.rename(a, b)
+        self.assertEqual((cm.exception.status, cm.exception.code), (409, "exists"))
+        with open(b, "rb") as f:
+            self.assertEqual(f.read(), b"B")
+        sf.rename(a, self.path("c"))
+        self.assertTrue(os.path.exists(self.path("c")))
+
+    def test_rename_and_delete_protected(self):
+        with self.assertRaises(sf.FileError) as cm:
+            sf.delete("/etc", recursive=True, confirm="/etc")
+        self.assertEqual((cm.exception.status, cm.exception.code), (403, "protected"))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.rename("/opt", "/opt2")
+        self.assertEqual(cm.exception.code, "protected")
+
+    def test_delete_symlink_keeps_target(self):
+        target = self.path("target")
+        os.mkdir(target)
+        self.touch("target/inner")
+        os.symlink(target, self.path("lnk"))
+        sf.delete(self.path("lnk"))
+        self.assertFalse(os.path.lexists(self.path("lnk")))
+        self.assertTrue(os.path.exists(self.path("target", "inner")))
+
+    def test_delete_recursive_needs_confirm(self):
+        d = self.path("tree")
+        os.makedirs(os.path.join(d, "sub"))
+        self.touch("tree/sub/f")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.delete(d)
+        self.assertEqual((cm.exception.status, cm.exception.code), (409, "not_empty"))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.delete(d, recursive=True)
+        self.assertEqual((cm.exception.status, cm.exception.code), (400, "confirm_required"))
+        with self.assertRaises(sf.FileError):
+            sf.delete(d, recursive=True, confirm=d + "x")
+        self.assertTrue(os.path.isdir(d))
+        sf.delete(d, recursive=True, confirm=d)
+        self.assertFalse(os.path.exists(d))
+
+    def test_delete_file_and_missing(self):
+        p = self.touch("f")
+        sf.delete(p)
+        self.assertFalse(os.path.exists(p))
+        with self.assertRaises(sf.FileError) as cm:
+            sf.delete(p)
+        self.assertEqual(cm.exception.status, 404)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

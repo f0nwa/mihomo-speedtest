@@ -15,9 +15,13 @@ docs/superpowers/specs/2026-10-07-web-file-manager-design.md).
 import errno
 import os
 import posixpath
+import shutil
 import stat
 
 TEXT_LIMIT = 1024 * 1024
+WRITE_LIMIT = 2 * 1024 * 1024
+UPLOAD_MAX = 64 * 1024 * 1024
+CHUNK = 64 * 1024
 LIST_LIMIT = 2000
 SNIFF_BYTES = 8192
 HIDDEN_SUFFIXES = (".bak", ".part")
@@ -209,3 +213,168 @@ def read_text(path, limit=TEXT_LIMIT):
         raise FileError(415, "not_text")
     return {"content": text, "mtime": st.st_mtime, "size": len(data),
             "readonly": is_readonly(norm)}
+
+
+def _cleanup(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _replace_atomic(tmp, target, mode=None):
+    if mode is not None:
+        os.chmod(tmp, mode)
+    os.replace(tmp, target)
+
+
+def write_text(path, content, expected_mtime=None):
+    """Сохраняет текст: прежнее содержимое в .bak, замена атомарная."""
+    norm = normalize(path)
+    if is_readonly(norm):
+        raise FileError(403, "readonly")
+    data = content.encode("utf-8")
+    if len(data) > WRITE_LIMIT:
+        raise FileError(413, "too_large")
+    target = os.path.realpath(norm) if os.path.islink(norm) else norm
+    mode = None
+    existed = False
+    try:
+        try:
+            st = os.stat(target)
+        except FileNotFoundError:
+            st = None
+        if st is not None:
+            if not stat.S_ISREG(st.st_mode):
+                raise FileError(415, "not_regular")
+            if expected_mtime is not None and abs(st.st_mtime - float(expected_mtime)) > 0.001:
+                raise FileError(409, "conflict")
+            mode = stat.S_IMODE(st.st_mode)
+            existed = True
+        tmp = target + ".part"
+        try:
+            if existed:
+                shutil.copyfile(target, target + ".bak")
+            with open(tmp, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            _replace_atomic(tmp, target, mode)
+        except BaseException:
+            _cleanup(tmp)
+            raise
+        new = os.stat(target)
+    except OSError as exc:
+        raise _oserror(exc)
+    return {"mtime": new.st_mtime, "size": new.st_size}
+
+
+def _check_name(name):
+    if (not isinstance(name, str) or name in ("", ".", "..")
+            or "/" in name or "\0" in name):
+        raise FileError(400, "bad_name")
+
+
+def save_stream(dest_dir, name, rfile, length, max_bytes=UPLOAD_MAX, chunk=CHUNK):
+    """Принимает загрузку потоком: *.part, затем атомарная замена файла."""
+    _check_name(name)
+    directory = normalize(dest_dir)
+    if length < 0:
+        raise FileError(400, "bad_length")
+    if length > max_bytes:
+        raise FileError(413, "too_large")
+    target = posixpath.join(directory, name)
+    if is_readonly(target):
+        raise FileError(403, "readonly")
+    if not os.path.isdir(directory):
+        raise FileError(404, "not_found")
+    try:
+        vfs = os.statvfs(directory)
+    except OSError as exc:
+        raise _oserror(exc)
+    if length > vfs.f_bavail * vfs.f_frsize:
+        raise FileError(507, "no_space")
+    tmp = target + ".part"
+    received = 0
+    try:
+        mode = None
+        try:
+            mode = stat.S_IMODE(os.stat(target).st_mode)
+        except OSError:
+            pass
+        with open(tmp, "wb") as f:
+            while received < length:
+                block = rfile.read(min(chunk, length - received))
+                if not block:
+                    raise FileError(400, "truncated")
+                f.write(block)
+                received += len(block)
+            f.flush()
+            os.fsync(f.fileno())
+        _replace_atomic(tmp, target, mode)
+    except FileError:
+        _cleanup(tmp)
+        raise
+    except OSError as exc:
+        _cleanup(tmp)
+        raise _oserror(exc)
+    except BaseException:
+        _cleanup(tmp)
+        raise
+    return {"path": target, "size": received}
+
+
+def mkdir(path):
+    norm = normalize(path)
+    if is_readonly(norm):
+        raise FileError(403, "readonly")
+    try:
+        os.mkdir(norm)
+    except OSError as exc:
+        raise _oserror(exc)
+    return {"path": norm}
+
+
+def rename(src, dst):
+    """Переименование/перенос; поверх существующего - отказ."""
+    a = normalize(src)
+    b = normalize(dst)
+    if is_protected(a) or is_protected(b):
+        raise FileError(403, "protected")
+    if is_readonly(a) or is_readonly(b):
+        raise FileError(403, "readonly")
+    if os.path.lexists(b):
+        raise FileError(409, "exists")
+    try:
+        os.rename(a, b)
+    except OSError as exc:
+        raise _oserror(exc)
+    return {"path": b}
+
+
+def delete(path, recursive=False, confirm=None):
+    """Удаление; ссылка удаляется как ссылка; дерево - только с confirm."""
+    norm = normalize(path)
+    if is_protected(norm):
+        raise FileError(403, "protected")
+    if is_readonly(norm):
+        raise FileError(403, "readonly")
+    try:
+        st = os.lstat(norm)
+        if not stat.S_ISDIR(st.st_mode):
+            os.unlink(norm)
+            return {"path": norm}
+        try:
+            os.rmdir(norm)
+            return {"path": norm}
+        except OSError as exc:
+            if exc.errno != errno.ENOTEMPTY:
+                raise
+        if not recursive:
+            raise FileError(409, "not_empty")
+        if confirm != norm:
+            raise FileError(400, "confirm_required")
+        shutil.rmtree(norm)
+    except OSError as exc:
+        raise _oserror(exc)
+    return {"path": norm}
