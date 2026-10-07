@@ -10,6 +10,10 @@
 # или первым позиционным аргументом при прямом запуске:
 #   check  [источник]  POST - проверить версии, записать components.json
 #   status             GET  - components.json, состояние и журнал обновления
+#   apply  ?name=      POST - обновить mihomo или zashboard (xkeen не обновляется):
+#                          фоновое задание, состояние - components-job.json,
+#                          ход - components-job.log; общий с редактором конфига
+#                          замок CONFIGEDIT_LOCK, один apply за раз
 set -eu
 
 DIR=${DIR:-/opt/etc/mihomo-speedtest}
@@ -27,11 +31,21 @@ XKEEN_RELEASES_REPO=${XKEEN_RELEASES_REPO:-jameszeroX/XKeen}
 # COMPONENTS_HTTP_CMD - только для тестов: команда вместо curl.
 COMPONENTS_HTTP_CMD=${COMPONENTS_HTTP_CMD:-}
 COMP_HTTP_TIMEOUT=${COMP_HTTP_TIMEOUT:-30}
+COMPONENTS_UPGRADE_WAIT=${COMPONENTS_UPGRADE_WAIT:-60}   # сколько ждать смены версии ядра после /upgrade, с
+COMPONENTS_POLL=${COMPONENTS_POLL:-2}                    # период опроса /version, с
+RESTART_TIMEOUT=${RESTART_TIMEOUT:-30}
+CONFIGEDIT_LOCK=${CONFIGEDIT_LOCK:-$TMPROOT/mst-configedit.lock}
 WORK=
 API_BASE=
 CURL_CFG=
+LOCK_OWNED=0
+JOB_NAME=
+JOB_STARTED=
 
-cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
+cleanup() {
+  [ -z "$WORK" ] || rm -rf "$WORK"
+  [ "$LOCK_OWNED" != 1 ] || rm -rf "$CONFIGEDIT_LOCK"
+}
 trap cleanup EXIT INT TERM
 
 json_error() {
@@ -213,6 +227,156 @@ cmd_status() {
     "$(read_json_or_null "$COMPONENTS_FILE")" "$(read_json_or_null "$JOB_FILE")" "$(read_log_json "$JOB_LOG")"
 }
 
+# ----- обновление (apply) -----
+
+reply_status() {
+  # $1 = HTTP-статус, $2 = код ошибки
+  echo "Status: $1"
+  echo "Content-Type: application/json; charset=utf-8"
+  echo
+  printf '{"error":"%s"}\n' "$2"
+  exit 0
+}
+
+# Замок общий с редактором конфига и командами XKeen (CONFIGEDIT_LOCK, pid
+# внутри): пока ядро обновляется, конфиг не применяется и наоборот. Мёртвый
+# замок снимается. 0 - взят, 1 - занят живым процессом.
+take_lock() {
+  if ! mkdir "$CONFIGEDIT_LOCK" 2>/dev/null; then
+    tl_old=$(cat "$CONFIGEDIT_LOCK/pid" 2>/dev/null || true)
+    case $tl_old in
+      ''|*[!0-9]*) ;;
+      *) if kill -0 "$tl_old" 2>/dev/null; then return 1; fi ;;
+    esac
+    rm -rf "$CONFIGEDIT_LOCK"
+    mkdir "$CONFIGEDIT_LOCK" 2>/dev/null || return 1
+  fi
+  echo $$ > "$CONFIGEDIT_LOCK/pid" || true
+}
+
+# Команда с ограничением по времени, вывод в /dev/null (xkeen -restart
+# запускает демон mihomo - унаследованный stdout держал бы ответ открытым).
+bounded() {
+  bd_limit=$1; shift
+  ( exec "$@" ) > /dev/null 2>&1 < /dev/null &
+  bd_pid=$!
+  bd_waited=0
+  while kill -0 "$bd_pid" 2>/dev/null; do
+    if [ "$bd_waited" -ge "$bd_limit" ]; then kill "$bd_pid" 2>/dev/null || true; return 124; fi
+    sleep 1; bd_waited=$((bd_waited + 1))
+  done
+  wait "$bd_pid"
+}
+
+jlog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >> "$JOB_LOG" 2>/dev/null || true; }
+
+# $1 = running|done|error, $2 = текст ошибки или пусто
+write_job() {
+  wj_fin=null; wj_err=null
+  case $1 in done|error) wj_fin="\"$(date '+%Y-%m-%d %H:%M:%S')\"" ;; esac
+  if [ -n "$2" ]; then wj_err=$(printf '%s' "$2" | tr -d '"\\' | tr '\n' ' '); wj_err="\"$wj_err\""; fi
+  wj_tmp=$STATS_UPDATE_RUNTIME_DIR/.components-job.$$
+  printf '{"schema_version":1,"name":"%s","state":"%s","started_at":"%s","finished_at":%s,"error":%s}\n' \
+    "$JOB_NAME" "$1" "$JOB_STARTED" "$wj_fin" "$wj_err" > "$wj_tmp"
+  write_json_atomic "$wj_tmp" "$JOB_FILE"
+}
+
+job_fail() {
+  jlog "ОШИБКА: $1"
+  write_job error "$1"
+  exit 1
+}
+
+# Версия ядра из /version или пусто.
+core_version() {
+  cv_raw=$(comp_api "http://$API_BASE/version" 2>/dev/null) || return 0
+  clean_ver "$(printf '%s' "$cv_raw" | json_field version)"
+}
+
+worker_zashboard() {
+  jlog "Обновляю zashboard (POST /upgrade/ui)"
+  comp_api -X POST "http://$API_BASE/upgrade/ui" > /dev/null 2>&1 || job_fail "ядро не приняло обновление zashboard (POST /upgrade/ui)"
+  if [ -z "$(ls -A "$MIHOMO_DIR/zash" 2>/dev/null)" ]; then
+    job_fail "после обновления каталог $MIHOMO_DIR/zash пуст"
+  fi
+  wz_ver=$(latest_stable Zephyruso/zashboard) || wz_ver=
+  [ -z "$wz_ver" ] || printf '%s\n' "$wz_ver" > "$MIHOMO_DIR/zash/.mst-version"
+  jlog "zashboard обновлён${wz_ver:+ до $wz_ver}"
+}
+
+worker_mihomo() {
+  [ -x "$BIN" ] || job_fail "mihomo не найден: $BIN"
+  jlog "Проверяю текущий конфиг: mihomo -t"
+  if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" > "$WORK/t.log" 2>&1 < /dev/null; then
+    tail -n 10 "$WORK/t.log" | while IFS= read -r wm_l; do jlog "  | $wm_l"; done
+    job_fail "текущий конфиг не проходит mihomo -t - обновление ядра не начато"
+  fi
+  wm_old=$(core_version)
+  cp -p "$BIN" "$BIN.mst-bak" || job_fail "не удалось сохранить копию ядра $BIN.mst-bak"
+  jlog "Копия ядра: $BIN.mst-bak. Запускаю обновление (POST /upgrade), сейчас: ${wm_old:-неизвестно}"
+  wm_rc=0
+  comp_api -X POST "http://$API_BASE/upgrade" > /dev/null 2>&1 || wm_rc=$?
+  if [ "$wm_rc" = 22 ]; then
+    rm -f "$BIN.mst-bak"
+    job_fail "обновление ядра недоступно: ядро отклонило POST /upgrade (сборка без поддержки или уже последняя версия)"
+  fi
+  [ "$wm_rc" = 0 ] || jlog "Ответ на /upgrade не получен (код $wm_rc) - ядро могло перезапуститься, жду новую версию"
+  wm_waited=0; wm_new=
+  while [ "$wm_waited" -lt "$COMPONENTS_UPGRADE_WAIT" ]; do
+    sleep "$COMPONENTS_POLL"; wm_waited=$((wm_waited + COMPONENTS_POLL))
+    wm_new=$(core_version)
+    if [ -n "$wm_new" ] && [ "$wm_new" != "$wm_old" ]; then
+      rm -f "$BIN.mst-bak"
+      jlog "ядро обновлено до $wm_new"
+      return 0
+    fi
+  done
+  jlog "Версия ядра не сменилась за $COMPONENTS_UPGRADE_WAIT с - возвращаю прежний бинарник"
+  if mv -f "$BIN.mst-bak" "$BIN"; then
+    wm_rrc=0; bounded "$RESTART_TIMEOUT" "$XKEEN_BIN" -restart || wm_rrc=$?
+    jlog "xkeen -restart завершился с кодом $wm_rrc"
+    jlog "откат выполнен: ядро возвращено к ${wm_old:-прежней версии}"
+  else
+    jlog "ОШИБКА: не удалось вернуть $BIN.mst-bak - восстановите ядро по SSH"
+  fi
+  job_fail "ядро не обновилось за $COMPONENTS_UPGRADE_WAIT с, выполнен откат"
+}
+
+# Фоновый воркер: вызывается self-exec из cmd_apply с очищенными
+# MST_COMPONENTS_ACTION/REQUEST_METHOD (иначе он снова попал бы в CGI-ветку).
+# Замок уже взят cmd_apply (pid воркера записан туда же).
+cmd_apply_worker() {
+  LOCK_OWNED=1
+  JOB_NAME=$1
+  JOB_STARTED=$(date '+%Y-%m-%d %H:%M:%S')
+  COMP_HTTP_TIMEOUT=120
+  : > "$JOB_LOG" 2>/dev/null || true
+  write_job running ""
+  api_init || job_fail "ядро не отвечает: не удалось определить адрес API из $CONFIG"
+  case $JOB_NAME in
+    zashboard) worker_zashboard ;;
+    mihomo) worker_mihomo ;;
+  esac
+  jlog "Пересчитываю версии"
+  cmd_check worker > /dev/null 2>&1 || true
+  write_job done ""
+}
+
+cmd_apply() {
+  ca_name=$1
+  case $ca_name in mihomo|zashboard) ;; *) reply_status 400 unknown_component ;; esac
+  mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
+  take_lock || reply_status 409 busy
+  JOB_NAME=$ca_name
+  JOB_STARTED=$(date '+%Y-%m-%d %H:%M:%S')
+  write_job running ""
+  MST_COMPONENTS_ACTION= REQUEST_METHOD= sh "$0" apply-worker "$ca_name" < /dev/null > /dev/null 2>&1 &
+  echo $! > "$CONFIGEDIT_LOCK/pid" || true
+  echo "Content-Type: application/json; charset=utf-8"; echo
+  printf '{"started":true}\n'
+  exit 0
+}
+
 action=${MST_COMPONENTS_ACTION:-${1:-}}
 if [ -n "${REQUEST_METHOD:-}" ]; then
   case $action:$REQUEST_METHOD in
@@ -225,12 +389,19 @@ if [ -n "${REQUEST_METHOD:-}" ]; then
       echo "Content-Type: application/json; charset=utf-8"; echo
       cmd_status
       exit 0 ;;
+    apply:POST)
+      ap_name=
+      for ap_kv in $(printf '%s' "${QUERY_STRING:-}" | tr '&' ' '); do
+        case $ap_kv in name=*) ap_name=${ap_kv#name=} ;; esac
+      done
+      cmd_apply "$ap_name" ;;
     *) json_error "unknown_action" ;;
   esac
 else
   case $action in
     check) cmd_check "${2:-button}" ;;
     status) cmd_status ;;
+    apply-worker) cmd_apply_worker "${2:-}" ;;
     *) echo "usage: stats_components.sh check [источник]|status" >&2; exit 2 ;;
   esac
 fi
