@@ -17,7 +17,10 @@ mkdir -p "$TMP/bin" "$TMP/mihomo" "$TMP/fx" "$TMP/rt"
 cat > "$TMP/mihomo/config.yaml" <<'EOF'
 external-controller: 0.0.0.0:9090
 secret: "s3cret"
+external-ui: ./zash
+external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
 EOF
+cp "$TMP/mihomo/config.yaml" "$TMP/config.orig"
 
 # Заглушка HTTP: последний аргумент - URL; ответ - файл из $TMP/fx.
 cat > "$TMP/bin/http" <<EOF2
@@ -251,6 +254,47 @@ reset_apply
 out=$(apply_req xkeen); assert_contains 'Status: 400' "$out"; assert_contains 'unknown_component' "$out"
 out=$(apply_req foo); assert_contains 'unknown_component' "$out"
 [ ! -f "$TMP/rt/components-job.json" ] || fail "apply_unknown_name: job создан"
+
+# ===== правки по итогам финального ревью =====
+# --- F1: воркер упал вне job_fail - задание не должно навсегда остаться в running
+reset_apply v1.19.3
+mkdir -p "$TMP/mihomo/zash/.mst-version"
+apply_req zashboard >/dev/null; wait_job
+[ "$st" = error ] || fail "F1 worker_crash: state=$st"
+[ ! -d "$TMP/lock" ] || fail "F1 worker_crash: замок не снят"
+reset_apply
+printf '{"schema_version":1,"name":"zashboard","state":"running","started_at":"x","finished_at":null,"error":null}\n' > "$TMP/rt/components-job.json"
+out=$(sh "$SCRIPT" status)
+[ "$(printf '%s' "$out" | jget '["job"]["state"]')" = error ] || fail "F1 status: running без живого замка должен стать error"
+
+# --- F2: check не оставляет во временном каталоге файлов с secret
+rm -rf "$TMP"/mst-components.*
+setfx v1.19.2 v1.19.3 v2.6.0 v1.1; check >/dev/null
+[ -z "$(ls -d "$TMP"/mst-components.* 2>/dev/null)" ] || fail "F2: после check остался временный каталог: $(ls -d "$TMP"/mst-components.*)"
+
+# --- F3: четыре последовательных запроса check укладываются в таймаут CGI
+def_to=$(sed -n 's/^COMP_HTTP_TIMEOUT=${COMP_HTTP_TIMEOUT:-\([0-9]*\)}.*/\1/p' "$SCRIPT")
+route_to=$(sed -n 's/.*"api\/components\/check".*"MST_CGI_TIMEOUT": "\([0-9]*\)".*/\1/p' "$ROOT/web/stats_httpd.py")
+[ -n "$def_to" ] && [ -n "$route_to" ] || fail "F3: не разобрал таймауты ($def_to/$route_to)"
+[ $((3 * def_to + 5)) -lt "$route_to" ] || fail "F3: 3x$def_to с + запас не укладываются в MST_CGI_TIMEOUT=$route_to"
+
+# --- F4: ядро не отвечает перед обновлением - ни копии, ни отката, ни перезапуска
+reset_apply; : > "$TMP/fx/core_down"
+apply_req mihomo >/dev/null; wait_job
+[ "$st" = error ] || fail "F4: state=$st"
+assert_contains 'ядро не отвечает' "$(joblog)"
+assert_not_contains 'откат' "$(joblog)"
+assert_not_contains '-restart' "$(cat "$TMP/xkeen.log" 2>/dev/null || true)"
+[ ! -e "$TMP/bin/mihomo.mst-bak" ] || fail "F4: копия ядра не должна создаваться"
+
+# --- F5: external-ui/external-ui-url не про zashboard - обновление отказано, /upgrade/ui не вызван
+reset_apply v1.19.3; : > "$TMP/http.log"
+printf 'external-controller: 0.0.0.0:9090\nexternal-ui: ./ui\nexternal-ui-url: "https://github.com/MetaCubeX/metacubexd/archive/gh-pages.zip"\n' > "$TMP/mihomo/config.yaml"
+apply_req zashboard >/dev/null; wait_job
+[ "$st" = error ] || fail "F5: state=$st"
+assert_contains 'zashboard' "$(joblog)"
+assert_not_contains 'upgrade/ui' "$(cat "$TMP/http.log")"
+cp "$TMP/config.orig" "$TMP/mihomo/config.yaml"
 
 # ===== подключение =====
 # --- cron: stats_update.sh check зовёт проверку компонентов; её сбой не ломает проверку проекта

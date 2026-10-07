@@ -501,7 +501,7 @@ API_ROUTES = {
     "api/updates/discard": ("stats_update.sh", {"MST_UPDATE_ACTION": "discard"}),
     # Компоненты (mihomo, zashboard, xkeen): check ходит на GitHub и в API ядра;
     # apply только запускает фоновое задание и отвечает сразу.
-    "api/components/check": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "check", "MST_CGI_TIMEOUT": "60"}),
+    "api/components/check": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "check", "MST_CGI_TIMEOUT": "90"}),
     "api/components/status": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "status"}),
     "api/components/apply": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "apply"}),
     # Применение конфига ждёт mihomo -t, xkeen -restart, проверку ядра и

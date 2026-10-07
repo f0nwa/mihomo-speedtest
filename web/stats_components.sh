@@ -30,7 +30,7 @@ GITHUB_API_BASE=${GITHUB_API_BASE:-https://api.github.com}
 XKEEN_RELEASES_REPO=${XKEEN_RELEASES_REPO:-jameszeroX/XKeen}
 # COMPONENTS_HTTP_CMD - только для тестов: команда вместо curl.
 COMPONENTS_HTTP_CMD=${COMPONENTS_HTTP_CMD:-}
-COMP_HTTP_TIMEOUT=${COMP_HTTP_TIMEOUT:-30}
+COMP_HTTP_TIMEOUT=${COMP_HTTP_TIMEOUT:-15}   # check: 3 запроса к GitHub должны уложиться в MST_CGI_TIMEOUT маршрута (stats_httpd.py)
 COMPONENTS_UPGRADE_WAIT=${COMPONENTS_UPGRADE_WAIT:-60}   # сколько ждать смены версии ядра после /upgrade, с
 COMPONENTS_POLL=${COMPONENTS_POLL:-2}                    # период опроса /version, с
 RESTART_TIMEOUT=${RESTART_TIMEOUT:-30}
@@ -41,12 +41,21 @@ CURL_CFG=
 LOCK_OWNED=0
 JOB_NAME=
 JOB_STARTED=
+JOB_FINAL=0
 
+# Воркер, умерший вне job_fail (ошибка записи при set -e, SIGTERM), не должен
+# оставлять задание в running: интерфейс иначе ждал бы его до перезагрузки.
 cleanup() {
+  if [ "$LOCK_OWNED" = 1 ] && [ "$JOB_FINAL" != 1 ] && [ -n "$JOB_NAME" ]; then
+    jlog "ОШИБКА: задание прервано" 2>/dev/null || true
+    write_job error "задание прервано" 2>/dev/null || true
+  fi
   [ -z "$WORK" ] || rm -rf "$WORK"
   [ "$LOCK_OWNED" != 1 ] || rm -rf "$CONFIGEDIT_LOCK"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
 
 json_error() {
   echo "Content-Type: application/json; charset=utf-8"
@@ -211,6 +220,9 @@ item_xkeen() {
 cmd_check() {
   cc_source=${1:-button}
   mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
+  # Рабочий каталог (там файл curl с secret) создаём здесь, в основной
+  # оболочке: из api_init внутри $(item_mihomo) его не удалил бы trap.
+  [ -n "$WORK" ] || WORK=$(mktemp -d "$TMPROOT/mst-components.XXXXXX" 2>/dev/null) || WORK=
   cc_tmp=$STATS_UPDATE_RUNTIME_DIR/.components.$$
   {
     printf '{"schema_version":1,"checked_at":"%s","source":"%s","items":{' "$(date '+%Y-%m-%d %H:%M:%S')" "$cc_source"
@@ -222,9 +234,23 @@ cmd_check() {
   cat "$COMPONENTS_FILE"
 }
 
+# Замок CONFIGEDIT_LOCK держит живой процесс.
+lock_alive() {
+  la_pid=$(cat "$CONFIGEDIT_LOCK/pid" 2>/dev/null || true)
+  case $la_pid in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$la_pid" 2>/dev/null
+}
+
 cmd_status() {
+  st_job=$(read_json_or_null "$JOB_FILE")
+  # "running" без живого воркера (убит SIGKILL/OOM, /tmp переполнен) - задание
+  # прервано, а не идёт: иначе интерфейс завис бы на экране хода обновления.
+  case $st_job in
+    *'"state":"running"'*)
+      lock_alive || st_job=$(printf '%s' "$st_job" | sed 's/"state":"running"/"state":"error"/; s/"error":null/"error":"задание прервано"/') ;;
+  esac
   printf '{"components":%s,"job":%s,"log":%s}\n' \
-    "$(read_json_or_null "$COMPONENTS_FILE")" "$(read_json_or_null "$JOB_FILE")" "$(read_log_json "$JOB_LOG")"
+    "$(read_json_or_null "$COMPONENTS_FILE")" "$st_job" "$(read_log_json "$JOB_LOG")"
 }
 
 # ----- обновление (apply) -----
@@ -273,7 +299,7 @@ jlog() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" >> "$JOB_LOG" 2>/dev/null |
 # $1 = running|done|error, $2 = текст ошибки или пусто
 write_job() {
   wj_fin=null; wj_err=null
-  case $1 in done|error) wj_fin="\"$(date '+%Y-%m-%d %H:%M:%S')\"" ;; esac
+  case $1 in done|error) wj_fin="\"$(date '+%Y-%m-%d %H:%M:%S')\""; JOB_FINAL=1 ;; esac
   if [ -n "$2" ]; then wj_err=$(printf '%s' "$2" | tr -d '"\\' | tr '\n' ' '); wj_err="\"$wj_err\""; fi
   wj_tmp=$STATS_UPDATE_RUNTIME_DIR/.components-job.$$
   printf '{"schema_version":1,"name":"%s","state":"%s","started_at":"%s","finished_at":%s,"error":%s}\n' \
@@ -293,7 +319,24 @@ core_version() {
   clean_ver "$(printf '%s' "$cv_raw" | json_field version)"
 }
 
+# external-ui и external-ui-url конфига должны вести на zashboard в ./zash:
+# POST /upgrade/ui качает по external-ui-url в external-ui, а без своей ссылки
+# ядро ставит панель по умолчанию (другую).
+zashboard_config_ok() {
+  zc_vals=$(awk '
+    function val(s) { sub(/^[^:]*:[ \t]*/, "", s); sub(/[ \t]+#.*$/, "", s); sub(/[ \t\r]+$/, "", s)
+      if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2); return s }
+    /^external-ui:/ { u = val($0) }
+    /^external-ui-url:/ { l = val($0) }
+    END { printf "%s\t%s", u, l }' "$CONFIG" 2>/dev/null) || return 1
+  zc_ui=${zc_vals%%"$(printf '\t')"*}
+  zc_url=${zc_vals#*"$(printf '\t')"}
+  case $zc_ui in zash|./zash|*/zash) ;; *) return 1 ;; esac
+  case $zc_url in *Zephyruso/zashboard*) ;; *) return 1 ;; esac
+}
+
 worker_zashboard() {
+  zashboard_config_ok || job_fail "в конфиге external-ui/external-ui-url не указывают на zashboard (./zash, Zephyruso/zashboard) - обновление zashboard отменено, чтобы не поставить другую панель"
   jlog "Обновляю zashboard (POST /upgrade/ui)"
   comp_api -X POST "http://$API_BASE/upgrade/ui" > /dev/null 2>&1 || job_fail "ядро не приняло обновление zashboard (POST /upgrade/ui)"
   if [ -z "$(ls -A "$MIHOMO_DIR/zash" 2>/dev/null)" ]; then
@@ -312,6 +355,7 @@ worker_mihomo() {
     job_fail "текущий конфиг не проходит mihomo -t - обновление ядра не начато"
   fi
   wm_old=$(core_version)
+  [ -n "$wm_old" ] || job_fail "ядро не отвечает: версия неизвестна - обновление не начато"
   cp -p "$BIN" "$BIN.mst-bak" || job_fail "не удалось сохранить копию ядра $BIN.mst-bak"
   jlog "Копия ядра: $BIN.mst-bak. Запускаю обновление (POST /upgrade), сейчас: ${wm_old:-неизвестно}"
   wm_rc=0
