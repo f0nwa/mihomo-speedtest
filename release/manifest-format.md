@@ -43,7 +43,7 @@ config.example.yaml, migrate_config.awk или fast_wg.awk в строках FIL
 `releases/latest/download`. dev берёт наибольший тег вида `x.y.z`
 (покомпонентное числовое сравнение) среди релизов любого канала из
 `UPDATE_RELEASES_API` (по умолчанию
-`https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10`;
+`https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5`;
 теги не вида x.y.z пропускаются, так что стабильный hotfix после dev-релиза
 не откатывает канал dev),
 качает манифест из `releases/download/<тег>` и требует, чтобы RELEASE_TAG

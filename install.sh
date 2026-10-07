@@ -650,8 +650,8 @@ bootstrap_choose_channel() {
 # тот же релиз. Нет списка - установка останавливается: тихо поставить
 # stable вместо выбранного dev было бы обманом.
 bootstrap_resolve_dev() {
-  bootstrap_download_to "${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=10}" \
-      "$BOOTSTRAP_WORK/releases.json" 1048576 || {
+  bootstrap_download_to "${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5}" \
+      "$BOOTSTRAP_WORK/releases.json" 4194304 || {
     ui_fail "Не удалось получить список релизов для канала dev"
     return 1
   }
