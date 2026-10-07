@@ -235,6 +235,17 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-textarea{display:block;width:100%;height:62vh;min-height:320px;background:#11151c;color:#d7dee6;border:0;padding:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre;tab-size:2}
 .config-status.config-dirty{color:#e0b060}
 .config-diff{max-height:420px}
+.config-sdiff-host{margin:12px 0}
+.config-sdiff-head{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.config-sdiff{max-height:62vh;min-height:320px;overflow:auto;border:1px solid var(--card-border);background:#11151c}
+.config-sdiff table{width:100%;border-collapse:collapse;table-layout:fixed;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;color:#d7dee6}
+.config-sdiff th{position:sticky;top:0;background:#161a20;color:var(--muted);font-weight:600;text-align:left;padding:4px 8px;border-bottom:1px solid var(--card-border);z-index:1}
+.config-sdiff th:nth-child(odd),.config-sdiff td.sd-n{width:44px}
+.config-sdiff td{padding:0 8px;vertical-align:top;white-space:pre-wrap;word-break:break-all}
+.config-sdiff td.sd-n{color:#5c6570;text-align:right;background:#161a20;user-select:none;padding:0 6px}
+.config-sdiff td.sd-r{border-left:1px solid var(--card-border)}
+.config-sdiff td.sd-del{color:#ff8a80;background:#d1453b1f}
+.config-sdiff td.sd-add{color:#7ee787;background:#16a34a1f}
 .config-diff .diff-add{color:#7ee787;background:#16a34a1f}
 .config-diff .diff-del{color:#ff8a80;background:#d1453b1f}
 .config-diff .diff-gap{color:var(--muted)}

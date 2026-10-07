@@ -303,6 +303,56 @@ function renderDiff(container, a, b, labelA, labelB) {
   container.appendChild(pre);
 }
 
+// Двухколоночный diff на месте редактора: слева a (текущий), справа b.
+// Весь файл целиком, изменённые строки подсвечены; идущие подряд удаления
+// и добавления выстраиваются парами в одну строку таблицы.
+function renderSideDiff(container, a, b, labelA, labelB, onClose) {
+  while (container.firstChild) { container.removeChild(container.firstChild); }
+  var head = el('div', 'config-sdiff-head');
+  var close = el('button', 'theme-btn', 'Вернуться к редактору');
+  close.type = 'button';
+  close.addEventListener('click', onClose);
+  head.appendChild(close);
+  container.appendChild(head);
+  var d = lineDiff(a, b);
+  if (d === null) { container.appendChild(el('p', 'hint', 'Файлы слишком большие для сравнения в браузере.')); return; }
+  var rows = [], k = 0, li = 0, ri = 0;
+  while (k < d.length) {
+    if (d[k][0] === ' ') { rows.push([++li, d[k][1], ++ri, d[k][1], '']); k++; continue; }
+    var dels = [], adds = [];
+    while (k < d.length && d[k][0] === '-') { dels.push(d[k++][1]); }
+    while (k < d.length && d[k][0] === '+') { adds.push(d[k++][1]); }
+    for (var q = 0; q < Math.max(dels.length, adds.length); q++) {
+      var hasL = q < dels.length, hasR = q < adds.length;
+      rows.push([hasL ? ++li : '', hasL ? dels[q] : '', hasR ? ++ri : '', hasR ? adds[q] : '',
+        hasL && hasR ? 'mod' : (hasL ? 'del' : 'add')]);
+    }
+  }
+  var changed = rows.filter(function (r) { return r[4]; }).length;
+  head.appendChild(el('span', 'hint', changed ? ('Изменённых строк: ' + changed) : 'Отличий нет.'));
+  var wrap = el('div', 'config-sdiff');
+  var table = el('table');
+  var th = el('tr', 'config-sdiff-title');
+  th.appendChild(el('th', null, ''));
+  th.appendChild(el('th', null, labelA));
+  th.appendChild(el('th', null, ''));
+  th.appendChild(el('th', null, labelB));
+  table.appendChild(th);
+  var first = null;
+  rows.forEach(function (r) {
+    var tr = el('tr', r[4] ? 'sd-' + r[4] : null);
+    tr.appendChild(el('td', 'sd-n', String(r[0])));
+    tr.appendChild(el('td', 'sd-l' + (r[4] === 'del' || r[4] === 'mod' ? ' sd-del' : ''), r[1]));
+    tr.appendChild(el('td', 'sd-n', String(r[2])));
+    tr.appendChild(el('td', 'sd-r' + (r[4] === 'add' || r[4] === 'mod' ? ' sd-add' : ''), r[3]));
+    if (r[4] && !first) { first = tr; }
+    table.appendChild(tr);
+  });
+  wrap.appendChild(table);
+  container.appendChild(wrap);
+  if (first) { wrap.scrollTop = Math.max(0, first.offsetTop - 60); }
+}
+
 var REPAIR_FIX_LABELS = {
   bom: 'убрана метка BOM', crlf: 'переводы строк Windows (CRLF) заменены на LF',
   nbsp: 'неразрывные пробелы заменены обычными', tabs: 'табуляция в отступах заменена пробелами',
@@ -384,8 +434,11 @@ function renderYaml(bar) {
     var msgBox = el('div', 'config-msg');
     var editorHost = el('div', 'config-editor');
     var output = el('div');
+    var diffHost = el('div', 'config-sdiff-host');
+    diffHost.hidden = true;
     main.appendChild(msgBox);
     main.appendChild(editorHost);
+    main.appendChild(diffHost);
     main.appendChild(output);
 
     // Журнал применения (stats_config.sh, действие log): этапы проверки,
@@ -444,6 +497,18 @@ function renderYaml(bar) {
       if (text) { main.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
     }
     function clearOutput() { while (output.firstChild) { output.removeChild(output.firstChild); } }
+    // Сравнение открывается вместо редактора: слева текущий конфиг, справа b.
+    function closeDiff() {
+      if (diffHost.hidden) { return; }
+      diffHost.hidden = true; editorHost.hidden = false;
+      while (diffHost.firstChild) { diffHost.removeChild(diffHost.firstChild); }
+      if (view.editor) { view.editor.refresh(); }
+    }
+    function openDiff(b, labelB) {
+      editorHost.hidden = true; diffHost.hidden = false;
+      renderSideDiff(diffHost, view.saved, b, 'текущий config.yaml', labelB, closeDiff);
+      main.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
 
     var applyTimer = null;
     function applyLineClass(line) {
@@ -534,7 +599,7 @@ function renderYaml(bar) {
     function reload(okText, kind, keepEditor) {
       fetchConfigJson('/api/config', 'text').then(function (d) {
         view.base = d.base; view.saved = d.text || '';
-        if (!keepEditor) { migrationSchema = null; view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); }
+        if (!keepEditor) { closeDiff(); migrationSchema = null; view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); }
         setDirty();
         if (okText) { msg(okText, kind || 'ok'); }
         loadBackups();
@@ -594,12 +659,12 @@ function renderYaml(bar) {
           }
           act('Сравнить', function () {
             withBackup(function (bd) {
-              renderDiff(backupView, bd.text || '', view.editor.getValue(), 'бэкап ' + fmtBackupName(b.name), 'редактор');
-              backupView.scrollIntoView({ block: 'nearest' });
+              openDiff(bd.text || '', 'бэкап ' + fmtBackupName(b.name));
             });
           });
           act('В редактор', function () {
             withBackup(function (bd) {
+              closeDiff();
               migrationSchema = null; view.editor.setValue(bd.text || ''); setDirty();
               msg('Бэкап ' + fmtBackupName(b.name) + ' загружен в редактор. Проверьте и нажмите «Сохранить и применить».', 'ok');
             });
@@ -640,10 +705,11 @@ function renderYaml(bar) {
         (migrationSchema !== null ? '&schema=' + migrationSchema : ''), view.editor.getValue(), 'Конфиг сохранён.');
     });
     diffBtn.addEventListener('click', function () {
-      renderDiff(output, view.saved, view.editor.getValue(), 'сохранённый', 'редактор');
+      openDiff(view.editor.getValue(), 'в редакторе (будет применено)');
     });
     resetBtn.addEventListener('click', function () {
       if (view.dirty && !window.confirm('Отменить все несохранённые правки?')) { return; }
+      closeDiff();
       migrationSchema = null; view.editor.clearImport(); view.editor.setValue(view.saved); view.editor.markLine(0); setDirty(); msg('', ''); clearOutput();
     });
     function repair(mode) {
