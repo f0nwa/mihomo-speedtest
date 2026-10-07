@@ -30,9 +30,11 @@ else: print('OK')
   # Тест запускает диспетчер так же, как установленная команда.
   helper=ROOT/'installer/update_interactive.sh'
   if helper.exists(): (self.d/'update_interactive.sh').write_bytes(helper.read_bytes())
- def run_cli(self,answers='',args=(),tty=True):
+  (self.d/'ui.sh').write_bytes((ROOT/'installer/ui.sh').read_bytes())
+ def run_cli(self,answers='',args=(),tty=True,live=False):
   (self.d/'plan').write_text(json.dumps(self.plan,separators=(',',':')))
-  env=dict(os.environ,DIR=str(self.d),TMPROOT=str(self.d/'tmp'),NO_COLOR='1',TERM='dumb')
+  env=dict(os.environ,DIR=str(self.d),TMPROOT=str(self.d/'tmp'),NO_COLOR='1',TERM='dumb',UI_LOG='/dev/null')
+  if live: env.pop('NO_COLOR');env['TERM']='xterm'
   cmd=['sh',str(ROOT/'mihomo-speedtest.sh'),'update',*args]
   if not tty:
    r=subprocess.run(cmd,input=answers,text=True,capture_output=True,env=env,timeout=10);return r.returncode,r.stdout+r.stderr
@@ -96,6 +98,12 @@ else: print('OK')
  def test_apply_error_does_not_claim_success(self):
   (self.d/'fail').write_text('--apply')
   rc,out=self.run_cli('д\n');self.assertNotEqual(rc,0);self.assertNotIn('Готово.',out);self.assertEqual(list((self.d/'tmp').iterdir()),[])
+ def test_live_ui_style(self):
+  rc,out=self.run_cli('д\n',live=True);self.assertEqual(rc,0,out)
+  for part in ('╭','MIHOMO-SPEEDTEST','01/03','02/03','03/03','✓','Готово.'):self.assertIn(part,out)
+ def test_plain_ui_has_no_escapes(self):
+  rc,out=self.run_cli('д\n');self.assertEqual(rc,0,out);self.assertNotIn('\x1b',out)
+  for part in ('== MIHOMO-SPEEDTEST','01/03','[OK]','[??]'):self.assertIn(part,out)
  def test_flags_bypass_dialog(self):
   rc,out=self.run_cli(args=('--plan','--format=json'),tty=False);self.assertEqual(rc,0,out);self.assertEqual(json.loads(out)['release_tag'],'1.5.3');self.assertEqual(self.calls(),'--plan --format=json\n')
  def test_no_terminal_only_checks(self):
