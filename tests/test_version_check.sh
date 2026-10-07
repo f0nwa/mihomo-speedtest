@@ -131,6 +131,18 @@ got=$(env -i PATH="$FAKEBIN21:$PATH" sh -c '. "'"$SCRIPT"'"; echo "$(xkeen_versi
 [ "$got" = "2.1 1.19.32" ] || { echo "FAIL: XKeen 2.1 parse: '$got'" >&2; FAILED=1; }
 rm -rf "$FAKEBIN21"
 
+# Формат не распознан: запасной источник opkg + сырой вывод в диагностике.
+FAKEBINX=$(mktemp -d)
+printf '#!/bin/sh\necho "что-то новое"\n' > "$FAKEBINX/xkeen"
+printf '#!/bin/sh\necho "xkeen - 2.0"\n' > "$FAKEBINX/opkg"
+chmod +x "$FAKEBINX/xkeen" "$FAKEBINX/opkg"
+got=$(env -i PATH="$FAKEBINX:$PATH" sh -c '. "'"$SCRIPT"'"; xkeen_version')
+[ "$got" = "2.0" ] || { echo "FAIL: opkg fallback: '$got'" >&2; FAILED=1; }
+rm -f "$FAKEBINX/opkg"
+err=$(env -i PATH="$FAKEBINX:$PATH" sh -c '. "'"$SCRIPT"'"; check_versions' 2>&1 || true)
+printf '%s' "$err" | grep -q "что-то новое" || { echo "FAIL: raw output not shown" >&2; FAILED=1; }
+rm -rf "$FAKEBINX"
+
 if [ "$FAILED" = 1 ]; then
   echo "test_version_check.sh: FAILED" >&2
   exit 1

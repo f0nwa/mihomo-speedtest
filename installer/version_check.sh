@@ -56,13 +56,24 @@ xkeen_v_output() {
   xkeen -v 2>&1
 }
 
+# Запасной источник: версия пакета в opkg. Может отставать от реальной
+# (после самообновления XKeen opkg показывал 2.0 при `xkeen -v` = 2.1),
+# поэтому используется только если `xkeen -v` не удалось разобрать.
+xkeen_version_opkg() {
+  opkg list-installed xkeen 2>/dev/null | awk '$1 == "xkeen" && match($0, /[0-9]+\.[0-9]+(\.[0-9]+)*/) {
+    print substr($0, RSTART, RLENGTH); exit
+  }'
+}
+
 xkeen_version() {
-  xkeen_v_output | awk '
+  _xv=$(xkeen_v_output | awk '
     { gsub(/\033\[[0-9;]*[A-Za-z]/, ""); gsub(/\r/, "") }
     { l = tolower($0) }
     l ~ /xkeen/ && l !~ /mihomo|xray/ && match($0, /[0-9]+\.[0-9]+(\.[0-9]+)*/) {
       print substr($0, RSTART, RLENGTH); exit
-    }'
+    }')
+  [ -n "$_xv" ] || _xv=$(xkeen_version_opkg)
+  printf '%s\n' "$_xv"
 }
 
 mihomo_version() {
@@ -112,6 +123,10 @@ check_versions() {
   VC_XKEEN=$found
   if [ -z "$found" ] || ! version_ge "$found" "$MIN_XKEEN_VERSION"; then
     echo "version_check: Версия XKeen ниже минимума: обнаружено '${found:-не найдено}', нужно не ниже $MIN_XKEEN_VERSION" >&2
+    if [ -z "$found" ]; then
+      echo "version_check: вывод 'xkeen -v' не распознан, сырой вывод:" >&2
+      xkeen_v_output | sed 's/^/version_check:   | /' >&2
+    fi
     ok=0
   fi
 
