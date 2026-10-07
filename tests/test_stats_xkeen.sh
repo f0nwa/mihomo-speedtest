@@ -21,6 +21,9 @@ case \$1 in
     if grep -q KILLCORE "$TMP/xk/port_exclude.lst" 2>/dev/null; then echo down > "$TMP/state"; else echo up > "$TMP/state"; fi
     [ ! -f "$TMP/spawn-daemon" ] || ( sleep 4; echo DAEMON-LATE; touch "$TMP/daemon-ok" ) & ;;
   -diag) sleep 30 ;;
+  -ap) printf 'Введите порт: '; x=; read -r x || x=EOF; echo "port:\$x"; printf 'Точно (y/n): '; y=; read -r y || y=EOF; echo "ok:\$y" ;;
+  -dp) printf 'Введите порт: '; sleep 30 ;;
+  -sb) echo "sb \$2" ;;
   -v) echo "XKeen 2.0"; exit 3 ;;
   *) echo "flag \$1" ;;
 esac
@@ -34,7 +37,7 @@ echo up > "$TMP/state"
 mkdir -p "$TMP/xk"
 
 export DIR=$TMP/dir XKEEN_BIN=$TMP/bin/xkeen TMPROOT=$TMP CONFIGEDIT_LOCK=$TMP/lock \
-  CONFIG_LIB=$ROOT/web/stats_config.sh XKEEN_RUN_TIMEOUT_SHORT=10 XKEEN_RUN_TIMEOUT_LONG=2 \
+  CONFIG_LIB=$ROOT/web/stats_config.sh XKEEN_RUN_TIMEOUT_SHORT=10 XKEEN_RUN_TIMEOUT_LONG=2 XKEEN_RUN_TIMEOUT_SESSION=3 \
   XKEEN_DIR=$TMP/xk XKEEN_BACKUP_DIR=$TMP/xkb XKEEN_BACKUP_KEEP=2 PIDOF_CMD=$TMP/bin/pidof \
   HEALTH_TIMEOUT=2 HEALTH_STABLE=0
 
@@ -116,6 +119,63 @@ out=$(cgi run-log GET "id=$id&from=$next")
 out=$(cgi run GET cmd=status)
 assert_contains 'Status: 405' "$out"
 rm -f "$TMP/spawn-daemon" "$TMP/calls"
+
+# --- 8a: все ключи вкладки есть в белом списке сервера (и наоборот)
+js_keys=$(sed -n '/^var XKEEN_COMMANDS/,/^];/p' "$ROOT/web/stats_app_xkeen.js" | grep -o "key: '[a-z0-9_]*'" | sed "s/key: '//; s/'//" | sort -u)
+sh_keys=$(awk '/^cmd_flag\(\)/{f=1;next} f&&/^}/{exit} f&&/^    [a-z0-9_]+\)/{sub(/\).*/,"");gsub(/ /,"");print}' "$SCRIPT" | sort -u)
+[ -n "$js_keys" ] || fail "8a: нет ключей во вкладке"
+[ "$js_keys" = "$sh_keys" ] || fail "8a: ключи вкладки и сервера расходятся: $(printf '%s\n%s\n' "$js_keys" "$sh_keys" | sort | uniq -u | tr '\n' ' ')"
+
+# --- 8b: команда с аргументом: флаг и аргумент разными словами
+id=$(start sb_on)
+out=$(wait_done "$id")
+assert_contains 'sb on' "$(printf '%s' "$out" | jget '["text"]')"
+
+# --- 8c: интерактивная команда: вопрос виден без перевода строки, ответы доходят
+inp() { printf '%s' "$2" | MST_XKEEN_ACTION=input REQUEST_METHOD=POST QUERY_STRING="id=$1" CONTENT_LENGTH=${#2} sh "$SCRIPT"; }
+id=$(start ap)
+n=0
+while [ "$n" -lt 20 ]; do
+  out=$(cgi run-log GET "id=$id&from=0")
+  case $(printf '%s' "$out" | jget '["text"]') in *'Введите порт: '*) break ;; esac
+  sleep 0.5; n=$((n + 1))
+done
+assert_contains 'Введите порт: ' "$(printf '%s' "$out" | jget '["text"]')"
+[ "$(printf '%s' "$out" | jget '["running"]')" = True ] || fail "8c: команда не ждёт ответа"
+out=$(inp "$id" '8080'); assert_contains 'Status: 200' "$out"
+out=$(inp "$id" ''); assert_contains 'Status: 200' "$out"
+out=$(wait_done "$id")
+txt=$(printf '%s' "$out" | jget '["text"]')
+assert_contains 'port:8080' "$txt"
+assert_contains 'ok:' "$txt"
+assert_not_contains 'EOF' "$txt"
+[ "$(printf '%s' "$out" | jget '["exit"]')" = 0 ] || fail "8c: exit"
+[ ! -d "$TMP/lock" ] || fail "8c: lock"
+
+# --- 8d: ввод в неинтерактивную команду, чужой id и завершённую - 409; управляющие символы - 400
+id=$(start status); wait_done "$id" > /dev/null
+out=$(inp "$id" 'x'); assert_contains 'Status: 409' "$out"
+id=$(start ap)
+out=$(inp "old" 'x'); assert_contains 'Status: 409' "$out"
+out=$(inp "$id" "$(printf 'a\001b')"); assert_contains 'Status: 400' "$out"
+out=$(inp "$id" "$(head -c 600 /dev/zero | tr '\0' a)"); assert_contains 'Status: 413' "$out"
+
+# --- 8e: прерывание идущей команды
+sleep 0.5
+out=$(MST_XKEEN_ACTION=cancel REQUEST_METHOD=POST QUERY_STRING="id=$id" CONTENT_LENGTH=0 sh "$SCRIPT" </dev/null)
+assert_contains 'Status: 200' "$out"
+out=$(wait_done "$id")
+assert_contains 'прервано пользователем' "$(printf '%s' "$out" | jget '["text"]')"
+[ "$(printf '%s' "$out" | jget '["exit"]')" != 0 ] || fail "8e: exit"
+[ ! -d "$TMP/lock" ] || fail "8e: lock"
+out=$(MST_XKEEN_ACTION=cancel REQUEST_METHOD=POST QUERY_STRING="id=$id" CONTENT_LENGTH=0 sh "$SCRIPT" </dev/null)
+assert_contains 'Status: 409' "$out"
+
+# --- 8f: таймаут интерактивной команды без ответа
+id=$(start dp)
+n=0; while [ "$n" -lt 30 ]; do out=$(cgi run-log GET "id=$id&from=0"); [ "$(printf '%s' "$out" | jget '["running"]')" = False ] && break; sleep 0.5; n=$((n + 1)); done
+[ "$(printf '%s' "$out" | jget '["exit"]')" = 124 ] || fail "8f: exit"
+rm -f "$TMP/calls"
 
 # ===== Списки XKeen: read / save / backups / restore =====
 cgip() {

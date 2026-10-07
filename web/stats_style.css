@@ -344,3 +344,18 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-panel h2{margin:0 0 8px}
 .cx-panel[hidden]{display:none}
 @media (max-width:760px){.cx-layout{grid-template-columns:1fr}.cx-nav{position:static}}
+
+/* вкладка XKeen: блоки команд и ответ команде в окне */
+.xk-group{margin-top:18px}
+.xk-group-title{margin:0 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.xk-cmds{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.xk-cmd{display:grid;grid-template-columns:minmax(120px,190px) minmax(0,1fr) auto;gap:12px;align-items:center;padding:6px 10px;background:var(--bg);border:1px solid var(--border)}
+.xk-cmd.danger{border-color:#5a3330}
+.xk-flag{font-family:inherit;color:var(--accent);overflow-wrap:anywhere}
+.xk-cdesc{font-size:13px;color:var(--text);overflow-wrap:anywhere}
+.xk-cmd .xk-btn{white-space:nowrap}
+@media (max-width:760px){.xk-cmd{grid-template-columns:minmax(0,1fr) auto}.xk-cdesc{grid-column:1/-1;order:3}}
+.xk-input{display:flex;gap:8px;align-items:center;flex:1 1 100%}
+.xk-input input{flex:1 1 auto;min-width:0;font:inherit;padding:6px 8px}
+.xk-input button{font:inherit;margin-top:0}
+.xk-console .xk-in{color:#7ee2a8}

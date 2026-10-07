@@ -6,6 +6,8 @@
 # Действие приходит в MST_XKEEN_ACTION (из API_ROUTES stats_httpd.py):
 #   run      POST ?cmd=<ключ>        - запустить команду в фоне, ответ сразу {ok,id}
 #   run-log  GET  ?id=<id>&from=<N>  - вывод с байта N: {id,stale,text,next,running,exit,seconds}
+#   input    POST ?id=<id>           - тело = одна строка ответа в stdin команды (только IA=1)
+#   cancel   POST ?id=<id>           - прервать идущую команду
 #   _runner  внутреннее: сам фоновый запуск (не маршрутизируется)
 #   read     GET  - списки XKeen: {files:{<ключ>:{name,text,exists,base}}}
 #   save     POST - тело блоками "### MST-FILE <ключ> <base>": проверить,
@@ -42,6 +44,8 @@ CONFIG_LIB=${CONFIG_LIB:-$DIR/stats_config.sh}
 MST_CONFIG_LIB=1 . "$CONFIG_LIB"
 XKEEN_RUN_TIMEOUT_SHORT=${XKEEN_RUN_TIMEOUT_SHORT:-60}
 XKEEN_RUN_TIMEOUT_LONG=${XKEEN_RUN_TIMEOUT_LONG:-300}
+XKEEN_RUN_TIMEOUT_SESSION=${XKEEN_RUN_TIMEOUT_SESSION:-900}
+XKEEN_RUN_TIMEOUT_INSTALL=${XKEEN_RUN_TIMEOUT_INSTALL:-1800}
 RUN_DIR=$TMPROOT/mst-xkeen-run
 XKEEN_DIR=${XKEEN_DIR:-/opt/etc/xkeen}
 XKEEN_BACKUP_DIR=${XKEEN_BACKUP_DIR:-$DIR/xkeen-backups}
@@ -49,25 +53,93 @@ XKEEN_BACKUP_KEEP=${XKEEN_BACKUP_KEEP:-20}
 APPLY_LOG=${XKEEN_APPLY_LOG:-$TMPROOT/mst-xkeen-apply.log}
 LIST_KEYS="port_exclude port_proxying ip_exclude xkeen_json"
 
-# Ключ -> FLAG и TMO. 1 - ключа нет в списке. Тот же список - в
-# XKEEN_COMMANDS (stats_app_xkeen.js) и в спеке.
+# Ключ -> FLAG (флаг XKeen, может быть с аргументом: "-sb on"), TMO и IA.
+# 1 - ключа нет в списке. IA=1 - команда может задавать вопросы: ей даётся
+# stdin из FIFO, который пользователь пишет через action=input; иначе
+# stdin=/dev/null. Тот же список - в XKEEN_COMMANDS (stats_app_xkeen.js).
 cmd_flag() {
   TMO=$XKEEN_RUN_TIMEOUT_SHORT
+  IA=0
   case $1 in
+    # Состояние и информация
     status) FLAG=-status ;;
     version) FLAG=-v ;;
+    dscp) FLAG=-dscp ;;
     tp) FLAG=-tp ;;
     cp) FLAG=-cp ;;
     cpe) FLAG=-cpe ;;
     cfd) FLAG=-cfd ;;
+    about) FLAG=-about ;;
+    ad) FLAG=-ad ;;
+    af) FLAG=-af ;;
+    # Проверки и диагностика
     mtest) FLAG=-mtest ;;
+    xtest) FLAG=-xtest ;;
+    health) FLAG=-health ;;
     diag) FLAG=-diag; TMO=$XKEEN_RUN_TIMEOUT_LONG ;;
+    # Управление
     start) FLAG=-start ;;
     restart) FLAG=-restart ;;
     stop) FLAG=-stop ;;
+    # Режимы с аргументом, вопросов не задают
+    sb_on) FLAG="-sb on" ;;
+    sb_off) FLAG="-sb off" ;;
+    sb_status) FLAG="-sb status" ;;
+    pbr_on) FLAG="-pbr on" ;;
+    pbr_off) FLAG="-pbr off" ;;
+    pbr_status) FLAG="-pbr status" ;;
+    pbr_codes) FLAG="-pbr codes" ;;
+    killswitch_on) FLAG="-killswitch on" ;;
+    killswitch_off) FLAG="-killswitch off" ;;
+    killswitch_status) FLAG="-killswitch status" ;;
+    # Обновление и обслуживание без вопросов
     ug) FLAG=-ug; TMO=$XKEEN_RUN_TIMEOUT_LONG ;;
     mb) FLAG=-mb ;;
     kb) FLAG=-kb ;;
+    xb) FLAG=-xb ;;
+    # Дальше - команды, которым может понадобиться ответ
+    i) FLAG=-i; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    i_auto) FLAG="-i auto"; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    io) FLAG=-io; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    i_toff) FLAG="-i -toff"; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    k) FLAG=-k; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    g) FLAG=-g; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    gips) FLAG=-gips; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    ri) FLAG=-ri; IA=1 ;;
+    uk) FLAG=-uk; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    ux) FLAG=-ux; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    um) FLAG=-um; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    uy) FLAG=-uy; IA=1; TMO=$XKEEN_RUN_TIMEOUT_INSTALL ;;
+    ugc) FLAG=-ugc; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dgc) FLAG=-dgc; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    kbr) FLAG=-kbr; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    xbr) FLAG=-xbr; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    mbr) FLAG=-mbr; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    remove) FLAG=-remove; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dgs) FLAG=-dgs; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dgi) FLAG=-dgi; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dgips) FLAG=-dgips; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dx) FLAG=-dx; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dm) FLAG=-dm; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dk) FLAG=-dk; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    ap) FLAG=-ap; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dp) FLAG=-dp; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    ape) FLAG=-ape; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dpe) FLAG=-dpe; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    auto) FLAG=-auto; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    di) FLAG=-di; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    d) FLAG=-d; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    fd) FLAG=-fd; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    channel) FLAG=-channel; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    xray) FLAG=-xray; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    mihomo) FLAG=-mihomo; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    ipv6) FLAG=-ipv6; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    dns) FLAG=-dns; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    pr) FLAG=-pr; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    startvb) FLAG=-startvb; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    extmsg) FLAG=-extmsg; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    cbk) FLAG=-cbk; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
+    aghfix) FLAG=-aghfix; IA=1; TMO=$XKEEN_RUN_TIMEOUT_SESSION ;;
     *) return 1 ;;
   esac
 }
@@ -95,9 +167,63 @@ cmd_run() {
   echo "$id" > "$RUN_DIR/id"
   date +%s > "$RUN_DIR/started"
   : > "$RUN_DIR/log"
+  if [ "$IA" = 1 ]; then
+    mkfifo "$RUN_DIR/in" 2>/dev/null || { rm -rf "$CONFIGEDIT_LOCK"; fail_json 500 run_dir "Не удалось создать FIFO ввода"; }
+    : > "$RUN_DIR/ia"
+  fi
   MST_XKEEN_ACTION=_runner MST_XKEEN_CMD=$key sh "$0" < /dev/null > /dev/null 2>&1 &
   echo $! > "$CONFIGEDIT_LOCK/pid" || true
   printf '{"ok":true,"id":%s}\n' "$(jstr "$id")" > "$WORK/resp"
+  reply 200 "$WORK/resp"
+}
+
+# Остановить команду и её подпроцессы (скрипты XKeen запускают wget и т.п.).
+kill_run() {
+  pkill -P "$1" 2>/dev/null || true
+  kill "$1" 2>/dev/null || true
+}
+
+# id запроса совпадает с текущей командой, иначе ответ 409.
+need_current() {
+  want=$(query_param id)
+  cur=$(cat "$RUN_DIR/id" 2>/dev/null || true)
+  if [ -z "$cur" ] || [ "$want" != "$cur" ]; then
+    fail_json 409 stale "Эта команда уже не выполняется"
+  fi
+  if [ -f "$RUN_DIR/exit" ]; then
+    fail_json 409 finished "Команда уже завершилась"
+  fi
+}
+
+# Строка ответа пользователя в stdin запущенной команды: тело запроса,
+# одна строка до 512 байт, без управляющих символов. Пустая строка -
+# это просто Enter (ответ по умолчанию), поэтому пустое тело допустимо.
+cmd_input() {
+  need_current
+  { [ -f "$RUN_DIR/ia" ] && [ -p "$RUN_DIR/in" ]; } || fail_json 409 no_input "Эта команда не принимает ввод"
+  len=${CONTENT_LENGTH:-0}
+  case $len in ''|*[!0-9]*) len=0 ;; esac
+  [ "$len" -le 512 ] || fail_json 413 too_large "Ответ длиннее 512 байт"
+  if [ "$len" -gt 0 ]; then head -c "$len" > "$WORK/in"; else : > "$WORK/in"; fi
+  head -n 1 "$WORK/in" | tr -d '\r' > "$WORK/line"
+  if LC_ALL=C grep -q '[[:cntrl:]]' "$WORK/line"; then
+    fail_json 400 bad_input "В ответе нельзя управляющие символы"
+  fi
+  # 1<> - открытие на чтение и запись: не блокируется, даже если читатель
+  # ещё не открыл FIFO.
+  { cat "$WORK/line"; echo; } 1<> "$RUN_DIR/in"
+  printf '{"ok":true}\n' > "$WORK/resp"
+  reply 200 "$WORK/resp"
+}
+
+# Прервать идущую команду.
+cmd_cancel() {
+  need_current
+  xp=$(cat "$RUN_DIR/xpid" 2>/dev/null || true)
+  case $xp in ''|*[!0-9]*) fail_json 409 not_started "Команда ещё не стартовала" ;; esac
+  : > "$RUN_DIR/cancel"
+  kill_run "$xp"
+  printf '{"ok":true}\n' > "$WORK/resp"
   reply 200 "$WORK/resp"
 }
 
@@ -113,17 +239,36 @@ cmd_runner() {
     rm -rf "$CONFIGEDIT_LOCK"
     exit 0
   fi
-  ( while IFS= read -r l || [ -n "$l" ]; do
-      [ -f "$RUN_DIR/stop" ] || printf '%s\n' "$l" >> "$log"
-    done < "$fifo" ) &
+  if [ "$IA" = 1 ]; then
+    # Вопросы без перевода строки ("Введите порт: ") должны быть видны до
+    # ответа, поэтому читаем кусками, а не по строкам.
+    ( exec 4< "$fifo"
+      while :; do
+        dd bs=4096 count=1 of="$RUN_DIR/chunk" <&4 2>/dev/null
+        [ -s "$RUN_DIR/chunk" ] || break
+        [ -f "$RUN_DIR/stop" ] || cat "$RUN_DIR/chunk" >> "$log"
+      done ) &
+    # Держим FIFO ввода открытым на запись: команда не получит конец ввода,
+    # пока идёт, а запись из action=input не повиснет без читателя.
+    exec 5<> "$RUN_DIR/in"
+    insrc=$RUN_DIR/in
+  else
+    ( while IFS= read -r l || [ -n "$l" ]; do
+        [ -f "$RUN_DIR/stop" ] || printf '%s\n' "$l" >> "$log"
+      done < "$fifo" ) &
+    insrc=/dev/null
+  fi
   rc=
   if [ -x "$XKEEN_BIN" ]; then
-    "$XKEEN_BIN" "$FLAG" < /dev/null > "$fifo" 2>&1 &
+    # FLAG - только из cmd_flag(), слова разделяются намеренно ("-sb on").
+    # shellcheck disable=SC2086
+    "$XKEEN_BIN" $FLAG < "$insrc" > "$fifo" 2>&1 &
     xp=$!
+    echo "$xp" > "$RUN_DIR/xpid"
     waited=0
     while kill -0 "$xp" 2>/dev/null; do
       if [ "$waited" -ge "$TMO" ]; then
-        kill "$xp" 2>/dev/null || true
+        kill_run "$xp"
         rc=124
         break
       fi
@@ -134,8 +279,10 @@ cmd_runner() {
     echo "xkeen не найден: $XKEEN_BIN" > "$fifo"
     rc=127
   fi
+  exec 5>&-
   sleep 1
   [ "$rc" != 124 ] || echo "--- остановлено по таймауту ($TMO с)" >> "$log"
+  if [ -f "$RUN_DIR/cancel" ] && [ "$rc" != 0 ]; then echo "--- прервано пользователем" >> "$log"; fi
   : > "$RUN_DIR/stop"
   printf '%s %s\n' "$rc" "$(( $(date +%s) - started ))" > "$RUN_DIR/exit.tmp"
   mv -f "$RUN_DIR/exit.tmp" "$RUN_DIR/exit"
@@ -452,6 +599,8 @@ new_work
 case $action:$method in
   run:POST) cmd_run ;;
   run-log:GET|run-log:HEAD) cmd_run_log ;;
+  input:POST) cmd_input ;;
+  cancel:POST) cmd_cancel ;;
   read:GET|read:HEAD) cmd_read ;;
   save:POST) cmd_save ;;
   backups:GET|backups:HEAD) cmd_backups ;;

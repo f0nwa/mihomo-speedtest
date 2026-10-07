@@ -521,6 +521,8 @@ API_ROUTES = {
     # окно забирает опросом run-log - длинные таймауты не нужны.
     "api/xkeen/run": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run"}),
     "api/xkeen/run-log": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run-log"}),
+    "api/xkeen/input": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "input"}),
+    "api/xkeen/cancel": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "cancel"}),
     # Списки XKeen: save/restore ждут xkeen -restart, проверку ядра и откат.
     "api/xkeen": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "read"}),
     "api/xkeen/save": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "save", "MST_CGI_TIMEOUT": "150"}),
