@@ -177,7 +177,7 @@ def system_status(proc=None, manifest=None, cpu_delay=None, sleep=time.sleep):
     if manifest is None:
         manifest = os.environ.get("INSTALLED_MANIFEST_PATH") or os.path.join(
             os.environ.get("UPDATE_STATE_DIR")
-            or os.path.join(os.environ.get("MIHOMO_DIR", "/opt/etc/mihomo"), ".update"),
+            or os.path.join(os.environ.get("DIR", "/opt/etc/mihomo-speedtest"), ".update"),
             "installed-manifest.txt",
         )
     if cpu_delay is None:
