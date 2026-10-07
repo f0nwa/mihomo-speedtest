@@ -27,6 +27,7 @@ COMPONENTS_FILE=$STATS_UPDATE_RUNTIME_DIR/components.json
 JOB_FILE=$STATS_UPDATE_RUNTIME_DIR/components-job.json
 JOB_LOG=$STATS_UPDATE_RUNTIME_DIR/components-job.log
 GITHUB_API_BASE=${GITHUB_API_BASE:-https://api.github.com}
+GITHUB_WEB_BASE=${GITHUB_WEB_BASE:-https://github.com}
 XKEEN_RELEASES_REPO=${XKEEN_RELEASES_REPO:-jameszeroX/XKeen}
 # COMPONENTS_HTTP_CMD - только для тестов: команда вместо curl.
 COMPONENTS_HTTP_CMD=${COMPONENTS_HTTP_CMD:-}
@@ -145,17 +146,29 @@ api_init() {
 }
 
 # Последний stable-релиз репозитория $1 (тег). 1 - сеть/разбор не удались.
+# Сначала API GitHub; без авторизации он даёт 403 при лимите 60 запросов в час
+# на IP (общий для всех устройств за NAT) - тогда тег берём из редиректа
+# github.com/<repo>/releases/latest -> .../releases/tag/<тег>, лимита там нет.
 latest_stable() {
-  ls_raw=$(comp_http "$GITHUB_API_BASE/repos/$1/releases/latest" 2>/dev/null) || return 1
+  ls_raw=$(comp_http -H 'Accept: application/vnd.github+json' "$GITHUB_API_BASE/repos/$1/releases/latest" 2>/dev/null) || ls_raw=
   ls_tag=$(clean_ver "$(printf '%s' "$ls_raw" | json_field tag_name)")
+  if [ -z "$ls_tag" ]; then
+    ls_loc=$(comp_http -I -o /dev/null -w '%{redirect_url}' "$GITHUB_WEB_BASE/$1/releases/latest" 2>/dev/null) || ls_loc=
+    case $ls_loc in */releases/tag/*) ls_tag=$(clean_ver "${ls_loc##*/releases/tag/}") ;; esac
+  fi
   [ -n "$ls_tag" ] || return 1
   printf '%s' "$ls_tag"
 }
 
 # Версия alpha-сборки ядра ("alpha-<sha>") из имени ассета релиза Prerelease-Alpha.
+# Запасной источник - HTML-список ассетов на github.com (без лимита API).
 latest_alpha() {
-  la_raw=$(comp_http "$GITHUB_API_BASE/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 2>/dev/null) || return 1
+  la_raw=$(comp_http "$GITHUB_API_BASE/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha" 2>/dev/null) || la_raw=
   la_ver=$(printf '%s' "$la_raw" | sed -n 's/.*\(alpha-[0-9a-f]\{7,\}\).*/\1/p' | head -n 1)
+  if [ -z "$la_ver" ]; then
+    la_raw=$(comp_http "$GITHUB_WEB_BASE/MetaCubeX/mihomo/releases/expanded_assets/Prerelease-Alpha" 2>/dev/null) || la_raw=
+    la_ver=$(printf '%s' "$la_raw" | sed -n 's/.*\(alpha-[0-9a-f]\{7,\}\).*/\1/p' | head -n 1)
+  fi
   [ -n "$la_ver" ] || return 1
   printf '%s' "$la_ver"
 }

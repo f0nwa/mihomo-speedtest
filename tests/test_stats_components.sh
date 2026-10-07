@@ -42,6 +42,14 @@ case \$url in
      echo '{"status":"ok"}' ;;
   *) [ ! -f "$TMP/fx/gh_fail" ] || exit 22
      case \$url in
+       https://gh.test/*) [ ! -f "$TMP/fx/api_fail" ] || exit 22
+          case \$url in
+            */releases/tags/Prerelease-Alpha) cat "$TMP/fx/alpha.json" ;;
+            */MetaCubeX/mihomo/releases/latest) cat "$TMP/fx/mihomo.json" ;;
+            */Zephyruso/zashboard/releases/latest) cat "$TMP/fx/zash.json" ;;
+            *) cat "$TMP/fx/xkeen.json" ;;
+          esac ;;
+       https://github.com/*/releases/latest) printf 'https://github.com/x/y/releases/tag/v9.9.9' ;;
        */releases/tags/Prerelease-Alpha) cat "$TMP/fx/alpha.json" ;;
        */MetaCubeX/mihomo/releases/latest) cat "$TMP/fx/mihomo.json" ;;
        */Zephyruso/zashboard/releases/latest) cat "$TMP/fx/zash.json" ;;
@@ -69,11 +77,11 @@ setfx() { # $1 mihomo-installed $2 mihomo-latest-tag $3 zash-tag $4 xkeen-tag
   printf '{"tag_name":"%s"}' "$3" > "$TMP/fx/zash.json"
   printf '{"tag_name":"%s"}' "$4" > "$TMP/fx/xkeen.json"
   printf '{"tag_name":"Prerelease-Alpha","assets":[{"name":"mihomo-linux-arm64-alpha-def5678.gz"}]}' > "$TMP/fx/alpha.json"
-  rm -f "$TMP/fx/core_down" "$TMP/fx/gh_fail" "$TMP/rt/components.json"
+  rm -f "$TMP/fx/core_down" "$TMP/fx/gh_fail" "$TMP/fx/api_fail" "$TMP/rt/components.json"
 }
 export DIR=$TMP MIHOMO_DIR=$TMP/mihomo CONFIG=$TMP/mihomo/config.yaml \
   STATS_UPDATE_RUNTIME_DIR=$TMP/rt XKEEN_BIN=$TMP/bin/xkeen COMPONENTS_HTTP_CMD=$TMP/bin/http \
-  GITHUB_API_BASE=https://gh.test TMPROOT=$TMP BIN=$TMP/bin/mihomo CONFIGEDIT_LOCK=$TMP/lock \
+  GITHUB_API_BASE=https://gh.test GITHUB_WEB_BASE=https://github.com TMPROOT=$TMP BIN=$TMP/bin/mihomo CONFIGEDIT_LOCK=$TMP/lock \
   XKEEN_LOG=$TMP/xkeen.log COMPONENTS_UPGRADE_WAIT=2 COMPONENTS_POLL=1
 
 jget() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval("d"+sys.argv[1]))' "$1"; }
@@ -88,6 +96,14 @@ out=$(check)
 [ "$(printf '%s' "$out" | jget '["items"]["mihomo"]["available"]')" = True ] || fail "stable_update: available"
 [ "$(printf '%s' "$out" | jget '["items"]["mihomo"]["can_apply"]')" = True ] || fail "stable_update: can_apply"
 [ -f "$TMP/rt/components.json" ] || fail "stable_update: components.json не записан"
+
+# --- api_403_fallback: API недоступен (лимит), версия берётся из редиректа github.com
+setfx v1.19.2 v1.19.3 v2.6.0 v1.1
+: > "$TMP/fx/api_fail"
+out=$(check)
+[ "$(printf '%s' "$out" | jget '["items"]["mihomo"]["latest"]')" = v9.9.9 ] || fail "api_fallback: latest из редиректа"
+[ "$(printf '%s' "$out" | jget '["items"]["mihomo"]["error"]')" = None ] || fail "api_fallback: нет ошибки"
+rm -f "$TMP/fx/api_fail"
 
 # --- alpha_channel
 setfx alpha-abc1234 v1.19.3 v2.6.0 v1.1
