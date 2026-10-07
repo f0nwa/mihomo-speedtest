@@ -2030,7 +2030,12 @@ main() {
   [ "${MST_OWN_CONFIG:-0}" != 1 ] || own_config_notice
   [ "$NO_NODES" != 1 ] || no_nodes_notice
   ui_done "mihomo-speedtest ${done_tag}установлен"
-  ui_kv "Открыть" "${web_open:-?}"
+  # Ссылку выделяем цветом рамки заголовка (жирный акцент); пояснения вроде
+  # «веб-интерфейс отключён» остаются обычным текстом.
+  case ${web_open:-} in
+    http://*|https://*) ui_kv "Открыть" "$UI_C_ACC$UI_C_B$web_open$UI_C_0" ;;
+    *) ui_kv "Открыть" "${web_open:-?}" ;;
+  esac
   ui_kv "Фильтр" "$BLOCK"
   ui_kv "Порог" "$(format_mbit "$MIN_SPEED") Мбит/с"
   ui_kv "Диагностика" "$UI_LOG"
