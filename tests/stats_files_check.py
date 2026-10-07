@@ -61,6 +61,47 @@ class PathTests(Base):
         self.assertFalse(sf.is_readonly(self.path("other")))
 
 
+class PanelGuardTests(Base):
+    def setUp(self):
+        Base.setUp(self)
+        for k in ("STATS_AUTH_STATE_DIR", "STATS_AUTH_RUNTIME_DIR", "FM_READONLY", "DIR"):
+            old = os.environ.pop(k, None)
+            if old is not None:
+                self.addCleanup(os.environ.__setitem__, k, old)
+            self.addCleanup(os.environ.pop, k, None)
+        self.app = self.path("app")
+        os.makedirs(os.path.join(self.app, ".stats-auth"))
+        os.environ["DIR"] = self.app
+
+    def test_default_state_dir_is_guarded(self):
+        self.assertTrue(sf.is_readonly(os.path.join(self.app, ".stats-auth", "credentials")))
+
+    def test_runtime_dir_is_guarded(self):
+        rt = self.path("rt")
+        os.mkdir(rt)
+        os.environ["STATS_AUTH_RUNTIME_DIR"] = rt
+        self.assertTrue(sf.is_readonly(os.path.join(rt, "session")))
+
+    def test_symlink_into_guarded_dir_is_guarded(self):
+        os.symlink(os.path.join(self.app, ".stats-auth"), self.path("sneaky"))
+        self.assertTrue(sf.is_readonly(self.path("sneaky", "credentials")))
+
+    def test_delete_and_rename_of_ancestor_refused(self):
+        with self.assertRaises(sf.FileError) as cm:
+            sf.delete(self.app, recursive=True, confirm=self.app)
+        self.assertEqual(cm.exception.code, "readonly")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.rename(self.app, self.path("moved"))
+        self.assertEqual(cm.exception.code, "readonly")
+        self.assertTrue(os.path.isdir(self.app))
+
+    def test_write_text_bad_mtime_is_400(self):
+        p = self.touch("f.txt", b"x")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.write_text(p, "y", expected_mtime="abc")
+        self.assertEqual((cm.exception.status, cm.exception.code), (400, "invalid_request"))
+
+
 class ListTests(Base):
     def test_list_dir_sorts_dirs_first_and_hides_bak(self):
         os.mkdir(self.path("zdir"))

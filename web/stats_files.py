@@ -84,33 +84,53 @@ def is_protected(path, mounts_file="/proc/mounts"):
     return norm in PROTECTED or norm in _mount_points(mounts_file)
 
 
+def _real(path):
+    return os.path.realpath(path)
+
+
 def _panel_guarded():
-    """Каталоги и префиксы файлов панели, доступные только на чтение."""
+    """Каталоги и префиксы файлов панели (с раскрытыми симлинками).
+
+    Значения по умолчанию те же, что у stats_httpd.py: $DIR/.stats-auth для
+    состояния входа и /tmp/mihomo-speedtest-auth для сессий.
+    """
     dirs = []
     prefixes = []
-    state = os.environ.get("STATS_AUTH_STATE_DIR")
-    if state:
-        dirs.append(posixpath.normpath(state))
-    for extra in os.environ.get("FM_READONLY", "").split(":"):
-        if extra:
-            dirs.append(posixpath.normpath(extra))
     app_dir = os.environ.get("DIR")
+    state = os.environ.get("STATS_AUTH_STATE_DIR")
+    if not state and app_dir:
+        state = os.path.join(app_dir, ".stats-auth")
+    runtime = os.environ.get("STATS_AUTH_RUNTIME_DIR") or "/tmp/mihomo-speedtest-auth"
+    for d in [state, runtime] + os.environ.get("FM_READONLY", "").split(":"):
+        if d:
+            dirs.append(_real(d))
     if app_dir:
-        prefixes.append(posixpath.join(posixpath.normpath(app_dir), "stats_auth"))
+        prefixes.append(posixpath.join(_real(app_dir), "stats_auth"))
     return dirs, prefixes
 
 
 def is_readonly(path):
     """Файл панели (пароль, сессии): из веб-интерфейса его не меняют."""
     norm = normalize(path)
+    real = _real(norm)
     dirs, prefixes = _panel_guarded()
     for d in dirs:
-        if norm == d or norm.startswith(d.rstrip("/") + "/"):
+        if real == d or real.startswith(d.rstrip("/") + "/"):
             return True
     for pre in prefixes:
-        if norm.startswith(pre):
+        if real.startswith(pre):
             return True
     return False
+
+
+def touches_panel(path):
+    """Путь сам файл панели или объемлет его (удаление/перенос задели бы вход)."""
+    if is_readonly(path):
+        return True
+    real = _real(normalize(path))
+    prefix = real.rstrip("/") + "/"
+    dirs, prefixes = _panel_guarded()
+    return any(g.startswith(prefix) for g in dirs + prefixes)
 
 
 def _display(name):
@@ -233,6 +253,11 @@ def write_text(path, content, expected_mtime=None):
     norm = normalize(path)
     if is_readonly(norm):
         raise FileError(403, "readonly")
+    if expected_mtime is not None:
+        try:
+            expected_mtime = float(expected_mtime)
+        except (TypeError, ValueError):
+            raise FileError(400, "invalid_request")
     data = content.encode("utf-8")
     if len(data) > WRITE_LIMIT:
         raise FileError(413, "too_large")
@@ -247,7 +272,7 @@ def write_text(path, content, expected_mtime=None):
         if st is not None:
             if not stat.S_ISREG(st.st_mode):
                 raise FileError(415, "not_regular")
-            if expected_mtime is not None and abs(st.st_mtime - float(expected_mtime)) > 0.001:
+            if expected_mtime is not None and abs(st.st_mtime - expected_mtime) > 0.001:
                 raise FileError(409, "conflict")
             mode = stat.S_IMODE(st.st_mode)
             existed = True
@@ -341,7 +366,7 @@ def rename(src, dst):
     b = normalize(dst)
     if is_protected(a) or is_protected(b):
         raise FileError(403, "protected")
-    if is_readonly(a) or is_readonly(b):
+    if touches_panel(a) or is_readonly(b):
         raise FileError(403, "readonly")
     if os.path.lexists(b):
         raise FileError(409, "exists")
@@ -357,7 +382,7 @@ def delete(path, recursive=False, confirm=None):
     norm = normalize(path)
     if is_protected(norm):
         raise FileError(403, "protected")
-    if is_readonly(norm):
+    if touches_panel(norm):
         raise FileError(403, "readonly")
     try:
         st = os.lstat(norm)
