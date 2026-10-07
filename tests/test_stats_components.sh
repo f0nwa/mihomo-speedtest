@@ -252,4 +252,43 @@ out=$(apply_req xkeen); assert_contains 'Status: 400' "$out"; assert_contains 'u
 out=$(apply_req foo); assert_contains 'unknown_component' "$out"
 [ ! -f "$TMP/rt/components-job.json" ] || fail "apply_unknown_name: job создан"
 
+# ===== подключение =====
+# --- cron: stats_update.sh check зовёт проверку компонентов; её сбой не ломает проверку проекта
+W=$TMP/wire; mkdir -p "$W/bin" "$W/rt"
+cp "$ROOT/web/stats_update.sh" "$W/stats_update.sh"
+printf '#!/bin/sh\n[ "$1" = --plan ] && echo "{}"\nexit 0\n' > "$W/update.sh"
+printf '#!/bin/sh\necho "$*" >> "%s/comp.log"\nexit "${COMP_RC:-0}"\n' "$W" > "$W/stats_components.sh"
+printf '#!/bin/sh\nexit 0\n' > "$W/bin/crontab"
+chmod +x "$W/update.sh" "$W/stats_components.sh" "$W/bin/crontab"
+wire_check() { env -i PATH="$W/bin:$PATH" DIR="$W" UPDATE_SCRIPT="$W/update.sh" STATS_UPDATE_RUNTIME_DIR="$W/rt" \
+  UPDATE_NOTES_HTTP_CMD=/bin/false TMPROOT="$W" sh "$W/stats_update.sh" check; }
+wire_check >/dev/null 2>&1 || fail "cron: check завершился с ошибкой"
+assert_contains 'check cron' "$(cat "$W/comp.log" 2>/dev/null || true)"
+rc=0; COMP_RC=1 wire_check >/dev/null 2>&1 || rc=$?
+[ "$rc" = 0 ] || fail "cron: сбой проверки компонентов не должен ломать check (rc=$rc)"
+# проверка проекта упала (update.sh --plan - ошибка): компоненты всё равно проверены, код выхода прежний
+printf '#!/bin/sh\nexit 1\n' > "$W/update.sh"; : > "$W/comp.log"
+rc=0; wire_check >/dev/null 2>&1 || rc=$?
+[ "$rc" != 0 ] || fail "cron: падение проверки проекта должно давать ненулевой код"
+assert_contains 'check cron' "$(cat "$W/comp.log")"
+printf '#!/bin/sh\n[ "$1" = --plan ] && echo "{}"\nexit 0\n' > "$W/update.sh"
+rm -rf "$W/comp.log"; rm -f "$W/stats_components.sh"
+wire_check >/dev/null 2>&1 || fail "cron: без stats_components.sh check должен работать"
+
+# --- маршруты и статика
+for a in check status apply; do
+  grep -q "\"MST_COMPONENTS_ACTION\": \"$a\"" "$ROOT/web/stats_httpd.py" || fail "нет маршрута для $a"
+done
+grep -q '"api/components/apply": ("stats_components.sh"' "$ROOT/web/stats_httpd.py" || fail "нет api/components/apply"
+grep -q '"app-components.js": "stats_app_components.js"' "$ROOT/web/stats_httpd.py" || fail "модуль не раздаётся"
+# --- регистрация файлов везде, где перечислены соседи
+for f in stats_components.sh stats_app_components.js; do
+  grep -q "$f" "$ROOT/install.sh" || fail "$f нет в install.sh"
+  grep -q "$f" "$ROOT/uninstall.sh" || fail "$f нет в uninstall.sh"
+  grep -q "|web/$f|" "$ROOT/release/components.txt" || fail "$f нет в components.txt"
+  grep -q "$f" "$ROOT/tests/test_install_bootstrap.sh" || fail "$f нет в test_install_bootstrap.sh"
+  [ "$(grep -c "$f" "$ROOT/tests/test_install.sh")" -ge 3 ] || fail "$f нет во всех списках test_install.sh"
+done
+[ -x "$ROOT/web/stats_components.sh" ] || fail "stats_components.sh не исполняемый"
+
 echo "test_stats_components: OK"

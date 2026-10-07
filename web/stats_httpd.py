@@ -462,6 +462,7 @@ STATIC_FILES = {
     "app-log.js": "stats_app_log.js",
     "app-config.js": "stats_app_config.js",
     "app-xkeen.js": "stats_app_xkeen.js",
+    "app-components.js": "stats_app_components.js",
     "app-constructor.js": "stats_app_constructor.js",
     "app-constructor-model.js": "stats_app_constructor_model.js",
     "app-constructor-modules.js": "stats_app_constructor_modules.js",
@@ -498,6 +499,11 @@ API_ROUTES = {
     "api/updates/prepare": ("stats_update.sh", {"MST_UPDATE_ACTION": "prepare"}),
     "api/updates/apply": ("stats_update.sh", {"MST_UPDATE_ACTION": "apply"}),
     "api/updates/discard": ("stats_update.sh", {"MST_UPDATE_ACTION": "discard"}),
+    # Компоненты (mihomo, zashboard, xkeen): check ходит на GitHub и в API ядра;
+    # apply только запускает фоновое задание и отвечает сразу.
+    "api/components/check": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "check", "MST_CGI_TIMEOUT": "60"}),
+    "api/components/status": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "status"}),
+    "api/components/apply": ("stats_components.sh", {"MST_COMPONENTS_ACTION": "apply"}),
     # Применение конфига ждёт mihomo -t, xkeen -restart, проверку ядра и
     # при провале - откат, поэтому таймауты больше.
     "api/config": ("stats_config.sh", {"MST_CONFIG_ACTION": "read"}),

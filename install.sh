@@ -26,7 +26,7 @@ PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh u
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_constructor.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_components.sh stats_constructor.sh stats_httpd.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_components.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -1104,6 +1104,8 @@ install_files() {
   chmod +x "$DIR/stats_config.sh"
   atomic_install "$SELFDIR/stats_xkeen.sh" "$DIR/stats_xkeen.sh" || return 1
   chmod +x "$DIR/stats_xkeen.sh"
+  atomic_install "$SELFDIR/stats_components.sh" "$DIR/stats_components.sh" || return 1
+  chmod +x "$DIR/stats_components.sh"
   atomic_install "$SELFDIR/stats_constructor.sh" "$DIR/stats_constructor.sh" || return 1
   chmod +x "$DIR/stats_constructor.sh"
   # статические файлы SPA-shell (см. docs/plans/2026-09-12-web-spa-migration-design.md)
@@ -1112,7 +1114,7 @@ install_files() {
   atomic_install "$SELFDIR/stats_index.html" "$DIR/stats_index.html" || return 1
   atomic_install "$SELFDIR/stats_style.css" "$DIR/stats_style.css" || return 1
   atomic_install "$SELFDIR/stats_app.js" "$DIR/stats_app.js" || return 1
-  for m in core stats settings updates log config xkeen constructor constructor_model constructor_modules constructor_modules_model; do
+  for m in core stats settings updates log config xkeen components constructor constructor_model constructor_modules constructor_modules_model; do
     atomic_install "$SELFDIR/stats_app_$m.js" "$DIR/stats_app_$m.js" || return 1
   done
   # stats_codemirror.js/.css - вендоренный CodeMirror 5 для вкладки "Конфиг".
