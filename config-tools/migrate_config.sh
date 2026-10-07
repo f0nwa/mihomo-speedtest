@@ -55,7 +55,7 @@ if ! (ulimit -f 4096; awk -v SUBS_FILE="$subs_file" -v PROXIES_FILE="$proxies_fi
   fail "Структура конфига не поддерживается: $reason; выход сохранён"
 fi
 # Очистка прежних групп FAST-WG и сохранение прямых ссылок на WG-победителей.
-awk -f "$DIR/fast_wg.awk" "$WORK/candidate" > "$WORK/candidate.wg" && mv -f "$WORK/candidate.wg" "$WORK/candidate" \
+awk -v KEEP="$source_file" -f "$DIR/fast_wg.awk" "$WORK/candidate" > "$WORK/candidate.wg" && mv -f "$WORK/candidate.wg" "$WORK/candidate" \
   || fail 'Не удалось обновить ссылки на WG-ноды; выход сохранён'
 [ "$(wc -c < "$WORK/candidate" | tr -d ' ')" -le 4194304 ] && [ "$(wc -c < "$WORK/report" | tr -d ' ')" -le 65536 ] || fail 'Результат превышает лимит'
 chmod 0600 "$WORK/candidate" "$WORK/report" || fail 'Не удалось защитить результат'

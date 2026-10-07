@@ -1,6 +1,8 @@
 # Прямые ссылки на WG-победителей в быстром пуле.
 # WINNERS - файл имён по одному на строку; без него сохраняем текущий состав.
 # TESTED - имена замеренных нод; остальные сохраняют прежнее участие.
+# KEEP - прежний конфиг: ссылки из его блока FAST_WG_REF учитываются как
+# текущий состав (сборка конструктора/миграция начинает с пустого блока).
 # Старые группы FAST-WG между маркерами удаляются, новые не создаются.
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
 function unquote(v) {
@@ -60,6 +62,17 @@ END {
     while ((rc = (getline name < TESTED)) > 0) tested[name] = 1
     close(TESTED)
     if (rc < 0) exit 2
+  }
+  if (KEEP != "") {
+    kin = 0
+    while ((rc = (getline kl < KEEP)) > 0) {
+      if (marker(kl, "FAST_WG_REF")) { kin = kl ~ /:BEGIN/; continue }
+      if (kin) keep[++nkeep] = kl
+    }
+    close(KEEP)
+    if (rc < 0) exit 2
+    for (i = 1; i <= nkeep; i++) for (k = 1; k <= nwg; k++)
+      if (in_flow(keep[i], wg[k])) wanted[wg[k]] = 1
   }
   if (WINNERS == "" || TESTED != "") {
     inside = 0

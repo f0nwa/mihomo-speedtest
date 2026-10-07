@@ -388,7 +388,12 @@ record_schema() {
 # Отпечаток управляемых конструктором разделов config.yaml ($1): anchors,
 # proxy-groups, rule-providers, rules (их пересобирает шаблон).
 managed_sig() {
+  # Содержимое блоков FAST_WG/FAST_WG_REF ведёт замер скорости (WG-победители),
+  # это не ручная правка - маркеры остаются, текст между ними не учитывается.
   awk '/^[A-Za-z0-9_-]+:/ { k = $0; sub(/:.*/, "", k) }
+       /^[ ]*# --- FAST_WG(_REF)?:BEGIN ---($|[ ])/ { print; skip = 1; next }
+       /^[ ]*# --- FAST_WG(_REF)?:END ---($|[ ])/ { skip = 0 }
+       skip { next }
        k == "anchors" || k == "proxy-groups" || k == "rule-providers" || k == "rules"' "$1" > "$WORK/managed"
   fingerprint "$WORK/managed"
 }

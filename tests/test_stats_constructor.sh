@@ -90,6 +90,15 @@ out=$(cgi read GET '' </dev/null)
 [ "$(printf '%s' "$out" | jget '["imported"]')" = False ] || fail "4b: состояние из .old не восстановлено"
 [ -d "$ST" ] && [ ! -e "$ST.old" ] || fail "4b: каталоги после восстановления"
 
+# --- 4c: замер скорости меняет ссылки на WG-победителей в FAST_WG_REF -
+#     это не ручная правка групп
+cp "$M/config.yaml" "$TMP/pre-wg.yaml"
+awk '{ print } /^ *# --- FAST_WG_REF:BEGIN ---/ { print "    proxies: [\x27WG-A\x27]" }' "$TMP/pre-wg.yaml" > "$M/config.yaml"
+grep -q "proxies: \['WG-A'\]" "$M/config.yaml" || fail "4c: ссылка не вставлена"
+out=$(cgi read GET '' </dev/null)
+[ "$(printf '%s' "$out" | jget '["manual_edits"]')" = False ] || fail "4c: ссылки WG посчитаны ручной правкой"
+cp "$TMP/pre-wg.yaml" "$M/config.yaml"
+
 # --- 5: ручная правка правил - manual_edits
 sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,hand.example,DIRECT\
   - MATCH,DIRECT/' "$M/config.yaml" > "$TMP/c" && cat "$TMP/c" > "$M/config.yaml"

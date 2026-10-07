@@ -55,6 +55,12 @@ awk -f "$SCRIPT" "$WORK/removed.yaml" > "$WORK/removed2.yaml"
 hasnt 'name: FAST-WG' "$WORK/removed2.yaml" "WG-ноды удалены - группы нет"
 hasnt "'FAST-WG" "$WORK/removed2.yaml" "WG-ноды удалены - ссылки нет"
 
+# KEEP: ссылки из блока прежнего конфига переживают пересборку с пустым блоком.
+printf "WG Bob's\nAWG-NL\n" > "$WORK/winners-keep"
+awk -v WINNERS="$WORK/winners-keep" -f "$SCRIPT" "$WORK/wg.yaml" > "$WORK/keep-old.yaml"
+awk -v KEEP="$WORK/keep-old.yaml" -f "$SCRIPT" "$WORK/wg.yaml" > "$WORK/keep-new.yaml"
+has "    proxies: ['WG Bob''s', 'AWG-NL']" "$WORK/keep-new.yaml" "KEEP сохраняет победителей"
+
 # Конфиг без маркеров (свой, не из шаблона) не трогается.
 printf 'proxies:\n  - name: w\n    type: wireguard\nproxy-groups:\n  - name: x\n    type: select\n    proxies: [w]\n' > "$WORK/plain.yaml"
 awk -f "$SCRIPT" "$WORK/plain.yaml" > "$WORK/plain2.yaml"
