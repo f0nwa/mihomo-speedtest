@@ -235,6 +235,17 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-textarea{display:block;width:100%;height:62vh;min-height:320px;background:#11151c;color:#d7dee6;border:0;padding:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre;tab-size:2}
 .config-status.config-dirty{color:#e0b060}
 .config-diff{max-height:420px}
+.config-toolbar{align-items:flex-start}
+.config-toolbar button.submit{margin-top:0}
+.config-more{position:relative;margin-left:auto}
+.config-more-menu{position:absolute;right:0;top:calc(100% + 4px);min-width:260px;z-index:5;background:var(--card);border:1px solid var(--card-border);box-shadow:0 8px 24px #0008;padding:6px 0}
+.config-more-menu[hidden]{display:none}
+.config-more-title{padding:8px 16px 4px;font-size:12px;letter-spacing:.08em;color:var(--muted)}
+.config-more-sep{height:1px;background:var(--card-border);margin:6px 0}
+.config-more-item{display:block;width:100%;text-align:left;min-height:40px;padding:0 16px;background:transparent;border:0;color:inherit;font:inherit;font-size:14px;cursor:pointer}
+.config-more-item:hover,.config-more-item:focus-visible{background:#35c7c71f}
+.config-more-item.danger{color:var(--danger)}
+.config-more-item:disabled{opacity:.5;cursor:default}
 .config-sdiff-host{margin:12px 0}
 .config-sdiff-head{display:flex;align-items:center;gap:12px;margin-bottom:8px}
 .config-sdiff{max-height:62vh;min-height:320px;overflow:auto;border:1px solid var(--card-border);background:#11151c}

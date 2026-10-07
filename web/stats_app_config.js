@@ -423,12 +423,50 @@ function renderYaml(bar) {
       var b = el('button', 'submit' + (secondary ? ' secondary' : ''), text);
       b.type = 'button'; row.appendChild(b); return b;
     }
-    var row1 = el('div', 'btn-row');
-    var checkBtn = btn(row1, 'Проверить', true);
+    var row1 = el('div', 'btn-row config-toolbar');
     var saveBtn = btn(row1, 'Сохранить и применить');
-    var diffBtn = btn(row1, 'Сравнить с сохранённым', true);
+    var checkBtn = btn(row1, 'Проверить', true);
+    var diffBtn = btn(row1, 'Изменения', true);
     var resetBtn = btn(row1, 'Отменить правки', true);
-    var logBtn = btn(row1, 'Журнал применения', true);
+    // «Ещё»: редкие действия (починка, откат, журнал) - меню справа в той же панели.
+    var moreWrap = el('div', 'config-more');
+    var moreBtn = btn(moreWrap, 'Ещё ▾', true);
+    moreBtn.setAttribute('aria-haspopup', 'true');
+    moreBtn.setAttribute('aria-expanded', 'false');
+    var moreMenu = el('div', 'config-more-menu');
+    moreMenu.hidden = true;
+    function menuGroup(title) { moreMenu.appendChild(el('div', 'config-more-title', title)); }
+    function menuItem(text, danger, tip) {
+      var b = el('button', 'config-more-item' + (danger ? ' danger' : ''), text);
+      b.type = 'button';
+      if (tip) { b.title = tip; }
+      moreMenu.appendChild(b);
+      return b;
+    }
+    menuGroup('Починка');
+    var fmtBtn = menuItem('Исправить формат', false, 'Только меняет текст в редакторе: BOM, CRLF, табы, пробелы в конце строк');
+    var tplBtn = menuItem('Миграция к шаблону', false, 'Только меняет текст в редакторе; после применения карточка обновления конфига исчезнет');
+    var wgBtn = menuItem('Импорт WireGuard…', false, 'Добавляет ноды из .conf (WireGuard и AmneziaWG) в proxies и группы; только меняет текст в редакторе');
+    moreMenu.appendChild(el('div', 'config-more-sep'));
+    menuGroup('История');
+    var logBtn = menuItem('Журнал применения');
+    var workBtn = menuItem('Откат к рабочему бэкапу', true, 'Сразу применяет самый свежий бэкап, который проходит mihomo -t');
+    moreWrap.appendChild(moreMenu);
+    row1.appendChild(moreWrap);
+    function closeMore() { moreMenu.hidden = true; moreBtn.setAttribute('aria-expanded', 'false'); }
+    moreBtn.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      moreMenu.hidden = !moreMenu.hidden;
+      moreBtn.setAttribute('aria-expanded', moreMenu.hidden ? 'false' : 'true');
+    });
+    moreMenu.addEventListener('click', function (ev) { if (ev.target.tagName === 'BUTTON') { closeMore(); } });
+    function outsideMore(ev) {
+      if (!document.body.contains(moreWrap)) { document.removeEventListener('click', outsideMore); document.removeEventListener('keydown', escMore); return; }
+      if (!moreWrap.contains(ev.target)) { closeMore(); }
+    }
+    function escMore(ev) { if (ev.key === 'Escape' && !moreMenu.hidden) { closeMore(); moreBtn.focus(); } }
+    document.addEventListener('click', outsideMore);
+    document.addEventListener('keydown', escMore);
     main.appendChild(row1);
 
     var msgBox = el('div', 'config-msg');
@@ -458,25 +496,12 @@ function renderYaml(bar) {
     main.appendChild(applyBox);
     app.appendChild(main);
 
-    var repairCard = card('Починка');
-    var row2 = el('div', 'btn-row');
-    var fmtBtn = btn(row2, 'Исправить формат', true);
-    var tplBtn = btn(row2, 'Миграция к шаблону', true);
-    var workBtn = btn(row2, 'Откат к рабочему бэкапу', true);
-    var wgBtn = btn(row2, 'Импорт WireGuard', true);
-    repairCard.appendChild(el('p', 'hint', 'Исправление формата, миграция и импорт WireGuard только меняют текст в редакторе - ' +
-      'проверьте результат и нажмите «Сохранить и применить». Откат к рабочему бэкапу сразу применяет ' +
-      'самый свежий бэкап, который проходит mihomo -t. Импорт WireGuard добавляет ноды из файлов .conf ' +
-      '(WireGuard и AmneziaWG) в proxies: и в группы 🚀 Авто по пингу, 🛡️Fallback-Stable, ⚙️Manual; в ⚡ Быстрый пул они попадут после успешного замера скорости; ' +
-      'новые строки отмечаются зелёной полосой слева, изменённые - жёлтой. После применения миграции ' +
-      'карточка «Доступно обновление конфига» на вкладке «Обновления» исчезнет.'));
-    repairCard.appendChild(row2);
+    // Импорт WireGuard: скрытый выбор файлов и окно со списком - в основной карточке.
     var wgInput = el('input');
     wgInput.type = 'file'; wgInput.accept = '.conf'; wgInput.multiple = true; wgInput.hidden = true;
-    repairCard.appendChild(wgInput);
+    main.appendChild(wgInput);
     var importHost = el('div');
-    repairCard.appendChild(importHost);
-    app.appendChild(repairCard);
+    main.appendChild(importHost);
 
     var backupsCard = card('Бэкапы');
     var backupsBody = el('div');
