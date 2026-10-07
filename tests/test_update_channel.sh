@@ -30,7 +30,8 @@ case \$1 in
   '$STABLE_BASE/manifest.txt') cat '$TMP/www/stable/manifest.txt' ;;
   'https://example.test/releases/download/1.1.0/manifest.txt') cat '$TMP/www/dev/manifest.txt' ;;
   'https://example.test/releases/download/1.3.0/manifest.txt') cat '$TMP/www/dev130/manifest.txt' ;;
-  '$API') echo api >> '$TMP/api.count'; cat '$TMP/api.json' ;;
+  '$API') echo api >> '$TMP/api.count'; [ ! -f '$TMP/api.fail' ] || exit 22; cat '$TMP/api.json' ;;
+  'https://example.test/releases') echo page >> '$TMP/page.count'; cat '$TMP/releases.html' ;;
   *) echo "unexpected url: \$1" >&2; exit 22 ;;
 esac
 EOF
@@ -171,5 +172,19 @@ run_plan "$TMP/installed-same.txt" UPDATE_CHANNEL=dev
 [ "$rc" = 0 ] || fail "--plan в канале dev: код $rc, stderr: $(cat "$TMP/err")"
 [ "$(api_calls)" = 1 ] || fail "--plan dev: ожидался 1 запрос к API, было $(api_calls)"
 grep -Fq '/opt/etc/mihomo-speedtest/update.sh [updater]' "$TMP/out" || fail "--plan dev: нет плана в выводе: $(cat "$TMP/out")"
+
+# 11. API недоступен (403 -> код 22): теги берутся со страницы релизов,
+# выбор тот же (наибольший x.y.z, hotfix 1.2.1 после dev 1.3.0 не мешает).
+printf '%s\n' '<a href="/o/r/releases/tag/1.2.1">x</a> <a href="/o/r/releases/tag/1.3.0">y</a> <a href="/o/r/releases/tag/v26.1">z</a>' > "$TMP/releases.html"
+touch "$TMP/api.fail"; rm -f "$TMP/page.count"
+run UPDATE_CHANNEL=dev UPDATE_RELEASES_FALLBACK=https://example.test/releases
+expect_ok 'fallback при отказе API' 1.3.0
+[ -f "$TMP/page.count" ] || fail 'fallback не обратился к странице релизов'
+# Страница без тегов x.y.z -> прежняя ошибка канала разработки.
+printf '%s\n' '<html>пусто</html>' > "$TMP/releases.html"
+run UPDATE_CHANNEL=dev UPDATE_RELEASES_FALLBACK=https://example.test/releases
+[ "$rc" != 0 ] || fail 'пустой fallback принят'
+grep -Fq 'канала разработки' "$TMP/err" || fail "пустой fallback: нет сообщения, stderr: $(cat "$TMP/err")"
+rm -f "$TMP/api.fail"
 
 echo 'test_update_channel.sh: OK' >&2

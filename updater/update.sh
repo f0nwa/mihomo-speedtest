@@ -14,6 +14,9 @@ UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
 # read_update_channel и resolve_channel_base.
 UPDATE_ENV_FILE=${UPDATE_ENV_FILE:-/opt/etc/mihomo-speedtest/speedtest2.env}
 UPDATE_RELEASES_API=${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5}
+# Запасной источник списка тегов, если API недоступен (403 - лимит 60
+# запросов в час на IP без авторизации, общий для всех устройств за NAT).
+UPDATE_RELEASES_FALLBACK=${UPDATE_RELEASES_FALLBACK:-https://github.com/f0nwa/mihomo-speedtest/releases}
 UPDATE_HTTP_TIMEOUT=${UPDATE_HTTP_TIMEOUT:-15}
 UPDATE_STATE_DIR=${UPDATE_STATE_DIR:-/opt/etc/mihomo-speedtest/.update}
 MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
@@ -162,6 +165,7 @@ download_to() {
     :
   else
     download_status=$?
+    [ -z "${DOWNLOAD_SOFT:-}" ] || return 1
     die "Не удалось скачать файл обновления (код загрузчика: $download_status).
 Адрес: $1
 Повторите обновление через несколько минут. Если ошибка повторится, пришлите этот вывод для диагностики."
@@ -237,7 +241,13 @@ resolve_channel_base() {
   [ -z "${UPDATE_BOOTSTRAP_DIR:-}${UPDATE_VERIFIED_ENGINE_DIR:-}${UPDATE_RECOVERY_ENGINE_DIR:-}" ] || return 0
   [ "$(read_update_channel)" = dev ] || return 0
   case $UPDATE_RELEASE_BASE in */releases/latest/download) ;; *) return 0 ;; esac
-  download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 4194304
+  if ! DOWNLOAD_SOFT=1 download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 4194304; then
+    # API отказал: берём теги со страницы релизов github.com (без лимита API)
+    # и приводим к виду "tag_name", чтобы дальше работал тот же разбор.
+    download_to "$UPDATE_RELEASES_FALLBACK" "$WORK/releases.html" 4194304
+    grep -Eo '/releases/tag/[0-9]+\.[0-9]+\.[0-9]+' "$WORK/releases.html" |
+      sed 's|.*/|{"tag_name":"|; s|$|"}|' > "$WORK/releases.json"
+  fi
   # Не первый релиз по дате, а наибольший тег x.y.z среди последних
   # релизов: стабильный hotfix (1.2.1), вышедший после dev 1.3.0, не должен
   # откатывать канал dev. Теги не вида x.y.z (старые v1..v26.x) пропускаются.

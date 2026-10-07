@@ -652,8 +652,14 @@ bootstrap_choose_channel() {
 bootstrap_resolve_dev() {
   bootstrap_download_to "${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5}" \
       "$BOOTSTRAP_WORK/releases.json" 4194304 || {
-    ui_fail "Не удалось получить список релизов для канала dev"
-    return 1
+    # API недоступен (403 - лимит запросов на IP): теги со страницы релизов.
+    bootstrap_download_to "${UPDATE_RELEASES_FALLBACK:-https://github.com/f0nwa/mihomo-speedtest/releases}" \
+        "$BOOTSTRAP_WORK/releases.html" 4194304 &&
+      grep -Eo '/releases/tag/[0-9]+\.[0-9]+\.[0-9]+' "$BOOTSTRAP_WORK/releases.html" |
+        sed 's|.*/|{"tag_name":"|; s|$|"}|' > "$BOOTSTRAP_WORK/releases.json" || {
+      ui_fail "Не удалось получить список релизов для канала dev"
+      return 1
+    }
   }
   BOOTSTRAP_DEV_TAG=$(awk '
     function newer(a, b,   x, y, i) {
