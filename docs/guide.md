@@ -606,8 +606,9 @@ PBKDF2-хеш пароля) хранятся в `/opt/etc/mihomo-speedtest/.stat
 - **Смена логина/пароля и сброс через SSH.** Сменить логин или пароль
   через саму веб-форму настроек нельзя - только через сброс по SSH:
   ```sh
-  sh /opt/etc/mihomo-speedtest/stats_auth.sh reset
+  mihomo-speedtest reset-password
   ```
+  (то же, что `sh /opt/etc/mihomo-speedtest/stats_auth.sh reset`)
   Команда стирает текущие credentials и все активные сессии, перезапускает
   веб-службу и печатает новый одноразовый код для `/setup`, как при первой
   настройке. Используйте `reset`, если забыли пароль или хотите сменить

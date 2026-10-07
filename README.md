@@ -123,6 +123,26 @@ cron, при желании откатить `config.yaml`):
 curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/uninstall.sh | sh
 ```
 
+## Команды
+
+После установки всем управляют по SSH одной командой `mihomo-speedtest`:
+
+| Команда | Что делает |
+|---|---|
+| `mihomo-speedtest reset-password` | **забыли пароль от веб-панели**: печатает одноразовый код, с ним на странице `/setup` задаёте новые логин и пароль |
+| `mihomo-speedtest show-url` | показать адрес веб-панели |
+| `mihomo-speedtest run` | запустить замер скорости прямо сейчас |
+| `mihomo-speedtest update` | проверить и установить обновление |
+| `mihomo-speedtest status` | состояние веб-службы |
+| `mihomo-speedtest restart-web` | перезапустить веб-панель, если не открывается |
+| `mihomo-speedtest stop-web` / `start-web` | выключить / включить веб-панель |
+| `mihomo-speedtest setup` | мастер настройки `config.yaml` |
+| `mihomo-speedtest version` | установленная версия |
+| `mihomo-speedtest recalibrate` | пересчитать порог скорости |
+| `mihomo-speedtest install` / `uninstall` | переустановить / удалить проект |
+
+Список всех команд: `mihomo-speedtest help`.
+
 ## Каналы обновлений
 
 В репозитории две ветки: `main` - стабильная, `dev` - разработка. Выпуски
