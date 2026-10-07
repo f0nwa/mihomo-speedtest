@@ -20,6 +20,13 @@ for fn in renderFiles stopFiles filesDirty; do
 done
 grep -q 'innerHTML' "$JS" && fail "9: innerHTML запрещён, только textContent"
 grep -q '\.fm-' "$ROOT/web/stats_style.css" || fail "10: нет стилей .fm-*"
+for f in stats_files.py stats_app_files.js; do
+  grep -q "$f" "$ROOT/install.sh" || fail "12: $f не в install.sh"
+  grep -q "$f" "$ROOT/uninstall.sh" || fail "13: $f не в uninstall.sh"
+  grep -q "^FILE|web|web/$f|" "$ROOT/release/components.txt" || fail "14: $f не в release/components.txt"
+  grep -q "$f" "$ROOT/tests/test_install_bootstrap.sh" || fail "15: $f не в test_install_bootstrap.sh"
+done
+grep -q 'stats_files.py' "$ROOT/docs/guide.md" || grep -q 'Файловый менеджер' "$ROOT/docs/guide.md" || fail "16: нет раздела в docs/guide.md"
 if command -v node >/dev/null 2>&1; then
   cp "$JS" "${TMPDIR:-/tmp}/stats_app_files_check.$$.mjs"
   node --check "${TMPDIR:-/tmp}/stats_app_files_check.$$.mjs" || { rm -f "${TMPDIR:-/tmp}/stats_app_files_check.$$.mjs"; fail "11: синтаксис JS"; }
