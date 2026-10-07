@@ -143,6 +143,39 @@ curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/uninsta
 
 Список всех команд: `mihomo-speedtest help`.
 
+## Рекомендуемая настройка сервисов
+
+В веб-панели у каждого сервиса (YouTube, Telegram и др.) выберите группу
+`Заблок. сервисы`. Она по умолчанию смотрит на `⚡ Самые быстрые + Fallback`,
+а та - на две группы: `⚡ Быстрый пул` (приоритет 1) и `🛡️Fallback-Stable`
+(приоритет 2). Если ноды быстрого пула перестают пинговаться, Mihomo сам
+переключается на `🛡️Fallback-Stable` - так настроена отказоустойчивость.
+
+```mermaid
+flowchart TD
+    S["Сервисы<br/>YouTube, Telegram, ChatGPT и др.<br/><i>в веб-панели выбрать: Заблок. сервисы</i>"]
+    B["Заблок. сервисы<br/>select, общий выбор для всех сервисов"]
+    F["⚡ Самые быстрые + Fallback<br/>fallback, по умолчанию выбран в «Заблок. сервисы»"]
+    P["⚡ Быстрый пул<br/>приоритет 1: быстрейшие ноды из fast.yaml"]
+    R["🛡️Fallback-Stable<br/>приоритет 2: первая живая нода подписок"]
+    X["Оба недоступны: соединение завершается ошибкой<br/>(DIRECT автоматически не включается)"]
+
+    S -->|"каждый сервис смотрит на"| B
+    B -->|"по умолчанию"| F
+    F -->|"1: пока пул отвечает"| P
+    F -.->|"2: ноды пула не пингуются, автопереключение"| R
+    F -.->|"оба не отвечают"| X
+
+    classDef main fill:#1f6feb,stroke:#1f6feb,color:#fff
+    classDef fast fill:#238636,stroke:#238636,color:#fff
+    classDef reserve fill:#9e6a03,stroke:#9e6a03,color:#fff
+    classDef dead fill:#6e7681,stroke:#6e7681,color:#fff
+    class B,F main
+    class P fast
+    class R reserve
+    class X dead
+```
+
 ## Каналы обновлений
 
 В репозитории две ветки: `main` - стабильная, `dev` - разработка. Выпуски
