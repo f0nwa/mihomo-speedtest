@@ -48,12 +48,29 @@ check_mihomo_process() {
   return 1
 }
 
+# Вывод `xkeen -v` разбираем терпимо: формат строк меняется между релизами
+# (в 2.1 строка с версией не совпала с "Версия XKeen"), вывод может идти в
+# stderr, версия может быть с префиксом "v". Берём первую строку со словом
+# XKeen (без Mihomo/Xray) и первое число вида N.N[.N] в ней.
+xkeen_v_output() {
+  xkeen -v 2>&1
+}
+
 xkeen_version() {
-  xkeen -v 2>/dev/null | awk '{ gsub(/\033\[[0-9;]*m/, "") } /Версия XKeen/ { print $3; exit }'
+  xkeen_v_output | awk '
+    { gsub(/\033\[[0-9;]*[A-Za-z]/, ""); gsub(/\r/, "") }
+    { l = tolower($0) }
+    l ~ /xkeen/ && l !~ /mihomo|xray/ && match($0, /[0-9]+\.[0-9]+(\.[0-9]+)*/) {
+      print substr($0, RSTART, RLENGTH); exit
+    }'
 }
 
 mihomo_version() {
-  xkeen -v 2>/dev/null | awk '{ gsub(/\033\[[0-9;]*m/, "") } /Mihomo версии/ { print $NF; exit }'
+  xkeen_v_output | awk '
+    { gsub(/\033\[[0-9;]*[A-Za-z]/, ""); gsub(/\r/, "") }
+    tolower($0) ~ /mihomo/ && match($0, /[0-9]+\.[0-9]+(\.[0-9]+)*/) {
+      print substr($0, RSTART, RLENGTH); exit
+    }'
 }
 
 keeneticos_version() {
