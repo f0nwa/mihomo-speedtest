@@ -149,6 +149,7 @@ body.auth-mode .wrap{padding:0}
 .nav-badge{display:inline-block;min-width:8px;height:8px;margin-left:5px;border-radius:0;background:var(--accent);vertical-align:middle;animation:nav-badge-blink 1.4s ease-in-out infinite}
 @keyframes nav-badge-blink{0%,100%{opacity:1}50%{opacity:.25}}
 .update-console{max-height:280px;overflow:auto;overflow-wrap:anywhere;background:#11151c;color:#d7dee6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;padding:12px;border-radius:0;border:1px solid var(--card-border);margin:8px 0}
+.msg-err-text{color:var(--danger)}
 .update-console .log-line{white-space:pre-wrap}
 .update-console .log-line.err{color:#ff8a80}
 .update-console.live-log{max-height:70vh;min-height:240px}
