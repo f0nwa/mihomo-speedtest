@@ -121,6 +121,7 @@ function read_defaults(  rc, line, n, f) {
     if (f[1] == "svc") { nds++; ds_id[nds] = f[2]; ds_name[f[2]] = f[3]; name_to_id[f[3]] = f[2]; is_default_id[f[2]] = 1 }
     else if (f[1] == "prov") { p = f[3]; sub(/:.*/, "", p); default_prov[p] = f[2] }
     else if (f[1] == "rule") { ndr++; dr_owner[ndr] = f[2]; dr_text[ndr] = f[3]; dr_index[body(f[3])] = ndr }
+    else if (f[1] == "fresh") fresh_rule[f[2] SUBSEP f[3]] = 1
   }
   if (rc < 0) err("не удалось прочитать " defaults)
   close(defaults)
@@ -280,6 +281,8 @@ END {
   # правила без сервиса "-" - тоже unrule, render_services.awk их понимает).
   for (i = 1; i <= ndr; i++) {
     if ((i in seen_rule) || (dr_owner[i] in deleted)) continue
+    # Правило новее конфига пользователя: его там не могло быть.
+    if ((dr_owner[i] SUBSEP dr_text[i]) in fresh_rule) continue
     out_line("unrule\t" dr_owner[i] "\t" dr_text[i])
     rep("IMPORTED", "unrule|" dr_owner[i])
   }

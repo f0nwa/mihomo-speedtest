@@ -24,7 +24,9 @@ fi
 # test_same_content_as_before: без строк-комментариев и пустых строк
 strip() { grep -v '^[[:space:]]*#' "$1" | grep -v '^[[:space:]]*$'; }
 strip "$FIXTURE" > "$WORK/before.txt"
-strip "$TEMPLATE" > "$WORK/after.txt"
+# правила с пометкой fresh добавлены после фикстуры - в сравнении их нет
+awk -F'\t' '$1 == "fresh" { print "  - " $3 }' "$TOOLS/services.default.tsv" > "$WORK/fresh.txt"
+strip "$TEMPLATE" | grep -v -x -F -f "$WORK/fresh.txt" > "$WORK/after.txt" || true
 if ! cmp -s "$WORK/before.txt" "$WORK/after.txt"; then
   fail "содержимое шаблона изменилось относительно фикстуры:"
   diff "$WORK/before.txt" "$WORK/after.txt" | head -20 >&2 || true
