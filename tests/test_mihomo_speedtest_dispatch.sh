@@ -20,6 +20,10 @@ mkfake install.sh
 mkfake uninstall.sh
 mkfake update.sh
 mkfake setup.sh
+mkfake speedtest2.sh
+mkfake stats_auth.sh
+mkfake stats_service.sh
+mkfake S80speedtest-stats
 
 assert_called() {
   grep -qF "$1" "$TEST_ROOT/calls.log" || fail "не вызвано: $1 (лог: $(cat "$TEST_ROOT/calls.log" 2>/dev/null))"
@@ -47,6 +51,22 @@ for pair in "recalibrate:--recalibrate" "stop-web:--stop-web" "start-web:--start
   DIR=$TEST_ROOT sh "$SCRIPT" "$cmd"
   assert_called "$TEST_ROOT/install.sh $flag"
 done
+
+: > "$TEST_ROOT/calls.log"
+DIR=$TEST_ROOT sh "$SCRIPT" run --extra
+assert_called "$TEST_ROOT/speedtest2.sh --force --extra"
+
+: > "$TEST_ROOT/calls.log"
+DIR=$TEST_ROOT sh "$SCRIPT" reset-password
+assert_called "$TEST_ROOT/stats_auth.sh reset"
+
+: > "$TEST_ROOT/calls.log"
+DIR=$TEST_ROOT sh "$SCRIPT" status
+assert_called "$TEST_ROOT/stats_service.sh status"
+
+: > "$TEST_ROOT/calls.log"
+DIR=$TEST_ROOT INITD_SCRIPT=$TEST_ROOT/S80speedtest-stats sh "$SCRIPT" restart-web
+assert_called "$TEST_ROOT/S80speedtest-stats restart"
 
 out=$(DIR=$TEST_ROOT sh "$SCRIPT" 2>&1); rc=$?
 [ "$rc" = 0 ] || fail "пустая команда должна давать exit 0, получено $rc"
