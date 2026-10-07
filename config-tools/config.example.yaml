@@ -413,7 +413,6 @@ rules:
   - DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
   - DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
   - DOMAIN-SUFFIX,teleos.club,KinoPub
-  - DOMAIN-SUFFIX,themoviedb.org,KinoPub
 
   # --- 18+ ---
   - GEOSITE,category-porn,18+

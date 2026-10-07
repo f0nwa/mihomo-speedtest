@@ -148,7 +148,6 @@ rule	kinopub	DOMAIN-SUFFIX,pushbr.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,teleos.club,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,themoviedb.org,KinoPub
 rule	adult	GEOSITE,category-porn,18+
 rule	apple	IP-ASN,714,Apple
 rule	apple	RULE-SET,apple@domain,Apple
