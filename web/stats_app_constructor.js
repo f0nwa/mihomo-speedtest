@@ -491,6 +491,10 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function draw() {
+      // Перерисовка сначала опустошает список: страница на миг укорачивается,
+      // и браузер сбрасывает прокрутку вверх. Держим высоту и позицию.
+      var keepY = window.pageYOffset;
+      svcHost.style.minHeight = svcHost.offsetHeight + 'px';
       modCards.render();
       var services = model.services();
       clear(svcHost);
@@ -542,6 +546,8 @@ export function renderConstructor(modeBar, opts) {
       if (!any) { rows2.appendChild(el('div', 'xk-empty', 'Своих доменов пока нет.')); }
       domHost.appendChild(rows2);
       domHost.appendChild(addDomainRow(services, null));
+      svcHost.style.minHeight = '';
+      if (window.pageYOffset !== keepY) { window.scrollTo(window.pageXOffset, keepY); }
       refreshChanges();
     }
 
