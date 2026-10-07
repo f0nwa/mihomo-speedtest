@@ -378,6 +378,42 @@ rules:
   - DOMAIN-SUFFIX,firebaseremoteconfigrealtime.googleapis.com,KinoPub
   - DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,KinoPub
   - DOMAIN-SUFFIX,pkr.ovh,KinoPub
+  - DOMAIN-SUFFIX,ahc.ovh,KinoPub
+  - DOMAIN-SUFFIX,api.alador.space,KinoPub
+  - DOMAIN-SUFFIX,api.ios-kp.store,KinoPub
+  - DOMAIN-SUFFIX,api.srvkp.com,KinoPub
+  - DOMAIN-SUFFIX,api2.support-kp.com,KinoPub
+  - DOMAIN-SUFFIX,cdn-service.space,KinoPub
+  - DOMAIN-SUFFIX,cdn2cdn.com,KinoPub
+  - DOMAIN-SUFFIX,cdn2site.com,KinoPub
+  - DOMAIN-SUFFIX,cdn32.lol,KinoPub
+  - DOMAIN-SUFFIX,cdn3t.store,KinoPub
+  - DOMAIN-SUFFIX,cdn4t.xyz,KinoPub
+  - DOMAIN-SUFFIX,cdnservices.link,KinoPub
+  - DOMAIN-SUFFIX,cdntogo.net,KinoPub
+  - DOMAIN-SUFFIX,digital-cdn.net,KinoPub
+  - DOMAIN-SUFFIX,flexcdn.cloud,KinoPub
+  - DOMAIN-SUFFIX,gfw.ovh,KinoPub
+  - DOMAIN-SUFFIX,i0.wp.com,KinoPub
+  - DOMAIN-SUFFIX,iptv.online,KinoPub
+  - DOMAIN-SUFFIX,kino.pub,KinoPub
+  - DOMAIN-SUFFIX,kino.watch,KinoPub
+  - DOMAIN-SUFFIX,kinopub.online,KinoPub
+  - DOMAIN-SUFFIX,kp-msx.onrender.com,KinoPub
+  - DOMAIN-SUFFIX,kpap.link,KinoPub
+  - DOMAIN-SUFFIX,kpapp.link,KinoPub
+  - DOMAIN-SUFFIX,kpdl.link,KinoPub
+  - DOMAIN-SUFFIX,m.pushbr.com,KinoPub
+  - DOMAIN-SUFFIX,m.staticdn.site,KinoPub
+  - DOMAIN-SUFFIX,media.service-kp.com,KinoPub
+  - DOMAIN-SUFFIX,mos-gorsud.co,KinoPub
+  - DOMAIN-SUFFIX,mycdn.video,KinoPub
+  - DOMAIN-SUFFIX,proxykp.xyz,KinoPub
+  - DOMAIN-SUFFIX,pushbr.com,KinoPub
+  - DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
+  - DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
+  - DOMAIN-SUFFIX,teleos.club,KinoPub
+  - DOMAIN-SUFFIX,themoviedb.org,KinoPub
 
   # --- 18+ ---
   - GEOSITE,category-porn,18+
