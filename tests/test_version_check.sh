@@ -118,6 +118,19 @@ MIN_XKEEN_VERSION=2.0 PATH="$FAKEBIN:$PATH" check_versions 2>/dev/null && { echo
 
 rm -rf "$FAKEBIN"
 
+# Реальный формат XKeen 2.1: без слова "Версия", плюс строка Yq.
+FAKEBIN21=$(mktemp -d)
+cat > "$FAKEBIN21/xkeen" <<'EOF2'
+#!/bin/sh
+printf '  \033[92mXKeen 2.1 Stable\033[0m (время сборки: 2026-10-06 10:58:45 MSK)\n'
+printf '  Ядро проксирования Mihomo версии \033[93m1.19.32\033[0m\n'
+printf '  Парсер конфигурационных файлов Yq версии 4.50.1\n'
+EOF2
+chmod +x "$FAKEBIN21/xkeen"
+got=$(env -i PATH="$FAKEBIN21:$PATH" sh -c '. "'"$SCRIPT"'"; echo "$(xkeen_version) $(mihomo_version)"')
+[ "$got" = "2.1 1.19.32" ] || { echo "FAIL: XKeen 2.1 parse: '$got'" >&2; FAILED=1; }
+rm -rf "$FAKEBIN21"
+
 if [ "$FAILED" = 1 ]; then
   echo "test_version_check.sh: FAILED" >&2
   exit 1
