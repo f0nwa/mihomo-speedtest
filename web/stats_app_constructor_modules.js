@@ -431,7 +431,11 @@ function hostOf(url) {
 var CUSTOM_UA = '__custom__';
 
 // Выбор User-Agent: готовые значения, «без заголовка» и свой вариант.
-function uaField(value) {
+// getUrl (необязательно) - откуда взять адрес подписки: тогда рядом кнопка
+// «Определить», которая просит роутер перебрать типичные клиентские UA
+// (/api/constructor/detect-ua, config-tools/detect_ua.sh) и подставляет
+// первый, под которым панель отдаёт clash YAML или список нод.
+export function uaField(value, getUrl) {
   var wrap = el('span', 'cx-ua');
   var sel = el('select');
   sel.setAttribute('aria-label', 'User-Agent');
@@ -440,14 +444,66 @@ function uaField(value) {
   var custom = el('input'); custom.type = 'text'; custom.placeholder = 'User-Agent';
   custom.setAttribute('aria-label', 'Свой User-Agent');
   function sync() { custom.hidden = sel.value !== CUSTOM_UA; }
-  var known = opts.some(function (o) { return o[0] === value; });
-  sel.value = known ? value : CUSTOM_UA;
-  custom.value = known ? '' : value;
+  function set(v) {
+    var known = opts.some(function (o) { return o[0] === v && o[0] !== CUSTOM_UA; });
+    sel.value = known ? v : CUSTOM_UA;
+    custom.value = known ? '' : v;
+    sync();
+  }
   sel.addEventListener('change', function () { sync(); if (!custom.hidden) { custom.focus(); } });
-  sync();
+  set(value);
   wrap.appendChild(sel); wrap.appendChild(custom);
   wrap.value = function () { return sel.value === CUSTOM_UA ? custom.value.trim() : sel.value; };
+  if (getUrl) { addDetect(wrap, getUrl, set); }
   return wrap;
+}
+
+// Кнопка «Определить» и строка результата под полем UA. Запрос идёт на
+// роутер: перебор может занять до нескольких минут, поэтому кнопка занята,
+// пока он идёт. Адрес уходит телом POST - ключ доступа не попадает в строку
+// запроса и журналы.
+function addDetect(wrap, getUrl, setUa) {
+  var btn = button('Определить', 'small muted');
+  btn.title = 'Проверить адрес под разными User-Agent и выбрать подходящий';
+  var note = el('div', 'hint cx-ua-note');
+  note.hidden = true;
+  wrap.appendChild(btn); wrap.appendChild(note);
+
+  function say(text, kind) {
+    clear(note);
+    note.className = 'hint cx-ua-note' + (kind ? ' ' + kind : '');
+    note.hidden = !text;
+    if (text) { note.appendChild(document.createTextNode(text)); }
+  }
+  function triedList(tried) {
+    var d = el('details');
+    d.appendChild(el('summary', null, 'Что вернула панель'));
+    tried.forEach(function (t) { d.appendChild(el('div', null, t.ua + ' - HTTP ' + t.http + ', ' + t.bytes + ' байт, ' + t.kind)); });
+    note.appendChild(d);
+  }
+
+  btn.addEventListener('click', function () {
+    var url = (getUrl() || '').trim();
+    if (!url) { say('Сначала введите адрес подписки.', 'msg-err-text'); return; }
+    btn.disabled = true; btn.textContent = 'Проверяю...';
+    say('Перебираю User-Agent, это может занять до нескольких минут.', '');
+    fetchJson('/api/constructor/detect-ua', { method: 'POST', body: url, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (d) {
+      var tried = d.tried || [];
+      if (d.ua) {
+        setUa(d.ua);
+        say(d.quality === 'short'
+          ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
+          : 'Выбран ' + d.ua + ': ' + d.kind + '.', d.quality === 'short' ? '' : 'msg-ok-text');
+      } else if (d.reason === 'unreachable') {
+        say('Адрес не открылся: проверьте ссылку и доступ роутера в интернет.', 'msg-err-text');
+      } else {
+        say('Ни один из ' + tried.length + ' User-Agent не дал подходящий формат. Проверьте ссылку или выберите User-Agent вручную.', 'msg-err-text');
+        if (tried.length) { triedList(tried); }
+      }
+    }, function (err) {
+      say('Не удалось определить: ' + errText(err), 'msg-err-text');
+    }).then(function () { btn.disabled = false; btn.textContent = 'Определить'; });
+  });
 }
 
 // ctx: {layout, mods, model, savedWords, edit(fn), msg(text, kind), redraw(), changed()}.
@@ -460,7 +516,7 @@ export function createModuleCards(ctx) {
   // ----- подписки -----
   var subsBlk = ctx.layout.add(1, 'Подписки'), subsCard = subsBlk.body;
   subsCard.appendChild(el('p', 'hint', 'Ссылки на подписки с нодами. Адрес содержит ключ доступа, поэтому в списке виден только домен. ' +
-    'User-Agent выбирает формат ответа панели: для Mihomo нужен clash-YAML (v2rayNG и clash.meta обычно подходят).'));
+    'User-Agent выбирает формат ответа панели: для Mihomo нужен clash-YAML. Не знаете, какой выбрать, - нажмите «Определить», роутер проверит адрес сам.'));
   var subsHost = el('div');
   subsCard.appendChild(subsHost);
   var editingSub = null;
@@ -482,7 +538,7 @@ export function createModuleCards(ctx) {
     var r = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.value = s.url; url.setAttribute('aria-label', 'Адрес подписки');
     var name = el('input'); name.type = 'text'; name.value = s.name; name.setAttribute('aria-label', 'Имя подписки');
-    var ua = uaField(s.ua);
+    var ua = uaField(s.ua, function () { return url.value; });
     var row = el('div', 'xk-add');
     var ok = button('Сохранить', 'submit'), cancel = button('Отмена', 'submit secondary');
     ok.addEventListener('click', function () {
@@ -507,7 +563,7 @@ export function createModuleCards(ctx) {
     var add = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.placeholder = 'https://...'; url.setAttribute('aria-label', 'Адрес новой подписки');
     var name = el('input'); name.type = 'text'; name.placeholder = 'имя (необязательно)'; name.setAttribute('aria-label', 'Имя подписки');
-    var ua = uaField(UA_PRESETS[0]);
+    var ua = uaField(UA_PRESETS[0], function () { return url.value; });
     var btn = button('Добавить подписку', 'submit');
     btn.addEventListener('click', function () {
       ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value); });

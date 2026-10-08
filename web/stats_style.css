@@ -366,6 +366,9 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-editor .xk-add input,.cx-editor .xk-add select{width:auto}
 .cx-ua{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
+.cx-ua-note{flex:1 1 100%;margin:0}
+.cx-ua-note details{margin-top:4px}
+.msg-ok-text{color:#16a34a}
 .cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
 .cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}
 .cx-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}

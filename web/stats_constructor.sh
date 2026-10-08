@@ -18,6 +18,12 @@
 #   wgconf   POST - перевод одного WireGuard/AmneziaWG .conf в ноду mihomo
 #                   (тело: строка "### MST-WG <имя ноды>" и текст .conf):
 #                   {"ok":true,"yaml":"  - name: ...","report":[...]}.
+#   detect-ua POST - подбор User-Agent для адреса подписки (тело: один адрес
+#                   http(s)://...; detect_ua.sh): перебирает типичные
+#                   клиентские UA и останавливается на первом, под которым
+#                   панель отдаёт clash YAML или base64-список нод:
+#                   {"ok":true,"ua","quality":"full|short|","kind","reason":
+#                   "|none|unreachable","tried":[{"ua","http","bytes","kind"}]}.
 #   catalog  GET  - {"text"}: каталог наборов правил для поиска
 #                   (rule-catalog.tsv, release/build_rule_catalog.sh).
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
@@ -41,6 +47,7 @@ CONSTRUCTOR_CATALOG=${CONSTRUCTOR_CATALOG:-$DIR/rule-catalog.tsv}
 APPLY_LOG=${CONSTRUCTOR_APPLY_LOG:-$APPLY_LOG}
 STATE_FILES="services.tsv geofilter.txt user-rules.txt subscriptions.tsv proxies.yaml"
 WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
+DETECT_UA_SH=${DETECT_UA_SH:-$DIR/detect_ua.sh}
 
 # Файл JSON-строкой или null, если файла нет.
 jfile_or_null() {
@@ -219,6 +226,50 @@ case $action:$method in
       fail_json 422 bad_conf "$(sed -n 's/^ERROR|[^|]*|//p' "$WORK/report" | head -n 1)"
     fi
     printf '{"ok":true,"yaml":%s,"report":%s}\n' "$(jstr_file "$WORK/nodes.yaml")" "$(lines_json "$WORK/report")" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  detect-ua:POST)
+    [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+    read_body "$WORK/body"
+    # Тело - один адрес: ключ доступа не попадает ни в строку запроса, ни в
+    # журнал, ни в ответ.
+    du_url=$(sed -n '1p' "$WORK/body" | tr -d '\r')
+    du_extra=$(sed -n '2,$p' "$WORK/body" | tr -d '[:space:]')
+    if [ -n "$du_extra" ] || ! printf '%s' "$du_url" | grep -Eq '^https?://[^[:space:]"\\]+$'; then
+      fail_json 400 bad_url "Адрес подписки должен начинаться с http:// или https:// и не содержать пробелов, кавычек и обратных косых черт"
+    fi
+    DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+    # Перебор в порядке UA_LIST, как pick_ua в setup.sh: полный clash YAML и
+    # base64-список подходят сразу, укороченный YAML - запасной вариант.
+    # Первый же ответ без соединения (код 000) - сеть или хост недоступны,
+    # остальные 16 запросов по 10 секунд ждать незачем.
+    du_tab=$(printf '\t')
+    du_tmp=$WORK/probe.body
+    : > "$WORK/du.rows"
+    du_found="" du_found_kind="" du_fallback="" du_fallback_kind="" du_n=0 du_dead=0
+    while IFS= read -r du_cand; do
+      [ -n "$du_cand" ] || continue
+      du_res=$(probe_ua "$du_cand" "$du_url" "$du_tmp")
+      du_code=${du_res%%"$du_tab"*}; du_res=${du_res#*"$du_tab"}
+      du_size=${du_res%%"$du_tab"*}; du_kind=${du_res#*"$du_tab"}
+      [ "$du_n" = 0 ] || printf ',' >> "$WORK/du.rows"
+      du_n=$((du_n + 1))
+      printf '{"ua":%s,"http":%s,"bytes":%s,"kind":%s}' "$(jstr "$du_cand")" "$(jstr "$du_code")" "$du_size" "$(jstr "$du_kind")" >> "$WORK/du.rows"
+      case $du_kind in
+        "clash YAML, полный"*|"v2ray-подписка"*) du_found=$du_cand; du_found_kind=$du_kind; break ;;
+        "clash YAML, укороченный"*) [ -n "$du_fallback" ] || { du_fallback=$du_cand; du_fallback_kind=$du_kind; } ;;
+      esac
+      if [ "$du_n" = 1 ] && [ "$du_code" = 000 ]; then du_dead=1; break; fi
+    done <<UALIST
+$UA_LIST
+UALIST
+    rm -f "$du_tmp"
+    du_quality="" du_ua="" du_kind=""
+    if [ -n "$du_found" ]; then du_quality=full du_ua=$du_found du_kind=$du_found_kind
+    elif [ -n "$du_fallback" ]; then du_quality=short du_ua=$du_fallback du_kind=$du_fallback_kind; fi
+    du_reason=""
+    if [ -z "$du_ua" ]; then if [ "$du_dead" = 1 ]; then du_reason=unreachable; else du_reason=none; fi; fi
+    printf '{"ok":true,"ua":%s,"quality":%s,"kind":%s,"reason":%s,"tried":[%s]}\n' "$(jstr "$du_ua")" "$(jstr "$du_quality")" \
+      "$(jstr "$du_kind")" "$(jstr "$du_reason")" "$(cat "$WORK/du.rows")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   preview:POST)
     read_state_body

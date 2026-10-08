@@ -29,7 +29,7 @@ chmod +x "$TMP/bin/mihomo" "$TMP/bin/xkeen" "$TMP/bin/pidof"
 echo up > "$TMP/state"
 for f in config-tools/config.example.yaml config-tools/services.default.tsv config-tools/render_services.awk \
          config-tools/config_to_state.awk config-tools/constructor_build.sh config-tools/migrate_config.sh \
-         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv config-tools/wg_import.awk web/stats_config.sh; do
+         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv config-tools/wg_import.awk config-tools/detect_ua.sh web/stats_config.sh; do
   cp "$ROOT/$f" "$D/"
 done
 cp "$D/config.example.yaml" "$M/config.yaml"
@@ -231,5 +231,96 @@ base=$(printf '%s' "$out" | jget '["base"]')
 out=$(printf '### MST-STATE services.tsv\n### MST-STATE geofilter.txt\nX\n' | cgi apply POST "base=$base")
 assert_contains 'Status: 200' "$out"
 [ ! -e "$ENV" ] || fail "15: speedtest2.env не должен создаваться конструктором"
+
+# --- 16: подбор User-Agent (curl - заглушка, ответ зависит от адреса и UA)
+mkdir -p "$TMP/curlbin"
+cat > "$TMP/curlbin/curl" <<'EOF_CURL'
+#!/bin/sh
+out="" ua="" url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    -A) ua=$2; shift 2 ;;
+    -w|-m|--proto|--proto-redir) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+echo "$ua $url" >> "$CURL_LOG"
+full='mixed-port: 7890
+proxy-groups: []
+proxies: []'
+case $url in
+  */dead) exit 7 ;;
+  */full)
+    case $ua in
+      v2rayNG*) printf '[{"dns":{}}]' > "$out" ;;
+      ClashforWindows*) printf 'proxies:\n  - name: a\n' > "$out" ;;
+      clash-verge*) printf '%s\n' "$full" > "$out" ;;
+      *) printf '<html>403</html>' > "$out" ;;
+    esac ;;
+  */short)
+    case $ua in
+      ClashforWindows*) printf 'proxies:\n  - name: a\n' > "$out" ;;
+      *) printf '<html>403</html>' > "$out" ;;
+    esac ;;
+  */b64) printf 'dmxlc3M6Ly90ZXN0\n' > "$out" ;;
+  *) printf '<html>403</html>' > "$out" ;;
+esac
+printf 200
+EOF_CURL
+chmod +x "$TMP/curlbin/curl"
+export CURL_LOG=$TMP/curl.log
+detect() { printf '%s' "$1" | PATH="$TMP/curlbin:$PATH" cgi detect-ua POST ''; }
+
+: > "$CURL_LOG"
+out=$(detect 'https://panel.test/SECRETKEY123/full')
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "clash-verge/v2.0.5" ] || fail "16: ua full: $out"
+[ "$(printf '%s' "$out" | jget '["quality"]')" = full ] || fail "16: quality full"
+[ "$(printf '%s' "$out" | jget '["reason"]')" = "" ] || fail "16: reason full"
+[ "$(printf '%s' "$out" | jget '["tried"].__len__()')" = 4 ] || fail "16: перебор должен остановиться на подошедшем UA"
+[ "$(printf '%s' "$out" | jget '["tried"][0]["http"]')" = 200 ] || fail "16: tried.http"
+assert_contains 'JSON' "$(printf '%s' "$out" | jget '["tried"][0]["kind"]')"
+assert_contains 'clash YAML, полный' "$(printf '%s' "$out" | jget '["kind"]')"
+assert_not_contains 'SECRETKEY123' "$(printf '%s' "$out" | sed -n '/^{/,$p')"
+[ "$(wc -l < "$CURL_LOG" | tr -d ' ')" = 4 ] || fail "16: число запросов curl"
+grep -q '^ClashforWindows/0.20.39 https://panel.test/SECRETKEY123/full$' "$CURL_LOG" || fail "16: curl получил UA и адрес"
+
+# base64-список подходит так же, как в setup.sh
+out=$(detect 'http://panel.test/b64')
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "v2rayNG/1.8.0" ] || fail "16: base64"
+[ "$(printf '%s' "$out" | jget '["quality"]')" = full ] || fail "16: base64 quality"
+
+# только укороченный YAML - запасной вариант после перебора всех UA
+out=$(detect 'https://panel.test/short')
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "ClashforWindows/0.20.39" ] || fail "16: short ua"
+[ "$(printf '%s' "$out" | jget '["quality"]')" = short ] || fail "16: short quality"
+ua_count=$( (DETECT_UA_LIB_ONLY=1; . "$ROOT/config-tools/detect_ua.sh"; printf '%s\n' "$UA_LIST" | grep -c .) )
+[ "$(printf '%s' "$out" | jget '["tried"].__len__()')" = "$ua_count" ] || fail "16: short перебрал не все UA ($ua_count)"
+
+# ничего не подошло
+out=$(detect 'https://panel.test/none')
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "" ] || fail "16: none ua"
+[ "$(printf '%s' "$out" | jget '["reason"]')" = none ] || fail "16: none reason"
+
+# нет соединения - сразу, без 16 лишних запросов
+: > "$CURL_LOG"
+out=$(detect 'https://panel.test/dead')
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["reason"]')" = unreachable ] || fail "16: unreachable"
+[ "$(wc -l < "$CURL_LOG" | tr -d ' ')" = 1 ] || fail "16: при недоступной сети нужен один запрос"
+
+# плохие адреса и тело
+for bad in 'ftp://x/y' 'file:///etc/passwd' 'https://x/y z' 'https://x/"y' 'https://x/\y' 'panel.test/sub' ''; do
+  : > "$CURL_LOG"
+  out=$(detect "$bad")
+  assert_contains 'Status: 400' "$out"
+  [ ! -s "$CURL_LOG" ] || fail "16: curl вызван для плохого адреса: $bad"
+done
+out=$(detect "https://a.test/1${NL}https://b.test/2")
+assert_contains 'Status: 400' "$out"
+out=$(printf 'https://a.test/1' | MST_CONSTRUCTOR_ACTION=detect-ua REQUEST_METHOD=GET sh "$SCRIPT")
+assert_contains 'Status: 405' "$out"
 
 echo "test_stats_constructor.sh: OK"
