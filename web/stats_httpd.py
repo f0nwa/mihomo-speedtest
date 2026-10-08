@@ -531,6 +531,8 @@ API_ROUTES = {
     "api/constructor/wgconf": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "wgconf"}),
     # Подбор User-Agent: до 17 запросов к панели подписки по 10 секунд.
     "api/constructor/detect-ua": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "detect-ua", "MST_CGI_TIMEOUT": "200"}),
+    # Проверка нод подписки: загрузка, временное ядро и до 8 нод по очереди.
+    "api/constructor/probe-nodes": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "probe-nodes", "MST_CGI_TIMEOUT": "120"}),
     "api/constructor/preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "preview", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/apply": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "apply", "MST_CGI_TIMEOUT": "180"}),
     # Команды XKeen: run запускает команду в фоне и отвечает сразу, вывод

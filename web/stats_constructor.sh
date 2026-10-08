@@ -24,6 +24,14 @@
 #                   панель отдаёт clash YAML или base64-список нод:
 #                   {"ok":true,"ua","quality":"full|short|","kind","reason":
 #                   "|none|unreachable","tried":[{"ua","http","bytes","kind"}]}.
+#   probe-nodes POST - проверка, отвечают ли ноды подписки (тело: адрес и
+#                   User-Agent, по строке): подписка качается, ноды (clash
+#                   YAML или список vless-ссылок) проверяются по одной во
+#                   временном ядре на 127.0.0.1, по журналу рукопожатия
+#                   REALITY определяется, отклоняет ли сервер клиента
+#                   Mihomo: {"ok":true,"verdict":"alive|reality_rejected|
+#                   unreachable","total","tested","alive","mlkem":"true|
+#                   false|","nodes":[{"name","delay","reality"}]}.
 #   catalog  GET  - {"text"}: каталог наборов правил для поиска
 #                   (rule-catalog.tsv, release/build_rule_catalog.sh).
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
@@ -48,6 +56,12 @@ APPLY_LOG=${CONSTRUCTOR_APPLY_LOG:-$APPLY_LOG}
 STATE_FILES="services.tsv geofilter.txt user-rules.txt subscriptions.tsv proxies.yaml"
 WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
 DETECT_UA_SH=${DETECT_UA_SH:-$DIR/detect_ua.sh}
+SUB_CONVERT_AWK=${SUB_CONVERT_AWK:-$DIR/sub_convert.awk}
+# Порты временного ядра проверки нод: только 127.0.0.1, не пересекаются с
+# основным ядром (9090) и со вторым ядром спидтеста.
+PROBE_API_PORT=${MST_PROBE_API_PORT:-19090}
+PROBE_MIXED_PORT=${MST_PROBE_MIXED_PORT:-17890}
+PROBE_MAX_NODES=${MST_PROBE_MAX_NODES:-8}
 
 # Файл JSON-строкой или null, если файла нет.
 jfile_or_null() {
@@ -270,6 +284,101 @@ UALIST
     if [ -z "$du_ua" ]; then if [ "$du_dead" = 1 ]; then du_reason=unreachable; else du_reason=none; fi; fi
     printf '{"ok":true,"ua":%s,"quality":%s,"kind":%s,"reason":%s,"tried":[%s]}\n' "$(jstr "$du_ua")" "$(jstr "$du_quality")" \
       "$(jstr "$du_kind")" "$(jstr "$du_reason")" "$(cat "$WORK/du.rows")" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  probe-nodes:POST)
+    [ -x "$BIN" ] || fail_json 500 no_core "mihomo не найден: $BIN"
+    read_body "$WORK/body"
+    # Адрес и User-Agent - телом: ключ доступа не попадает ни в строку
+    # запроса, ни в журнал, ни в ответ.
+    pn_url=$(sed -n '1p' "$WORK/body" | tr -d '\r')
+    pn_ua=$(sed -n '2p' "$WORK/body" | tr -d '\r')
+    pn_extra=$(sed -n '3,$p' "$WORK/body" | tr -d '[:space:]')
+    if [ -n "$pn_extra" ] || ! printf '%s' "$pn_url" | grep -Eq '^https?://[^[:space:]"\\]+$'; then
+      fail_json 400 bad_url "Адрес подписки должен начинаться с http:// или https:// и не содержать пробелов, кавычек и обратных косых черт"
+    fi
+    if printf '%s' "$pn_ua" | grep -q '["\\]'; then
+      fail_json 400 bad_ua "User-Agent: нельзя кавычки и обратную косую черту"
+    fi
+    pn_code=$(curl -sL --compressed --proto '=http,https' --proto-redir '=http,https' -m 15 -A "$pn_ua" \
+      -o "$WORK/sub.body" -w '%{http_code}' "$pn_url" 2>/dev/null) || pn_code=000
+    [ "$pn_code" = 200 ] || fail_json 502 fetch_failed "Подписка не открылась (HTTP $pn_code)"
+    # Источник нод: clash YAML (блок proxies:) или base64-список vless-ссылок.
+    : > "$WORK/nodes.yaml"
+    if grep -q '^proxies:' "$WORK/sub.body" 2>/dev/null; then
+      awk '/^proxies:[ \t]*$/ { on = 1; print; next } on && /^[^ \t#-]/ { exit } on { print }' "$WORK/sub.body" > "$WORK/nodes.yaml"
+    else
+      if ! base64 -d "$WORK/sub.body" > "$WORK/dec.txt" 2>/dev/null || [ ! -s "$WORK/dec.txt" ]; then
+        openssl base64 -d -A -in "$WORK/sub.body" > "$WORK/dec.txt" 2>/dev/null || : > "$WORK/dec.txt"
+      fi
+      case $(sed -n '1p' "$WORK/dec.txt") in
+        vless://*)
+          [ -f "$SUB_CONVERT_AWK" ] || fail_json 500 no_tools "sub_convert.awk не найден - переустановите проект"
+          LC_ALL=C awk -f "$SUB_CONVERT_AWK" "$WORK/dec.txt" > "$WORK/nodes.yaml" 2>/dev/null || : > "$WORK/nodes.yaml" ;;
+        *) fail_json 422 unsupported "Проверка нод понимает clash YAML и список vless-ссылок, а подписка в другом формате" ;;
+      esac
+    fi
+    # Ноды получают короткие имена n1..nN (в имени могут быть эмодзи и
+    # пробелы, а в адрес API они не помещаются); настоящее имя - в map.tsv.
+    : > "$WORK/map.tsv"
+    LC_ALL=C awk -v MAP="$WORK/map.tsv" -v MAX="$PROBE_MAX_NODES" -v TOTALF="$WORK/total" '
+      /^proxies:/ { print; next }
+      /^[ \t]*-[ \t]+name:/ {
+        pre = $0; sub(/name:.*/, "", pre)
+        nm = $0; sub(/^[^:]*name:[ \t]*/, "", nm); sub(/[ \t\r]+$/, "", nm)
+        if (nm ~ /^".*"$/ || nm ~ /^\x27.*\x27$/) nm = substr(nm, 2, length(nm) - 2)
+        total++
+        if (total <= MAX) { skip = 0; printf "%sname: n%d\n", pre, total; printf "n%d\t%s\n", total, nm >> MAP } else { skip = 1 }
+        next
+      }
+      !skip { print }
+      END { print total + 0 > TOTALF }' "$WORK/nodes.yaml" > "$WORK/nodes.tmp"
+    pn_total=$(cat "$WORK/total" 2>/dev/null || echo 0)
+    [ "${pn_total:-0}" -gt 0 ] || fail_json 422 no_nodes "В подписке не найдено нод"
+    mkdir "$WORK/core"
+    { echo "mixed-port: $PROBE_MIXED_PORT"; echo "external-controller: 127.0.0.1:$PROBE_API_PORT"
+      echo "log-level: debug"; echo "mode: rule"; cat "$WORK/nodes.tmp"
+      echo "proxy-groups:"; echo "  - name: T"; echo "    type: select"; echo "    include-all-proxies: true"
+      echo "rules:"; echo "  - MATCH,T"; } > "$WORK/core/c.yaml"
+    if ! "$BIN" -t -d "$WORK/core" -f "$WORK/core/c.yaml" > "$WORK/core/t.log" 2>&1 < /dev/null; then
+      fail_json 422 bad_nodes "Ноды не прошли проверку mihomo -t: $(sed -n 's/.*level=error msg=//p' "$WORK/core/t.log" | head -n 1)"
+    fi
+    PN_PID=
+    trap '[ -z "$PN_PID" ] || kill "$PN_PID" 2>/dev/null' EXIT
+    "$BIN" -d "$WORK/core" -f "$WORK/core/c.yaml" > "$WORK/core.log" 2>&1 < /dev/null &
+    PN_PID=$!
+    pn_up=0; pn_i=0
+    while [ "$pn_i" -lt 10 ]; do
+      if curl -s --noproxy '*' -m 2 "http://127.0.0.1:$PROBE_API_PORT/version" > /dev/null 2>&1; then pn_up=1; break; fi
+      pn_i=$((pn_i + 1)); sleep 1
+    done
+    [ "$pn_up" = 1 ] || fail_json 500 core_failed "Не удалось запустить проверочное ядро (порт $PROBE_API_PORT занят?): $(tail -n 1 "$WORK/core.log")"
+    pn_tab=$(printf '\t')
+    : > "$WORK/pn.rows"
+    pn_tested=0 pn_alive=0 pn_rejected=0 pn_mlkem=""
+    while IFS="$pn_tab" read -r pn_id pn_name; do
+      [ -n "$pn_id" ] || continue
+      pn_before=$(wc -l < "$WORK/core.log" | tr -d ' ')
+      pn_res=$(curl -s --noproxy '*' -m 12 "http://127.0.0.1:$PROBE_API_PORT/proxies/$pn_id/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=6000" < /dev/null 2>/dev/null || true)
+      pn_delay=$(printf '%s' "$pn_res" | sed -n 's/.*"delay":\([0-9][0-9]*\).*/\1/p')
+      pn_delay=${pn_delay:-0}
+      tail -n +$((pn_before + 1)) "$WORK/core.log" > "$WORK/node.log" 2>/dev/null || : > "$WORK/node.log"
+      pn_reality=""
+      if grep -q 'REALITY Authentication: false' "$WORK/node.log"; then pn_reality=rejected; pn_rejected=$((pn_rejected + 1))
+      elif grep -q 'REALITY Authentication: true' "$WORK/node.log"; then pn_reality=ok; fi
+      if grep -q "communication: true" "$WORK/node.log"; then pn_mlkem=true
+      elif [ "$pn_mlkem" != true ] && grep -q "communication: false" "$WORK/node.log"; then pn_mlkem=false; fi
+      pn_tested=$((pn_tested + 1))
+      [ "$pn_delay" -le 0 ] || pn_alive=$((pn_alive + 1))
+      [ "$pn_tested" = 1 ] || printf ',' >> "$WORK/pn.rows"
+      printf '{"name":%s,"delay":%s,"reality":%s}' "$(jstr "$pn_name")" "$pn_delay" "$(jstr "$pn_reality")" >> "$WORK/pn.rows"
+    done < "$WORK/map.tsv"
+    kill "$PN_PID" 2>/dev/null || true
+    PN_PID=
+    if [ "$pn_alive" -gt 0 ]; then pn_verdict=alive
+    elif [ "$pn_rejected" -gt 0 ]; then pn_verdict=reality_rejected
+    else pn_verdict=unreachable; fi
+    printf '{"ok":true,"verdict":%s,"total":%s,"tested":%s,"alive":%s,"mlkem":%s,"nodes":[%s]}\n' "$(jstr "$pn_verdict")" \
+      "$pn_total" "$pn_tested" "$pn_alive" "$(jstr "$pn_mlkem")" "$(cat "$WORK/pn.rows")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   preview:POST)
     read_state_body

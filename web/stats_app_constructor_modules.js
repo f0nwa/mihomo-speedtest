@@ -458,28 +458,47 @@ export function uaField(value, getUrl) {
   return wrap;
 }
 
-// Кнопка «Определить» и строка результата под полем UA. Запрос идёт на
-// роутер: перебор может занять до нескольких минут, поэтому кнопка занята,
-// пока он идёт. Адрес уходит телом POST - ключ доступа не попадает в строку
-// запроса и журналы.
+// Кнопка «Определить» и строки результата под полем UA. Запросы идут на
+// роутер: сначала перебор User-Agent (до нескольких минут), потом проверка,
+// отвечают ли ноды выбранным UA (подписка качается ещё раз, ноды проверяет
+// временное ядро); кнопка занята, пока идёт то и другое. Адрес уходит телом
+// POST - ключ доступа не попадает в строку запроса и журналы.
 function addDetect(wrap, getUrl, setUa) {
   var btn = button('Определить', 'small muted');
-  btn.title = 'Проверить адрес под разными User-Agent и выбрать подходящий';
+  btn.title = 'Проверить адрес под разными User-Agent, выбрать подходящий и проверить, отвечают ли ноды';
   var note = el('div', 'hint cx-ua-note');
-  note.hidden = true;
-  wrap.appendChild(btn); wrap.appendChild(note);
+  var probe = el('div', 'hint cx-ua-note');
+  note.hidden = true; probe.hidden = true;
+  wrap.appendChild(btn); wrap.appendChild(note); wrap.appendChild(probe);
 
-  function say(text, kind) {
-    clear(note);
-    note.className = 'hint cx-ua-note' + (kind ? ' ' + kind : '');
-    note.hidden = !text;
-    if (text) { note.appendChild(document.createTextNode(text)); }
+  function put(node, text, kind) {
+    clear(node);
+    node.className = 'hint cx-ua-note' + (kind ? ' ' + kind : '');
+    node.hidden = !text;
+    if (text) { node.appendChild(document.createTextNode(text)); }
   }
+  function say(text, kind) { put(note, text, kind); put(probe, '', ''); }
   function triedList(tried) {
     var d = el('details');
     d.appendChild(el('summary', null, 'Что вернула панель'));
     tried.forEach(function (t) { d.appendChild(el('div', null, t.ua + ' - HTTP ' + t.http + ', ' + t.bytes + ' байт, ' + t.kind)); });
     note.appendChild(d);
+  }
+  function post(route, body) {
+    return fetchJson(route, { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  }
+
+  // Итог проверки нод: отвечают, сервер отклоняет Reality-клиента Mihomo или не отвечают.
+  function verdict(r) {
+    if (r.verdict === 'alive') {
+      put(probe, 'Ноды отвечают: ' + r.alive + ' из ' + r.tested + (r.total > r.tested ? ' проверенных (в подписке ' + r.total + ')' : '') + '.', 'msg-ok-text');
+    } else if (r.verdict === 'reality_rejected') {
+      put(probe, 'Подписка загружается, но ноды не отвечают: сервер отклоняет подключение Mihomo по REALITY' +
+        (r.mlkem === 'false' ? ' (Mihomo не отправляет X25519MLKEM768, а новые версии Xray его требуют)' : '') +
+        '. Другой User-Agent или отпечаток этого не исправят: те же ноды у клиентов на Xray (например Happ) могут работать, а в Mihomo нет. См. раздел про REALITY в документации.', 'msg-err-text');
+    } else {
+      put(probe, 'Подписка загружается, но ни одна из ' + r.tested + ' нод не ответила (сервер недоступен или режется сетью). Проверка могла попасть на временный сбой: повторите позже.', 'msg-err-text');
+    }
   }
 
   btn.addEventListener('click', function () {
@@ -487,19 +506,26 @@ function addDetect(wrap, getUrl, setUa) {
     if (!url) { say('Сначала введите адрес подписки.', 'msg-err-text'); return; }
     btn.disabled = true; btn.textContent = 'Проверяю...';
     say('Перебираю User-Agent, это может занять до нескольких минут.', '');
-    fetchJson('/api/constructor/detect-ua', { method: 'POST', body: url, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (d) {
+    post('/api/constructor/detect-ua', url).then(function (d) {
       var tried = d.tried || [];
-      if (d.ua) {
-        setUa(d.ua);
-        say(d.quality === 'short'
-          ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
-          : 'Выбран ' + d.ua + ': ' + d.kind + '.', d.quality === 'short' ? '' : 'msg-ok-text');
-      } else if (d.reason === 'unreachable') {
-        say('Адрес не открылся: проверьте ссылку и доступ роутера в интернет.', 'msg-err-text');
-      } else {
-        say('Ни один из ' + tried.length + ' User-Agent не дал подходящий формат. Проверьте ссылку или выберите User-Agent вручную.', 'msg-err-text');
-        if (tried.length) { triedList(tried); }
+      if (!d.ua) {
+        if (d.reason === 'unreachable') {
+          say('Адрес не открылся: проверьте ссылку и доступ роутера в интернет.', 'msg-err-text');
+        } else {
+          say('Ни один из ' + tried.length + ' User-Agent не дал подходящий формат. Проверьте ссылку или выберите User-Agent вручную.', 'msg-err-text');
+          if (tried.length) { triedList(tried); }
+        }
+        return null;
       }
+      setUa(d.ua);
+      say(d.quality === 'short'
+        ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
+        : 'Выбран ' + d.ua + ': ' + d.kind + '.', d.quality === 'short' ? '' : 'msg-ok-text');
+      put(probe, 'Проверяю, отвечают ли ноды...', '');
+      // Сбой самой проверки нод не отменяет найденный User-Agent.
+      return post('/api/constructor/probe-nodes', url + '\n' + d.ua).then(verdict, function (err) {
+        put(probe, 'Проверить, отвечают ли ноды, не удалось: ' + errText(err), '');
+      });
     }, function (err) {
       say('Не удалось определить: ' + errText(err), 'msg-err-text');
     }).then(function () { btn.disabled = false; btn.textContent = 'Определить'; });

@@ -13,8 +13,11 @@ grep -q '"api/constructor/detect-ua": ("stats_constructor.sh"' "$ROOT/web/stats_
 grep -q 'uaField(s.ua, function' "$MOD" || fail "в редакторе подписки нет кнопки «Определить»"
 grep -q 'uaField(UA_PRESETS\[0\], function' "$MOD" || fail "в форме новой подписки нет кнопки «Определить»"
 # адрес уходит телом, а не строкой запроса: ключ доступа не попадает в журналы
-grep -q "body: url" "$MOD" || fail "адрес подписки должен уходить телом POST"
+grep -q "post('/api/constructor/detect-ua', url)" "$MOD" || fail "адрес подписки должен уходить телом POST"
 grep -q "detect-ua?" "$MOD" && fail "адрес подписки не должен попадать в строку запроса"
+grep -q '/api/constructor/probe-nodes' "$MOD" || fail "UI не вызывает /api/constructor/probe-nodes"
+grep -q '"api/constructor/probe-nodes": ("stats_constructor.sh"' "$ROOT/web/stats_httpd.py" || fail "нет маршрута probe-nodes в stats_httpd.py"
+grep -q "probe-nodes?" "$MOD" && fail "адрес подписки не должен попадать в строку запроса probe-nodes"
 
 command -v node >/dev/null 2>&1 || { echo "SKIP test_constructor_detect_ui (поведение): нет node"; echo "test_constructor_detect_ui: OK"; exit 0; }
 TMPD=$(mktemp -d /tmp/test-constructor-detect-ui.XXXXXX)
@@ -65,9 +68,15 @@ const findAll = (n, pred, out = []) => { if (pred(n)) { out.push(n); } n.childre
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 let requests = [];
-function mockServer(reply, status = 200) {
+// reply - ответ detect-ua; probe - ответ probe-nodes (или {status, body} для ошибки)
+function mockServer(reply, status = 200, probe = null) {
   requests = [];
-  globalThis.fetch = (url, opts) => { requests.push({ url, opts }); return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(reply) }); };
+  globalThis.fetch = (url, opts) => {
+    requests.push({ url, opts });
+    let body = reply, st = status;
+    if (url.indexOf('probe-nodes') >= 0) { body = probe ? probe.body : { ok: true, verdict: 'alive', alive: 1, tested: 1, total: 1, mlkem: '' }; st = probe && probe.status ? probe.status : 200; }
+    return Promise.resolve({ ok: st < 400, status: st, json: () => Promise.resolve(body) });
+  };
 }
 
 function build(urlValue, value = 'v2rayNG/1.8.0') {
@@ -76,8 +85,8 @@ function build(urlValue, value = 'v2rayNG/1.8.0') {
   const btn = find(f, (n) => n.tag === 'button');
   const sel = find(f, (n) => n.tag === 'select');
   const custom = find(f, (n) => n.tag === 'input');
-  const note = find(f, (n) => /cx-ua-note/.test(n.className));
-  return { f, btn, sel, custom, note, url };
+  const notes = findAll(f, (n) => /cx-ua-note/.test(n.className));
+  return { f, btn, sel, custom, note: notes[0], probe: notes[1], url };
 }
 
 // без кнопки, если адрес не передан (прежнее поведение поля)
@@ -97,8 +106,10 @@ t = build(' https://panel.test/KEY ');
 t.btn.click();
 eq(t.btn.disabled, true, 'кнопка занята, пока идёт перебор');
 await tick();
-eq(requests.length, 1, 'один запрос');
+eq(requests.length, 2, 'детект и проверка нод');
 eq(requests[0].url, '/api/constructor/detect-ua', 'маршрут без адреса в строке запроса');
+eq(requests[1].url, '/api/constructor/probe-nodes', 'маршрут проверки нод без адреса в строке запроса');
+eq(requests[1].opts.body, 'https://panel.test/KEY\nclash-verge/v2.0.5', 'проверка нод: адрес и UA - телом');
 eq(requests[0].opts.method, 'POST', 'POST');
 eq(requests[0].opts.body, 'https://panel.test/KEY', 'адрес - в теле, без пробелов по краям');
 eq(t.f.value(), 'clash-verge/v2.0.5', 'UA подставлен');
@@ -134,6 +145,45 @@ mockServer({ ok: true, ua: '', quality: '', kind: '', reason: 'unreachable', tri
 t = build('https://panel.test/k');
 t.btn.click(); await tick();
 if (!/не открылся/.test(t.note.textContent)) { console.error('FAIL: нет сообщения «не открылся»: ' + t.note.textContent); failed = 1; }
+
+// проверка нод: ноды отвечают
+mockServer({ ok: true, ua: 'clash-verge/v2.0.5', quality: 'full', kind: 'k', reason: '', tried: [] }, 200,
+  { body: { ok: true, verdict: 'alive', alive: 2, tested: 3, total: 3, mlkem: '', nodes: [] } });
+t = build('https://panel.test/k');
+t.btn.click(); await tick(); await tick();
+if (!/отвечают: 2 из 3/.test(t.probe.textContent) || !/msg-ok-text/.test(t.probe.className)) { console.error('FAIL: нет итога «ноды отвечают»: ' + t.probe.textContent); failed = 1; }
+eq(t.btn.disabled, false, 'после проверки нод кнопка свободна');
+
+// Reality отклоняет клиента Mihomo: понятный вердикт, UA остаётся выбранным
+mockServer({ ok: true, ua: 'v2rayNG/1.8.0', quality: 'full', kind: 'k', reason: '', tried: [] }, 200,
+  { body: { ok: true, verdict: 'reality_rejected', alive: 0, tested: 3, total: 3, mlkem: 'false', nodes: [] } });
+t = build('https://panel.test/k', 'clash.meta');
+t.btn.click(); await tick(); await tick();
+eq(t.f.value(), 'v2rayNG/1.8.0', 'вердикт Reality не отменяет найденный UA');
+if (!/REALITY/.test(t.probe.textContent) || !/X25519MLKEM768/.test(t.probe.textContent) || !/msg-err-text/.test(t.probe.className)) { console.error('FAIL: нет вердикта про REALITY: ' + t.probe.textContent); failed = 1; }
+if (!/Happ/.test(t.probe.textContent)) { console.error('FAIL: вердикт не объясняет, что клиенты на Xray могут работать'); failed = 1; }
+
+// ноды молчат без признаков Reality
+mockServer({ ok: true, ua: 'v2rayNG/1.8.0', quality: 'full', kind: 'k', reason: '', tried: [] }, 200,
+  { body: { ok: true, verdict: 'unreachable', alive: 0, tested: 2, total: 2, mlkem: '', nodes: [] } });
+t = build('https://panel.test/k');
+t.btn.click(); await tick(); await tick();
+if (!/ни одна из 2 нод/.test(t.probe.textContent)) { console.error('FAIL: нет вердикта «не отвечают»: ' + t.probe.textContent); failed = 1; }
+
+// сбой самой проверки нод: UA остаётся, причина показана
+mockServer({ ok: true, ua: 'clash-verge/v2.0.5', quality: 'full', kind: 'k', reason: '', tried: [] }, 200,
+  { status: 422, body: { ok: false, error: 'unsupported', message: 'Проверка нод понимает только clash YAML' } });
+t = build('https://panel.test/k');
+t.btn.click(); await tick(); await tick();
+eq(t.f.value(), 'clash-verge/v2.0.5', 'сбой проверки нод не отменяет UA');
+if (!/не удалось: Проверка нод понимает/.test(t.probe.textContent)) { console.error('FAIL: причина сбоя проверки нод не показана: ' + t.probe.textContent); failed = 1; }
+eq(t.btn.disabled, false, 'после сбоя проверки нод кнопка свободна');
+
+// UA не найден - проверка нод не запускается
+mockServer({ ok: true, ua: '', quality: '', kind: '', reason: 'none', tried: [{ ua: 'a', http: '403', bytes: 5, kind: 'html' }] });
+t = build('https://panel.test/k');
+t.btn.click(); await tick(); await tick();
+eq(requests.length, 1, 'UA не найден - без проверки нод');
 
 // ошибка сервера: текст ошибки показан, кнопка снова доступна
 mockServer({ ok: false, error: 'bad_url', message: 'Адрес подписки должен начинаться с http://' }, 400);
