@@ -153,8 +153,8 @@ export function renderConstructor(modeBar, opts) {
     head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
-    // слева список модулей, справа выбранный (по умолчанию - «Свои прокси»)
-    var layout = createLayout(2);
+    // слева список модулей, справа выбранный (по умолчанию - первый, «Подписки»)
+    var layout = createLayout(1);
     var modCards = createModuleCards({ layout: layout, mods: mods, model: model, savedWords: savedWords, edit: edit, msg: msg,
       redraw: draw, changed: refreshChanges });
 

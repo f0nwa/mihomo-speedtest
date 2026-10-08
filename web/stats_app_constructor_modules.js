@@ -359,7 +359,7 @@ export function plural(n, one, few, many) {
   return n + ' ' + w;
 }
 
-// Раскладка конструктора: слева список модулей (номер, название, краткая
+// Раскладка конструктора: слева список модулей (название, краткая
 // сводка, пометка «изменён»), справа содержимое выбранного модуля.
 // add(num, title) добавляет модуль на место по номеру и возвращает
 // {body, summary(текст), changed(bool), select()}.
@@ -384,13 +384,12 @@ export function createLayout(activeNum) {
   function add(num, title) {
     var btn = el('button', 'cx-nitem');
     btn.type = 'button';
-    var badge = el('span', 'cx-bnum', String(num));
     var text = el('span', 'cx-ntext');
     var ttl = el('span', 'cx-btitle', title);
     var sum = el('span', 'cx-bsum', '');
     text.appendChild(ttl); text.appendChild(sum);
     var chg = el('span', 'cx-bchg', 'изменён'); chg.hidden = true;
-    btn.appendChild(badge); btn.appendChild(text); btn.appendChild(chg);
+    btn.appendChild(text); btn.appendChild(chg);
     var panel = el('section', 'cx-panel');
     panel.setAttribute('aria-label', title);
     panel.appendChild(el('h2', null, title));
