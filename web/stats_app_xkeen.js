@@ -134,13 +134,86 @@ export function stopXkeenPolling() {
   }
 }
 
+// Разделы вкладки: слева меню (как в «Конфиг -> Конструктор»), справа
+// содержимое выбранного. Панели не пересоздаются при переключении, а только
+// прячутся - несохранённые правки списков остаются на месте.
+var xkSection = 'cmd';
+var xkGroup = 0; // выбранный блок команд
+var xkSecs = null; // { cmd|net: { btn, sub, pane } }
+
+function showSection(name) {
+  xkSection = name;
+  Object.keys(xkSecs).forEach(function (k) {
+    var s = xkSecs[k];
+    var on = k === name;
+    s.btn.classList.toggle('on', on);
+    s.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    s.pane.hidden = !on;
+  });
+}
+
+function updateSecs() {
+  if (!xkSecs || !xk || !xk.files) { return; }
+  var n = function (key) { return xk.files[key].rows.filter(function (r) { return r.type === 'entry'; }).length; };
+  xkSecs.net.sub.textContent = (n('port_exclude') + n('port_proxying')) + ' портов, ' + n('ip_exclude') + ' подсетей' +
+    (dirtyKeys().length ? ' · не сохранено' : '');
+}
+
 export function renderXkeen() {
   clearApp();
-  var c = card('Команды XKeen');
+  var layout = el('div', 'xk-layout');
+  var side = el('div', 'xk-sections');
+  var pane = el('div', 'xk-pane');
+  layout.appendChild(side);
+  layout.appendChild(pane);
+  var total = 0;
+  XKEEN_COMMANDS.forEach(function (g) { total += g.items.length; });
+  xkSecs = {};
+  [['cmd', 'Команды', total + ' команд в ' + XKEEN_COMMANDS.length + ' блоках'], ['net', 'Порты и исключения', 'загрузка...']].forEach(function (s, i) {
+    var b = el('button', 'xk-sec');
+    b.type = 'button';
+    var txt = el('span');
+    txt.appendChild(el('b', null, s[1]));
+    var sub = el('span', 'xk-sec-sub', s[2]);
+    txt.appendChild(sub);
+    b.appendChild(el('span', 'xk-sec-num', String(i + 1)));
+    b.appendChild(txt);
+    b.addEventListener('click', function () { showSection(s[0]); });
+    side.appendChild(b);
+    var p = el('div');
+    pane.appendChild(p);
+    xkSecs[s[0]] = { btn: b, sub: sub, pane: p };
+  });
+  buildCommands(xkSecs.cmd.pane);
+  app.appendChild(layout);
+  showSection(xkSection);
+  renderLists(xkSecs.net.pane);
+}
+
+// Команд много, поэтому блоки переключаются вкладками-кнопками: на экране
+// всегда один блок, длинной прокрутки нет.
+function buildCommands(host) {
+  var c = el('section', 'card');
   c.appendChild(el('p', 'hint', 'Каждая кнопка выполняет одну команду XKeen на роутере. ' +
     'Сначала откроется окно с описанием, команда пойдёт только после «Отправить». ' +
     'Если команда задаёт вопросы, отвечайте на них в этом же окне.'));
-  XKEEN_COMMANDS.forEach(function (group) {
+  var tabs = el('div', 'xk-gtabs');
+  tabs.setAttribute('role', 'group');
+  tabs.setAttribute('aria-label', 'Блоки команд');
+  var body = el('div');
+  c.appendChild(tabs);
+  c.appendChild(body);
+  var draw = function () {
+    while (tabs.firstChild) { tabs.removeChild(tabs.firstChild); }
+    while (body.firstChild) { body.removeChild(body.firstChild); }
+    XKEEN_COMMANDS.forEach(function (group, gi) {
+      var t = el('button', 'xk-gtab' + (gi === xkGroup ? ' on' : ''), group.title);
+      t.type = 'button';
+      t.setAttribute('aria-pressed', gi === xkGroup ? 'true' : 'false');
+      t.addEventListener('click', function () { xkGroup = gi; draw(); });
+      tabs.appendChild(t);
+    });
+    var group = XKEEN_COMMANDS[xkGroup];
     var box = el('div', 'xk-group');
     box.appendChild(el('h3', 'xk-group-title', group.title));
     if (group.note) { box.appendChild(el('p', 'hint', group.note)); }
@@ -157,10 +230,10 @@ export function renderXkeen() {
       rows.appendChild(row);
     });
     box.appendChild(rows);
-    c.appendChild(box);
-  });
-  app.appendChild(c);
-  renderLists();
+    body.appendChild(box);
+  };
+  draw();
+  host.appendChild(c);
 }
 
 // ----- окно-консоль -----
@@ -527,10 +600,10 @@ function loadFiles(data) {
   xk.json = { base: j.base, orig: j.text || '', text: j.text || '' };
 }
 
-function renderLists() {
+function renderLists(host) {
   var guard = viewGuard();
   var root = el('div');
-  app.appendChild(root);
+  host.appendChild(root);
   root.appendChild(el('p', 'hint', 'Загрузка списков XKeen...'));
   fetchJson('/api/xkeen').then(function (data) {
     if (!guard()) { return; }
@@ -541,16 +614,15 @@ function renderLists() {
   }, function (err) {
     if (!guard()) { return; }
     root.textContent = '';
+    if (xkSecs) { xkSecs.net.sub.textContent = 'не удалось прочитать'; }
     root.appendChild(el('p', 'msg-err', 'Не удалось прочитать списки XKeen: ' + (err && err.message ? err.message : err)));
   });
 }
 
 function buildLists(root) {
-  var intro = card('Что идёт мимо прокси');
-  intro.appendChild(el('p', 'hint', 'Здесь задаётся, какой трафик XKeen не отправляет через прокси. Каждый список - файл в /opt/etc/xkeen/. ' +
+  root.appendChild(el('p', 'hint xk-intro', 'Какой трафик XKeen не отправляет через прокси. Каждый список - файл в /opt/etc/xkeen/. ' +
     'Строки с # - заголовки или выключенные записи, они сохраняются как есть. После сохранения XKeen перезапустится (5-10 с); ' +
     'если ядро не поднимется, прежние файлы вернутся сами.'));
-  root.appendChild(intro);
   xk.msg = el('div');
   root.appendChild(xk.msg);
   var grid = el('div', 'xk-grid');
@@ -790,6 +862,7 @@ function buildJson() {
 
 function drawBar() {
   if (!xk || !xk.bar) { return; }
+  updateSecs();
   var b = xk.bar;
   while (b.firstChild) { b.removeChild(b.firstChild); }
   var keys = dirtyKeys();

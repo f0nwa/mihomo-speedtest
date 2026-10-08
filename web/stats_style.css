@@ -288,6 +288,25 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border)}
 .xk-foot .submit{margin-top:0}
 .xk-grow{flex:1 1 auto}
+/* Вкладка "XKeen": меню разделов слева (как в «Конфиг -> Конструктор»), содержимое справа */
+.xk-layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
+.xk-sections{display:flex;flex-direction:column;gap:8px}
+.xk-sec{display:flex;align-items:center;gap:11px;width:100%;padding:10px 13px;background:var(--card);border:1px solid var(--card-border);border-radius:0;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.xk-sec:hover{border-color:var(--accent)}
+.xk-sec.on{border-color:var(--accent);background:#1e2a2c}
+.xk-sec-num{width:22px;height:22px;flex:0 0 22px;display:flex;align-items:center;justify-content:center;border:1px solid var(--card-border);color:var(--muted);font-size:12px}
+.xk-sec.on .xk-sec-num{border-color:var(--accent);color:var(--accent)}
+.xk-sec b{display:block;font-size:14px}
+.xk-sec-sub{display:block;color:var(--muted);font-size:12px}
+.xk-pane{min-width:0}
+.xk-gtabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.xk-gtab{font:inherit;font-size:12.5px;padding:4px 10px;background:var(--bg);color:var(--text);border:1px solid var(--card-border);border-radius:0;cursor:pointer}
+.xk-gtab:hover{border-color:var(--accent)}
+.xk-gtab.on{border-color:var(--accent);background:#35c7c714;color:var(--accent)}
+.xk-intro{margin:0 0 12px}
+.xk-pane .xk-grid{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.xk-pane .xk-grid .wide{grid-column:auto}
+@media (max-width:900px){.xk-layout{grid-template-columns:minmax(0,1fr)}}
 /* Списки XKeen (renderLists() в stats_app_xkeen.js) */
 .xk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
 .xk-grid .wide{grid-column:1/-1}
