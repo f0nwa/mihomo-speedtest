@@ -83,21 +83,36 @@ classify_body() {
   echo "неизвестный формат, смотрите тело ответа глазами"
 }
 
+# Делает один запрос с заданным User-Agent. Аргументы: User-Agent, URL,
+# путь к файлу для тела ответа. Печатает в stdout одну строку
+# "HTTP-код<TAB>размер<TAB>вид ответа" (вид - из classify_body). Общая часть
+# CLI (try_one) и веб-интерфейса конструктора (stats_constructor.sh).
+# Только http(s): редирект на file:// и прочие схемы curl не пойдёт.
+probe_ua() {
+  pu_ua=$1
+  pu_target=$2
+  pu_out=$3
+  pu_code=$(curl -sL --compressed --proto '=http,https' --proto-redir '=http,https' \
+    -o "$pu_out" -w '%{http_code}' -m 10 -A "$pu_ua" "$pu_target" 2>/dev/null) || pu_code=000
+  # При полном сбое соединения curl иногда не создаёт файл -o вовсе -
+  # подстрахуемся, чтобы classify_body()/wc не спотыкались об его отсутствие.
+  [ -f "$pu_out" ] || : > "$pu_out"
+  pu_size=$(wc -c < "$pu_out" 2>/dev/null | tr -d ' ')
+  printf '%s\t%s\t%s\n' "$pu_code" "${pu_size:-0}" "$(classify_body "$pu_out")"
+}
+
 # Делает один запрос с заданным User-Agent и печатает строку результата.
 # Аргументы: User-Agent, URL, путь к файлу для тела ответа.
 # Не полагается на общие $URL/$TMP - так функцию можно тестировать
 # отдельно, подменяя curl через PATH (см. tests/test_detect_ua.sh).
 try_one() {
   ua=$1
-  target=$2
-  out=$3
-  code=$(curl -sL --compressed -o "$out" -w '%{http_code}' -m 10 -A "$ua" "$target" 2>/dev/null) || code=000
-  # При полном сбое соединения curl иногда не создаёт файл -o вовсе -
-  # подстрахуемся, чтобы classify_body()/wc не спотыкались об его отсутствие.
-  [ -f "$out" ] || : > "$out"
-  size=$(wc -c < "$out" 2>/dev/null | tr -d ' ')
-  kind=$(classify_body "$out")
-  printf 'UA=[%s] -> HTTP %s, bytes=%s, %s\n' "$ua" "$code" "${size:-0}" "$kind"
+  res=$(probe_ua "$ua" "$2" "$3")
+  code=${res%%"$(printf '\t')"*}
+  res=${res#*"$(printf '\t')"}
+  size=${res%%"$(printf '\t')"*}
+  kind=${res#*"$(printf '\t')"}
+  printf 'UA=[%s] -> HTTP %s, bytes=%s, %s\n' "$ua" "$code" "$size" "$kind"
 }
 
 if [ "${DETECT_UA_LIB_ONLY:-0}" != 1 ]; then

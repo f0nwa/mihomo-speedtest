@@ -11,25 +11,112 @@
 import { app, card, clearApp, el, fetchJson, viewGuard } from './app-core.js';
 
 var XKEEN_COMMANDS = [
-  { title: 'Состояние', items: [
-    { key: 'status', flag: '-status', label: 'Статус', desc: 'Работает ли прокси-клиент.' },
-    { key: 'version', flag: '-v', label: 'Версия', desc: 'Версия XKeen.' },
-    { key: 'tp', flag: '-tp', label: 'Порты и шлюз', desc: 'Порты, шлюз и протокол прокси-клиента.' },
-    { key: 'cp', flag: '-cp', label: 'Порты проксирования', desc: 'Какие порты проксируются - как их видит XKeen.' },
-    { key: 'cpe', flag: '-cpe', label: 'Исключённые порты', desc: 'Какие порты исключены из проксирования - как их видит XKeen.' },
-    { key: 'cfd', flag: '-cfd', label: 'Дескрипторы', desc: 'Сколько файловых дескрипторов открыто у прокси-клиента.' },
-    { key: 'mtest', flag: '-mtest', label: 'Проверить конфиг', desc: 'Проверить конфиг Mihomo на ошибки. Ничего не меняет.' },
-    { key: 'diag', flag: '-diag', label: 'Диагностика', desc: 'Полная диагностика XKeen - её просит автор XKeen при сообщении о проблеме. Может идти несколько минут.' }
+  { title: 'Установка', note: 'Первая установка XKeen и его компонентов. Во время установки XKeen задаёт вопросы - отвечайте в окне команды.', items: [
+    { key: 'i', flag: '-i', desc: 'Основной режим установки XKeen + Xray + Mihomo + GeoFile/GeoIPSET.', ia: true },
+    { key: 'i_auto', flag: '-i auto', desc: 'Автоустановка.', ia: true },
+    { key: 'io', flag: '-io', desc: 'OffLine установка XKeen.', ia: true },
+    { key: 'i_toff', flag: '-i -toff', desc: 'Отключение таймаута при медленной загрузке с GitHub (xkeen -i -toff).', ia: true },
+    { key: 'health', flag: '-health', desc: 'Базовая проверка исправности Entware перед установкой XKeen.' }
   ] },
-  { title: 'Управление', items: [
-    { key: 'start', flag: '-start', label: 'Запустить', desc: 'Запустить прокси-клиент, если он остановлен.' },
-    { key: 'restart', flag: '-restart', label: 'Перезапустить', desc: 'Перезапустить прокси-клиент. Интернет через прокси пропадёт на 5-10 секунд.' },
-    { key: 'stop', flag: '-stop', label: 'Остановить', desc: 'Остановить прокси-клиент: весь трафик пойдёт напрямую, мимо прокси, до запуска.', danger: true }
+  { title: 'Переустановка', note: '', items: [
+    { key: 'k', flag: '-k', desc: 'XKeen.', ia: true },
+    { key: 'g', flag: '-g', desc: 'GeoFile.', ia: true },
+    { key: 'gips', flag: '-gips', desc: 'GeoIPSET.', ia: true },
+    { key: 'ri', flag: '-ri', desc: 'Пересоздать файл автозапуска XKeen в init.d.', ia: true }
   ] },
-  { title: 'Обслуживание', items: [
-    { key: 'ug', flag: '-ug', label: 'Обновить геобазы', desc: 'Скачать свежие GeoFile/GeoIPSET (списки сайтов и адресов по странам). Может идти несколько минут.' },
-    { key: 'mb', flag: '-mb', label: 'Бэкап Mihomo', desc: 'Резервная копия конфигурации Mihomo средствами XKeen.' },
-    { key: 'kb', flag: '-kb', label: 'Бэкап XKeen', desc: 'Резервная копия XKeen.' }
+  { title: 'Обновление', note: '', items: [
+    { key: 'uk', flag: '-uk', desc: 'XKeen.', ia: true },
+    { key: 'ug', flag: '-ug', desc: 'GeoFile/GeoIPSET (списки сайтов и адресов по странам). Может идти несколько минут.' },
+    { key: 'ux', flag: '-ux', desc: 'Xray (установка, повышение/понижение версии).', ia: true },
+    { key: 'um', flag: '-um', desc: 'Mihomo (установка, повышение/понижение версии).', ia: true },
+    { key: 'uy', flag: '-uy', desc: 'Yq (установка/обновление).', ia: true }
+  ] },
+  { title: 'Автообновление GeoFile/GeoIPSET', note: 'Запланированная задача, которая сама обновляет геобазы.', items: [
+    { key: 'ugc', flag: '-ugc', desc: 'Создание задачи.', ia: true },
+    { key: 'dgc', flag: '-dgc', desc: 'Удаление задачи.', ia: true }
+  ] },
+  { title: 'Резервная копия XKeen', note: '', items: [
+    { key: 'kb', flag: '-kb', desc: 'Создание.' },
+    { key: 'kbr', flag: '-kbr', desc: 'Восстановление.', ia: true }
+  ] },
+  { title: 'Резервная копия конфигурации Xray', note: '', items: [
+    { key: 'xb', flag: '-xb', desc: 'Создание.' },
+    { key: 'xbr', flag: '-xbr', desc: 'Восстановление.', ia: true }
+  ] },
+  { title: 'Резервная копия конфигурации Mihomo', note: '', items: [
+    { key: 'mb', flag: '-mb', desc: 'Создание.' },
+    { key: 'mbr', flag: '-mbr', desc: 'Восстановление.', ia: true }
+  ] },
+  { title: 'Удаление', note: 'Необратимые действия: перед выполнением XKeen спросит подтверждение.', items: [
+    { key: 'remove', flag: '-remove', desc: 'Полная деинсталляция XKeen.', ia: true, danger: true },
+    { key: 'dgs', flag: '-dgs', desc: 'GeoSite.', ia: true, danger: true },
+    { key: 'dgi', flag: '-dgi', desc: 'GeoIP.', ia: true, danger: true },
+    { key: 'dgips', flag: '-dgips', desc: 'GeoIPSET.', ia: true, danger: true },
+    { key: 'dx', flag: '-dx', desc: 'Xray.', ia: true, danger: true },
+    { key: 'dm', flag: '-dm', desc: 'Mihomo + Yq.', ia: true, danger: true },
+    { key: 'dk', flag: '-dk', desc: 'XKeen.', ia: true, danger: true }
+  ] },
+  { title: 'Порты проксирования', note: 'Через прокси идут только эти порты (если список не пуст).', items: [
+    { key: 'ap', flag: '-ap', desc: 'Добавить.', ia: true },
+    { key: 'dp', flag: '-dp', desc: 'Удалить.', ia: true },
+    { key: 'cp', flag: '-cp', desc: 'Посмотреть - какие порты проксируются, как их видит XKeen.' }
+  ] },
+  { title: 'Порты, исключённые из проксирования', note: 'Соединения на эти порты идут напрямую, мимо прокси.', items: [
+    { key: 'ape', flag: '-ape', desc: 'Добавить.', ia: true },
+    { key: 'dpe', flag: '-dpe', desc: 'Удалить.', ia: true },
+    { key: 'cpe', flag: '-cpe', desc: 'Посмотреть - какие порты исключены, как их видит XKeen.' }
+  ] },
+  { title: 'Запуск и состояние прокси-клиента', note: '', items: [
+    { key: 'status', flag: '-status', desc: 'Статус работы.' },
+    { key: 'start', flag: '-start', desc: 'Запуск.' },
+    { key: 'restart', flag: '-restart', desc: 'Перезапуск. Интернет через прокси пропадёт на 5-10 секунд.' },
+    { key: 'stop', flag: '-stop', desc: 'Остановка: весь трафик пойдёт напрямую, мимо прокси, до запуска.', danger: true },
+    { key: 'dscp', flag: '-dscp', desc: 'Статус маршрутизации по DSCP-меткам.' },
+    { key: 'tp', flag: '-tp', desc: 'Порты, шлюз и протокол прокси-клиента.' },
+    { key: 'cfd', flag: '-cfd', desc: 'Проверить количество файловых дескрипторов, открытых прокси-клиентом.' }
+  ] },
+  { title: 'Проверка и диагностика', note: '', items: [
+    { key: 'diag', flag: '-diag', desc: 'Выполнить диагностику XKeen - её просит автор XKeen при сообщении о проблеме. Может идти несколько минут.' },
+    { key: 'xtest', flag: '-xtest', desc: 'Проверить конфигурацию Xray на ошибки. Ничего не меняет.' },
+    { key: 'mtest', flag: '-mtest', desc: 'Проверить конфигурацию Mihomo на ошибки. Ничего не меняет.' }
+  ] },
+  { title: 'Автозапуск и ожидания', note: '', items: [
+    { key: 'auto', flag: '-auto', desc: 'Включить | Отключить автозапуск прокси-клиента.', ia: true },
+    { key: 'di', flag: '-di', desc: 'Время ожидания инициализации роутера перед началом запуска прокси-клиента.', ia: true },
+    { key: 'd', flag: '-d', desc: 'Время ожидания успешного запуска прокси-клиента.', ia: true },
+    { key: 'fd', flag: '-fd', desc: 'Включить | Отключить контроль файловых дескрипторов прокси-клиента.', ia: true }
+  ] },
+  { title: 'Ядро и маршрутизация', note: '', items: [
+    { key: 'xray', flag: '-xray', desc: 'Переключить XKeen на ядро Xray.', ia: true },
+    { key: 'mihomo', flag: '-mihomo', desc: 'Переключить XKeen на ядро Mihomo.', ia: true },
+    { key: 'channel', flag: '-channel', desc: 'Переключить канал получения обновлений XKeen (Stable/Dev версия).', ia: true },
+    { key: 'ipv6', flag: '-ipv6', desc: 'Включить | Отключить протокол IPv6 в KeeneticOS.', ia: true },
+    { key: 'dns', flag: '-dns', desc: 'Включить | Отключить перенаправление DNS в прокси.', ia: true },
+    { key: 'pr', flag: '-pr', desc: 'Включить | Отключить проксирование трафика Entware через Xray/Mihomo.', ia: true }
+  ] },
+  { title: 'Режимы с параметром', note: 'Команды с готовым параметром: включить, выключить или посмотреть состояние.', items: [
+    { key: 'sb_on', flag: '-sb on', desc: 'Балансировка outbound по фактической скорости: включить.' },
+    { key: 'sb_off', flag: '-sb off', desc: 'Балансировка outbound по фактической скорости: выключить.' },
+    { key: 'sb_status', flag: '-sb status', desc: 'Балансировка outbound по фактической скорости: состояние.' },
+    { key: 'pbr_on', flag: '-pbr on', desc: 'Strict PBR-проверка mark / routing-mark для Xray/Mihomo: включить.' },
+    { key: 'pbr_off', flag: '-pbr off', desc: 'Strict PBR-проверка mark / routing-mark для Xray/Mihomo: выключить.' },
+    { key: 'pbr_status', flag: '-pbr status', desc: 'Strict PBR-проверка mark / routing-mark для Xray/Mihomo: состояние.' },
+    { key: 'pbr_codes', flag: '-pbr codes', desc: 'Strict PBR-проверка mark / routing-mark для Xray/Mihomo: коды.' },
+    { key: 'killswitch_on', flag: '-killswitch on', desc: 'Блокировать трафик policy xkeen при аварии ядра: включить.' },
+    { key: 'killswitch_off', flag: '-killswitch off', desc: 'Блокировать трафик policy xkeen при аварии ядра: выключить.' },
+    { key: 'killswitch_status', flag: '-killswitch status', desc: 'Блокировать трафик policy xkeen при аварии ядра: состояние.' }
+  ] },
+  { title: 'Сообщения и резервное копирование', note: '', items: [
+    { key: 'startvb', flag: '-startvb', desc: 'Включить | Отключить вывод информации при старте прокси-клиента.', ia: true },
+    { key: 'extmsg', flag: '-extmsg', desc: 'Включить | Отключить расширенные сообщения при запуске XKeen.', ia: true },
+    { key: 'cbk', flag: '-cbk', desc: 'Включить | Отключить резервное копирование XKeen при обновлении.', ia: true },
+    { key: 'aghfix', flag: '-aghfix', desc: 'Включить | Отключить отображение клиентов XKeen под своими IP в журнале AdGuard Home.', ia: true }
+  ] },
+  { title: 'Информация', note: '', items: [
+    { key: 'about', flag: '-about', desc: 'О программе.' },
+    { key: 'version', flag: '-v', desc: 'Версия XKeen.' },
+    { key: 'ad', flag: '-ad', desc: 'Поддержать разработчиков.' },
+    { key: 'af', flag: '-af', desc: 'Обратная связь.' }
   ] }
 ];
 
@@ -47,40 +134,116 @@ export function stopXkeenPolling() {
   }
 }
 
+// Разделы вкладки: слева меню (как в «Конфиг -> Конструктор»), справа
+// содержимое выбранного. Панели не пересоздаются при переключении, а только
+// прячутся - несохранённые правки списков остаются на месте.
+var xkSection = 'cmd';
+var xkGroup = 0; // выбранный блок команд
+var xkSecs = null; // { cmd|net: { btn, sub, pane } }
+
+function showSection(name) {
+  xkSection = name;
+  Object.keys(xkSecs).forEach(function (k) {
+    var s = xkSecs[k];
+    var on = k === name;
+    s.btn.classList.toggle('on', on);
+    s.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    s.pane.hidden = !on;
+  });
+}
+
+function updateSecs() {
+  if (!xkSecs || !xk || !xk.files) { return; }
+  var n = function (key) { return xk.files[key].rows.filter(function (r) { return r.type === 'entry'; }).length; };
+  xkSecs.net.sub.textContent = (n('port_exclude') + n('port_proxying')) + ' портов, ' + n('ip_exclude') + ' подсетей' +
+    (dirtyKeys().length ? ' · не сохранено' : '');
+}
+
 export function renderXkeen() {
   clearApp();
-  var c = card('Команды XKeen');
-  c.appendChild(el('p', 'hint', 'Каждая кнопка выполняет одну команду XKeen на роутере. ' +
-    'Сначала откроется окно с описанием, команда пойдёт только после «Отправить».'));
-  var bar = el('div', 'xk-bar');
-  var desc = el('p', 'hint xk-desc', 'Наведите на кнопку, чтобы увидеть, что она делает.');
-  XKEEN_COMMANDS.forEach(function (group, gi) {
-    if (gi > 0) { bar.appendChild(el('span', 'xk-sep')); }
-    group.items.forEach(function (cmd) {
-      var b = el('button', 'theme-btn xk-btn' + (cmd.danger ? ' danger' : ''), cmd.label);
-      b.type = 'button';
-      b.title = 'xkeen ' + cmd.flag;
-      var show = function () { desc.textContent = cmd.label + ' (xkeen ' + cmd.flag + ') - ' + cmd.desc; };
-      b.addEventListener('mouseenter', show);
-      b.addEventListener('focus', show);
-      b.addEventListener('click', function () { openDialog(cmd); });
-      bar.appendChild(b);
-    });
+  var layout = el('div', 'xk-layout');
+  var side = el('div', 'xk-sections');
+  var pane = el('div', 'xk-pane');
+  layout.appendChild(side);
+  layout.appendChild(pane);
+  var total = 0;
+  XKEEN_COMMANDS.forEach(function (g) { total += g.items.length; });
+  xkSecs = {};
+  [['cmd', 'Команды', total + ' команд в ' + XKEEN_COMMANDS.length + ' блоках'], ['net', 'Порты и исключения', 'загрузка...']].forEach(function (s, i) {
+    var b = el('button', 'xk-sec');
+    b.type = 'button';
+    var txt = el('span');
+    txt.appendChild(el('b', null, s[1]));
+    var sub = el('span', 'xk-sec-sub', s[2]);
+    txt.appendChild(sub);
+    b.appendChild(el('span', 'xk-sec-num', String(i + 1)));
+    b.appendChild(txt);
+    b.addEventListener('click', function () { showSection(s[0]); });
+    side.appendChild(b);
+    var p = el('div');
+    pane.appendChild(p);
+    xkSecs[s[0]] = { btn: b, sub: sub, pane: p };
   });
-  c.appendChild(bar);
-  c.appendChild(desc);
-  app.appendChild(c);
-  renderLists();
+  buildCommands(xkSecs.cmd.pane);
+  app.appendChild(layout);
+  showSection(xkSection);
+  renderLists(xkSecs.net.pane);
+}
+
+// Команд много, поэтому блоки переключаются вкладками-кнопками: на экране
+// всегда один блок, длинной прокрутки нет.
+function buildCommands(host) {
+  var c = el('section', 'card');
+  c.appendChild(el('p', 'hint', 'Каждая кнопка выполняет одну команду XKeen на роутере. ' +
+    'Сначала откроется окно с описанием, команда пойдёт только после «Отправить». ' +
+    'Если команда задаёт вопросы, отвечайте на них в этом же окне.'));
+  var tabs = el('div', 'xk-gtabs');
+  tabs.setAttribute('role', 'group');
+  tabs.setAttribute('aria-label', 'Блоки команд');
+  var body = el('div');
+  c.appendChild(tabs);
+  c.appendChild(body);
+  var draw = function () {
+    while (tabs.firstChild) { tabs.removeChild(tabs.firstChild); }
+    while (body.firstChild) { body.removeChild(body.firstChild); }
+    XKEEN_COMMANDS.forEach(function (group, gi) {
+      var t = el('button', 'xk-gtab' + (gi === xkGroup ? ' on' : ''), group.title);
+      t.type = 'button';
+      t.setAttribute('aria-pressed', gi === xkGroup ? 'true' : 'false');
+      t.addEventListener('click', function () { xkGroup = gi; draw(); });
+      tabs.appendChild(t);
+    });
+    var group = XKEEN_COMMANDS[xkGroup];
+    var box = el('div', 'xk-group');
+    box.appendChild(el('h3', 'xk-group-title', group.title));
+    if (group.note) { box.appendChild(el('p', 'hint', group.note)); }
+    var rows = el('div', 'xk-cmds');
+    group.items.forEach(function (cmd) {
+      var row = el('div', 'xk-cmd' + (cmd.danger ? ' danger' : ''));
+      row.appendChild(el('code', 'xk-flag', cmd.flag));
+      row.appendChild(el('span', 'xk-cdesc', cmd.desc));
+      var b = el('button', 'theme-btn xk-btn' + (cmd.danger ? ' danger' : ''), 'Выполнить');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'xkeen ' + cmd.flag + ' - ' + cmd.desc);
+      b.addEventListener('click', function () { openDialog(cmd, group); });
+      row.appendChild(b);
+      rows.appendChild(row);
+    });
+    box.appendChild(rows);
+    body.appendChild(box);
+  };
+  draw();
+  host.appendChild(c);
 }
 
 // ----- окно-консоль -----
 
-function openDialog(cmd) {
+function openDialog(cmd, group) {
   stopXkeenPolling();
   var d = el('dialog', 'xk-dialog');
   var head = el('div', 'xk-head');
-  head.appendChild(el('b', null, cmd.label));
-  head.appendChild(el('span', 'hint', 'xkeen ' + cmd.flag));
+  head.appendChild(el('b', null, 'xkeen ' + cmd.flag));
+  head.appendChild(el('span', 'hint', group.title));
   var status = el('span', 'xk-status');
   head.appendChild(status);
   var closeX = el('button', 'xk-x', '✕');
@@ -88,7 +251,7 @@ function openDialog(cmd) {
   closeX.setAttribute('aria-label', 'Закрыть');
   head.appendChild(closeX);
   d.appendChild(head);
-  d.appendChild(el('div', 'xk-about', cmd.desc));
+  d.appendChild(el('div', 'xk-about', cmd.desc + (cmd.ia ? ' Команда может задавать вопросы - отвечайте в поле под выводом.' : '')));
   var pre = el('div', 'update-console xk-console');
   d.appendChild(pre);
   var foot = el('div', 'xk-foot');
@@ -104,9 +267,85 @@ function openDialog(cmd) {
   d.showModal();
 }
 
-function line(text, cls) {
-  dlg.pre.appendChild(el('div', 'log-line' + (cls ? ' ' + cls : ''), text === '' ? ' ' : text));
+// Вывод приходит кусками: последняя строка может быть без перевода строки
+// (вопрос "Введите порт: ") - она остаётся открытой и продолжается
+// следующим куском или ответом пользователя.
+function addText(text) {
+  var parts = text.replace(/\r\n?/g, '\n').split('\n');
+  parts.forEach(function (p, i) {
+    var last = i === parts.length - 1;
+    if (!dlg.partial) {
+      if (last && p === '') { return; }
+      dlg.partial = line('', '');
+    }
+    var n = dlg.partial;
+    n.textContent = (n.textContent === ' ' ? '' : n.textContent) + p;
+    if (/^--- /.test(n.textContent)) { n.className = 'log-line err'; }
+    if (!last) {
+      if (n.textContent === '') { n.textContent = ' '; }
+      dlg.partial = null;
+    }
+  });
   dlg.pre.scrollTop = dlg.pre.scrollHeight;
+}
+
+function line(text, cls) {
+  var n = el('div', 'log-line' + (cls ? ' ' + cls : ''), text === '' ? ' ' : text);
+  dlg.pre.appendChild(n);
+  dlg.pre.scrollTop = dlg.pre.scrollHeight;
+  return n;
+}
+
+// Поле ответа: Enter или «Ввод» отправляет строку в stdin команды.
+function buildInput() {
+  var cur = dlg;
+  var row = el('div', 'xk-input');
+  var inp = el('input');
+  inp.type = 'text';
+  inp.placeholder = 'Ответ команде и Enter';
+  inp.maxLength = 500;
+  inp.autocomplete = 'off';
+  inp.setAttribute('aria-label', 'Ответ команде XKeen');
+  var sendLine = function (text) {
+    if (dlg !== cur || !cur.id || !cur.busy) { return; }
+    var echo = cur.partial || line('', 'xk-in');
+    cur.partial = null;
+    echo.textContent = (echo.textContent === ' ' ? '' : echo.textContent) + text;
+    echo.className = 'log-line xk-in';
+    cur.pre.scrollTop = cur.pre.scrollHeight;
+    fetchJson('/api/xkeen/input?id=' + encodeURIComponent(cur.id), { method: 'POST', body: text, headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
+      .then(null, function (err) {
+        if (dlg !== cur) { return; }
+        line('Ответ не доставлен: ' + ((err && err.data && err.data.message) || (err && err.message) || err), 'err');
+      });
+  };
+  var go = function () { var t = inp.value; inp.value = ''; sendLine(t); inp.focus(); };
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); go(); }
+  });
+  row.appendChild(inp);
+  var ok = el('button', 'submit', 'Ввод');
+  ok.type = 'button';
+  ok.addEventListener('click', go);
+  row.appendChild(ok);
+  [['y', 'y'], ['n', 'n']].forEach(function (q) {
+    var b = el('button', 'submit secondary', q[0]);
+    b.type = 'button';
+    b.title = 'Отправить «' + q[1] + '»';
+    b.addEventListener('click', function () { sendLine(q[1]); inp.focus(); });
+    row.appendChild(b);
+  });
+  setTimeout(function () { inp.focus(); }, 0);
+  return row;
+}
+
+function cancelRun() {
+  var cur = dlg;
+  if (!cur || !cur.id) { return; }
+  fetchJson('/api/xkeen/cancel?id=' + encodeURIComponent(cur.id), { method: 'POST' }).then(null, function (err) {
+    if (dlg !== cur) { return; }
+    line('Не удалось прервать: ' + ((err && err.data && err.data.message) || (err && err.message) || err), 'err');
+  });
 }
 
 function button(label, cls, onClick) {
@@ -122,6 +361,7 @@ function clearFoot() { while (dlg.foot.firstChild) { dlg.foot.removeChild(dlg.fo
 function showReady() {
   dlg.pre.textContent = '';
   dlg.text = '';
+  dlg.partial = null;
   dlg.status.textContent = '';
   dlg.status.className = 'xk-status';
   line('~ # xkeen ' + dlg.cmd.flag, 'xk-prompt');
@@ -142,12 +382,16 @@ function send_() {
   setBusy(true);
   clearFoot();
   var note = el('span', 'hint xk-grow', 'Команда отправлена...');
+  var inputRow = cur.cmd.ia ? buildInput() : null;
+  if (inputRow) { dlg.foot.appendChild(inputRow); }
   dlg.foot.appendChild(note);
+  button('Прервать', 'submit secondary', cancelRun);
   fetchJson('/api/xkeen/run?cmd=' + encodeURIComponent(cur.cmd.key), { method: 'POST' }).then(function (data) {
     if (dlg !== cur) { return; }
     cur.id = data.id;
     cur.next = 0;
     cur.note = note;
+    cur.partial = null;
     poll();
   }, function (err) {
     if (dlg !== cur) { return; }
@@ -173,9 +417,7 @@ function poll() {
     }
     if (data.text) {
       cur.text += data.text;
-      var lines = String(data.text).replace(/\r\n?/g, '\n').split('\n');
-      if (lines[lines.length - 1] === '') { lines.pop(); }
-      lines.forEach(function (l) { line(l, /^--- /.test(l) ? 'err' : ''); });
+      addText(String(data.text));
     }
     cur.next = data.next;
     if (data.running) {
@@ -358,10 +600,10 @@ function loadFiles(data) {
   xk.json = { base: j.base, orig: j.text || '', text: j.text || '' };
 }
 
-function renderLists() {
+function renderLists(host) {
   var guard = viewGuard();
   var root = el('div');
-  app.appendChild(root);
+  host.appendChild(root);
   root.appendChild(el('p', 'hint', 'Загрузка списков XKeen...'));
   fetchJson('/api/xkeen').then(function (data) {
     if (!guard()) { return; }
@@ -372,16 +614,15 @@ function renderLists() {
   }, function (err) {
     if (!guard()) { return; }
     root.textContent = '';
+    if (xkSecs) { xkSecs.net.sub.textContent = 'не удалось прочитать'; }
     root.appendChild(el('p', 'msg-err', 'Не удалось прочитать списки XKeen: ' + (err && err.message ? err.message : err)));
   });
 }
 
 function buildLists(root) {
-  var intro = card('Что идёт мимо прокси');
-  intro.appendChild(el('p', 'hint', 'Здесь задаётся, какой трафик XKeen не отправляет через прокси. Каждый список - файл в /opt/etc/xkeen/. ' +
+  root.appendChild(el('p', 'hint xk-intro', 'Какой трафик XKeen не отправляет через прокси. Каждый список - файл в /opt/etc/xkeen/. ' +
     'Строки с # - заголовки или выключенные записи, они сохраняются как есть. После сохранения XKeen перезапустится (5-10 с); ' +
     'если ядро не поднимется, прежние файлы вернутся сами.'));
-  root.appendChild(intro);
   xk.msg = el('div');
   root.appendChild(xk.msg);
   var grid = el('div', 'xk-grid');
@@ -621,6 +862,7 @@ function buildJson() {
 
 function drawBar() {
   if (!xk || !xk.bar) { return; }
+  updateSecs();
   var b = xk.bar;
   while (b.firstChild) { b.removeChild(b.firstChild); }
   var keys = dirtyKeys();

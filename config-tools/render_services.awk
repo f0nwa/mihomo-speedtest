@@ -23,6 +23,10 @@
 #   gkey<TAB>id<TAB>ключ: значение       доп. ключ группы как есть
 #   prov<TAB>id|-<TAB>строка provider    строка rule-providers как есть
 #   rule<TAB>id|-<TAB>текст правила      "- текст" в rules
+#   fresh<TAB>id|-<TAB>текст правила     пометка: правило добавлено после
+#                                        прошлого релиза (при сборке не нужна,
+#                                        config_to_state.awk не считает его
+#                                        убранным пользователем)
 # id в icon/gkey/prov/rule должен быть объявлен строкой svc выше; "-" -
 # provider или правило без сервиса.
 #
@@ -188,8 +192,10 @@ function read_defaults(  rc, n, f, kind, id) {
       need(n, 3, kind); known(id, kind)
       nrule++; rule_owner[nrule] = id; rule_text[nrule] = f[3]
       default_rule[id SUBSEP f[3]] = 1
+    } else if (kind == "fresh") {
+      need(n, 3, kind); known(id, kind)
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov или rule)")
+      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov, rule или fresh)")
     }
   }
   if (rc < 0) err("не удалось прочитать " services_file)

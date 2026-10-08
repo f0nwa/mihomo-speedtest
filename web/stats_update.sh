@@ -595,7 +595,16 @@ if [ -n "${REQUEST_METHOD:-}" ]; then
   esac
 else
   case $action in
-    check) cmd_cron_sync || true; cmd_check "${2:-button}" >/dev/null ;;
+    check)
+      cmd_cron_sync || true
+      chk_rc=0
+      cmd_check "${2:-button}" >/dev/null || chk_rc=$?
+      # Карточка "Компоненты" проверяется по тому же расписанию и независимо
+      # от результата проверки проекта; её сбой код выхода не меняет.
+      if [ -f "$DIR/stats_components.sh" ]; then
+        MST_COMPONENTS_ACTION= REQUEST_METHOD= sh "$DIR/stats_components.sh" check cron >/dev/null 2>&1 || true
+      fi
+      exit "$chk_rc" ;;
     cron-sync) cmd_cron_sync "${2:-}" ;;
     prepare-worker) cmd_prepare_worker "${2:-}" ;;
     apply-worker) cmd_apply_worker "${2:-}" "${3:-0}" "${4:-0}" ;;

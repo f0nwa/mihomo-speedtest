@@ -5,13 +5,20 @@ import { stopProgressPolling } from './app-stats.js';
 import { stopLogPolling } from './app-log.js';
 import { buildField } from './app-settings.js';
 import { requestTemplateMigration } from './app-config.js';
+import { buildComponentsCard, componentsAvailable, stopComponentsPolling } from './app-components.js';
 
 // ----- раздел "Обновления" (/api/updates/*) -----
 
 function updatesBadgeEl() { return document.getElementById('updatesBadge'); }
 
 export function refreshUpdatesBadge() {
+  // Компоненты (mihomo/zashboard/xkeen) - отдельный запрос: его сбой не
+  // должен скрывать бейдж обновления проекта.
+  var componentsReq = fetchJson('/api/components/status')['catch'](function () { return null; });
   fetchJson('/api/updates/status').then(function (data) {
+    return componentsReq.then(function (comp) { return [data, comp]; });
+  }).then(function (pair) {
+    var data = pair[0];
     var lc = data && data.last_check;
     // 'missing' - тоже "есть что поставить": релиз, добавляющий только
     // новые файлы (без единого изменённого), иначе не показал бы бейдж/
@@ -19,7 +26,7 @@ export function refreshUpdatesBadge() {
     var available = !!(lc && lc.ok && lc.plan && lc.plan.files &&
       lc.plan.files.some(function (f) {
         return f.state === 'new' || f.state === 'modified' || f.state === 'changed' || f.state === 'missing';
-      }));
+      })) || componentsAvailable(pair[1]);
     var badge = updatesBadgeEl();
     if (badge) { badge.hidden = !available; }
     // KPI-плитка "ОБНОВЛЕНИЕ" на /stats (buildKpiRow) - тот же расчёт
@@ -41,6 +48,7 @@ var updateJobPollTimer = null;
 
 export function stopUpdateJobPolling() {
   if (updateJobPollTimer) { clearInterval(updateJobPollTimer); updateJobPollTimer = null; }
+  stopComponentsPolling();
 }
 
 // onUpdate получает целиком ответ /api/updates/status (а не только
@@ -333,6 +341,7 @@ export function renderUpdates() {
     row.appendChild(checkBtn); if (available) { row.appendChild(updateBtn); }
     summary.appendChild(row);
     app.appendChild(summary);
+    app.appendChild(buildComponentsCard(refreshUpdatesBadge));
     var configCard = buildConfigSchemaCard(data.config_schema);
     if (configCard) { app.appendChild(configCard); }
     if (settings && settings.values) { app.appendChild(buildUpdateSettingsCard(settings.values)); }

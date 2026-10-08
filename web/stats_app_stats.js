@@ -411,26 +411,93 @@ var STABILITY_GROUPS = [
   { key: 'other', label: 'нет данных / не проверена', sw: 'sw-absent' }
 ];
 var stabilityFilter = { alive: true, down: true, other: true };
+// Поиск по имени ноды - подстрока без учёта регистра; хранится рядом с
+// фильтром по статусу и так же переживает перерисовку.
+var stabilityQuery = '';
 
 function stabilityGroup(status) {
   return status === 'alive' || status === 'down' ? status : 'other';
+}
+
+function stabilityRowVisible(group, name) {
+  if (!stabilityFilter[group]) { return false; }
+  var q = stabilityQuery.trim().toLowerCase();
+  return !q || String(name || '').toLowerCase().indexOf(q) >= 0;
+}
+
+function svgIcon(size, shapes) {
+  var ns = 'http://www.w3.org/2000/svg';
+  var svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.7');
+  svg.setAttribute('aria-hidden', 'true');
+  shapes.forEach(function (sh) {
+    var n = document.createElementNS(ns, sh[0]);
+    Object.keys(sh[1]).forEach(function (k) { n.setAttribute(k, sh[1][k]); });
+    svg.appendChild(n);
+  });
+  return svg;
 }
 
 function buildStabilityFilter(rows, table, emptyHint) {
   var wrap = el('div', 'stability-filter');
   var counts = { alive: 0, down: 0, other: 0 };
   rows.forEach(function (r) { counts[stabilityGroup(r.status)]++; });
+  var counter = el('span', 'hint stability-filter-count');
   function apply() {
     var trs = table.tBodies[0].rows;
     var shown = 0;
     for (var i = 0; i < trs.length; i++) {
-      var visible = !!stabilityFilter[trs[i].getAttribute('data-group')];
+      var visible = stabilityRowVisible(trs[i].getAttribute('data-group'), trs[i].getAttribute('data-name'));
       trs[i].hidden = !visible;
       if (visible) { shown++; }
     }
     table.hidden = shown === 0;
     emptyHint.hidden = shown !== 0;
+    emptyHint.textContent = stabilityQuery.trim()
+      ? 'Нет нод по запросу «' + stabilityQuery.trim() + '».'
+      : 'Нет нод с выбранными статусами.';
+    counter.textContent = 'показано ' + shown + ' из ' + rows.length;
   }
+
+  // --- поиск по имени ---
+  var box = el('div', 'stability-search');
+  var icon = svgIcon(14, [['circle', { cx: '6.5', cy: '6.5', r: '4.5' }], ['path', { d: 'M10 10l4 4' }]]);
+  icon.setAttribute('class', 'stability-search-icon');
+  var search = el('input');
+  search.type = 'text';
+  search.placeholder = 'поиск ноды';
+  search.setAttribute('aria-label', 'Поиск ноды в статистике доступности');
+  search.value = stabilityQuery;
+  var clear = el('button', 'stability-search-clear');
+  clear.type = 'button';
+  clear.setAttribute('aria-label', 'Очистить поиск');
+  clear.appendChild(svgIcon(12, [['path', { d: 'M3 3l10 10M13 3L3 13' }]]));
+  function syncClear() { clear.hidden = !search.value; }
+  search.addEventListener('input', function () {
+    stabilityQuery = search.value;
+    syncClear();
+    apply();
+  });
+  search.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && search.value) { search.value = ''; search.dispatchEvent(new Event('input')); }
+  });
+  clear.addEventListener('click', function () {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    search.focus();
+  });
+  box.appendChild(icon);
+  box.appendChild(search);
+  box.appendChild(clear);
+  wrap.appendChild(box);
+
+  // --- статусы ---
+  var groups = el('div', 'stability-filter-groups');
   STABILITY_GROUPS.forEach(function (g) {
     var label = el('label', 'stability-filter-item');
     var cb = el('input');
@@ -444,8 +511,11 @@ function buildStabilityFilter(rows, table, emptyHint) {
     label.appendChild(cb);
     label.appendChild(el('span', 'sw ' + g.sw));
     label.appendChild(document.createTextNode(g.label + ' (' + counts[g.key] + ')'));
-    wrap.appendChild(label);
+    groups.appendChild(label);
   });
+  wrap.appendChild(groups);
+  wrap.appendChild(counter);
+  syncClear();
   apply();
   return wrap;
 }
@@ -515,7 +585,8 @@ function buildStabilityTable(rows) {
       var tr = el('tr');
       var group = stabilityGroup(r.status);
       tr.setAttribute('data-group', group);
-      tr.hidden = !stabilityFilter[group];
+      tr.setAttribute('data-name', r.name || '');
+      tr.hidden = !stabilityRowVisible(group, r.name);
       var st = statusLabel(r.status);
       var swTd = el('td');
       swTd.appendChild(el('span', 'sw ' + st.sw));

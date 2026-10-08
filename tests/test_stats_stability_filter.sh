@@ -51,4 +51,24 @@ if command -v node >/dev/null 2>&1; then
   ' "$FILE" || fail "сортировка таблицы доступности работает неверно"
 fi
 
+# Поиск по имени ноды: подстрока без учёта регистра, совмещается с фильтром
+# по статусу; пустой запрос показывает всё.
+grep -q "var stabilityQuery = '';" "$FILE" || fail "запрос поиска должен храниться вне DOM"
+grep -q "Поиск ноды в статистике доступности" "$FILE" || fail "у поля поиска нет aria-label"
+grep -q "\.stability-search" "$CSS" || fail "нет стилей поиска"
+if command -v node >/dev/null 2>&1; then
+  node -e '
+    var src = require("fs").readFileSync(process.argv[1], "utf8");
+    var a = src.indexOf("var STABILITY_GROUPS"), b = src.indexOf("function svgIcon(");
+    if (a < 0 || b < 0) { process.exit(2); }
+    var api = new Function(src.slice(a, b) + "; return { vis: stabilityRowVisible, f: stabilityFilter, set: function (q) { stabilityQuery = q; } };")();
+    var ok = api.vis("alive", "NL Amsterdam 01") === true;
+    api.set("  AMS ");
+    ok = ok && api.vis("alive", "NL Amsterdam 01") === true && api.vis("alive", "DE Frankfurt 03") === false && api.vis("down", null) === false;
+    api.f.alive = false;
+    ok = ok && api.vis("alive", "NL Amsterdam 01") === false;
+    process.exit(ok ? 0 : 1);
+  ' "$FILE" || fail "поиск по имени ноды работает неверно"
+fi
+
 echo "test_stats_stability_filter.sh: OK"

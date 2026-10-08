@@ -359,7 +359,7 @@ export function plural(n, one, few, many) {
   return n + ' ' + w;
 }
 
-// Раскладка конструктора: слева список модулей (номер, название, краткая
+// Раскладка конструктора: слева список модулей (название, краткая
 // сводка, пометка «изменён»), справа содержимое выбранного модуля.
 // add(num, title) добавляет модуль на место по номеру и возвращает
 // {body, summary(текст), changed(bool), select()}.
@@ -384,13 +384,12 @@ export function createLayout(activeNum) {
   function add(num, title) {
     var btn = el('button', 'cx-nitem');
     btn.type = 'button';
-    var badge = el('span', 'cx-bnum', String(num));
     var text = el('span', 'cx-ntext');
     var ttl = el('span', 'cx-btitle', title);
     var sum = el('span', 'cx-bsum', '');
     text.appendChild(ttl); text.appendChild(sum);
     var chg = el('span', 'cx-bchg', 'изменён'); chg.hidden = true;
-    btn.appendChild(badge); btn.appendChild(text); btn.appendChild(chg);
+    btn.appendChild(text); btn.appendChild(chg);
     var panel = el('section', 'cx-panel');
     panel.setAttribute('aria-label', title);
     panel.appendChild(el('h2', null, title));
@@ -432,7 +431,11 @@ function hostOf(url) {
 var CUSTOM_UA = '__custom__';
 
 // Выбор User-Agent: готовые значения, «без заголовка» и свой вариант.
-function uaField(value) {
+// getUrl (необязательно) - откуда взять адрес подписки: тогда рядом кнопка
+// «Определить», которая просит роутер перебрать типичные клиентские UA
+// (/api/constructor/detect-ua, config-tools/detect_ua.sh) и подставляет
+// первый, под которым панель отдаёт clash YAML или список нод.
+export function uaField(value, getUrl) {
   var wrap = el('span', 'cx-ua');
   var sel = el('select');
   sel.setAttribute('aria-label', 'User-Agent');
@@ -441,14 +444,92 @@ function uaField(value) {
   var custom = el('input'); custom.type = 'text'; custom.placeholder = 'User-Agent';
   custom.setAttribute('aria-label', 'Свой User-Agent');
   function sync() { custom.hidden = sel.value !== CUSTOM_UA; }
-  var known = opts.some(function (o) { return o[0] === value; });
-  sel.value = known ? value : CUSTOM_UA;
-  custom.value = known ? '' : value;
+  function set(v) {
+    var known = opts.some(function (o) { return o[0] === v && o[0] !== CUSTOM_UA; });
+    sel.value = known ? v : CUSTOM_UA;
+    custom.value = known ? '' : v;
+    sync();
+  }
   sel.addEventListener('change', function () { sync(); if (!custom.hidden) { custom.focus(); } });
-  sync();
+  set(value);
   wrap.appendChild(sel); wrap.appendChild(custom);
   wrap.value = function () { return sel.value === CUSTOM_UA ? custom.value.trim() : sel.value; };
+  if (getUrl) { addDetect(wrap, getUrl, set); }
   return wrap;
+}
+
+// Кнопка «Определить» и строки результата под полем UA. Запросы идут на
+// роутер: сначала перебор User-Agent (до нескольких минут), потом проверка,
+// отвечают ли ноды выбранным UA (подписка качается ещё раз, ноды проверяет
+// временное ядро); кнопка занята, пока идёт то и другое. Адрес уходит телом
+// POST - ключ доступа не попадает в строку запроса и журналы.
+function addDetect(wrap, getUrl, setUa) {
+  var btn = button('Определить', 'small muted');
+  btn.title = 'Проверить адрес под разными User-Agent, выбрать подходящий и проверить, отвечают ли ноды';
+  var note = el('div', 'hint cx-ua-note');
+  var probe = el('div', 'hint cx-ua-note');
+  note.hidden = true; probe.hidden = true;
+  wrap.appendChild(btn); wrap.appendChild(note); wrap.appendChild(probe);
+
+  function put(node, text, kind) {
+    clear(node);
+    node.className = 'hint cx-ua-note' + (kind ? ' ' + kind : '');
+    node.hidden = !text;
+    if (text) { node.appendChild(document.createTextNode(text)); }
+  }
+  function say(text, kind) { put(note, text, kind); put(probe, '', ''); }
+  function triedList(tried) {
+    var d = el('details');
+    d.appendChild(el('summary', null, 'Что вернула панель'));
+    tried.forEach(function (t) { d.appendChild(el('div', null, t.ua + ' - HTTP ' + t.http + ', ' + t.bytes + ' байт, ' + t.kind)); });
+    note.appendChild(d);
+  }
+  function post(route, body) {
+    return fetchJson(route, { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  }
+
+  // Итог проверки нод: отвечают, сервер отклоняет Reality-клиента Mihomo или не отвечают.
+  function verdict(r) {
+    if (r.verdict === 'alive') {
+      put(probe, 'Ноды отвечают: ' + r.alive + ' из ' + r.tested + (r.total > r.tested ? ' проверенных (в подписке ' + r.total + ')' : '') + '.', 'msg-ok-text');
+    } else if (r.verdict === 'reality_rejected') {
+      put(probe, 'Подписка загружается, но ноды не отвечают: сервер отклоняет подключение Mihomo по REALITY' +
+        (r.mlkem === 'false' ? ' (Mihomo не отправляет X25519MLKEM768, а новые версии Xray его требуют)' : '') +
+        '. Другой User-Agent или отпечаток этого не исправят: те же ноды у клиентов на Xray (например Happ) могут работать, а в Mihomo нет. См. раздел про REALITY в документации.', 'msg-err-text');
+    } else {
+      put(probe, 'Подписка загружается, но ни одна из ' + r.tested + ' нод не ответила (сервер недоступен или режется сетью). Проверка могла попасть на временный сбой: повторите позже.', 'msg-err-text');
+    }
+  }
+
+  btn.addEventListener('click', function () {
+    var url = (getUrl() || '').trim();
+    if (!url) { say('Сначала введите адрес подписки.', 'msg-err-text'); return; }
+    btn.disabled = true; btn.textContent = 'Проверяю...';
+    say('Перебираю User-Agent, это может занять до нескольких минут.', '');
+    post('/api/constructor/detect-ua', url).then(function (d) {
+      var tried = d.tried || [];
+      if (!d.ua) {
+        if (d.reason === 'unreachable') {
+          say('Адрес не открылся: проверьте ссылку и доступ роутера в интернет.', 'msg-err-text');
+        } else {
+          say('Ни один из ' + tried.length + ' User-Agent не дал подходящий формат. Проверьте ссылку или выберите User-Agent вручную.', 'msg-err-text');
+          if (tried.length) { triedList(tried); }
+        }
+        return null;
+      }
+      setUa(d.ua);
+      say(d.quality === 'short'
+        ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
+        : 'Выбран ' + d.ua + ': ' + d.kind + '.', d.quality === 'short' ? '' : 'msg-ok-text');
+      put(probe, 'Проверяю, отвечают ли ноды...', '');
+      // Сбой самой проверки нод не отменяет найденный User-Agent.
+      return post('/api/constructor/probe-nodes', url + '\n' + d.ua).then(verdict, function (err) {
+        put(probe, 'Проверить, отвечают ли ноды, не удалось: ' + errText(err), '');
+      });
+    }, function (err) {
+      say('Не удалось определить: ' + errText(err), 'msg-err-text');
+    }).then(function () { btn.disabled = false; btn.textContent = 'Определить'; });
+  });
 }
 
 // ctx: {layout, mods, model, savedWords, edit(fn), msg(text, kind), redraw(), changed()}.
@@ -461,7 +542,7 @@ export function createModuleCards(ctx) {
   // ----- подписки -----
   var subsBlk = ctx.layout.add(1, 'Подписки'), subsCard = subsBlk.body;
   subsCard.appendChild(el('p', 'hint', 'Ссылки на подписки с нодами. Адрес содержит ключ доступа, поэтому в списке виден только домен. ' +
-    'User-Agent выбирает формат ответа панели: для Mihomo нужен clash-YAML (v2rayNG и clash.meta обычно подходят).'));
+    'User-Agent выбирает формат ответа панели: для Mihomo нужен clash-YAML. Не знаете, какой выбрать, - нажмите «Определить», роутер проверит адрес сам.'));
   var subsHost = el('div');
   subsCard.appendChild(subsHost);
   var editingSub = null;
@@ -483,7 +564,7 @@ export function createModuleCards(ctx) {
     var r = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.value = s.url; url.setAttribute('aria-label', 'Адрес подписки');
     var name = el('input'); name.type = 'text'; name.value = s.name; name.setAttribute('aria-label', 'Имя подписки');
-    var ua = uaField(s.ua);
+    var ua = uaField(s.ua, function () { return url.value; });
     var row = el('div', 'xk-add');
     var ok = button('Сохранить', 'submit'), cancel = button('Отмена', 'submit secondary');
     ok.addEventListener('click', function () {
@@ -508,7 +589,7 @@ export function createModuleCards(ctx) {
     var add = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.placeholder = 'https://...'; url.setAttribute('aria-label', 'Адрес новой подписки');
     var name = el('input'); name.type = 'text'; name.placeholder = 'имя (необязательно)'; name.setAttribute('aria-label', 'Имя подписки');
-    var ua = uaField(UA_PRESETS[0]);
+    var ua = uaField(UA_PRESETS[0], function () { return url.value; });
     var btn = button('Добавить подписку', 'submit');
     btn.addEventListener('click', function () {
       ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value); });

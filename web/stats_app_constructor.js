@@ -153,8 +153,8 @@ export function renderConstructor(modeBar, opts) {
     head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
-    // слева список модулей, справа выбранный (по умолчанию - «Свои прокси»)
-    var layout = createLayout(2);
+    // слева список модулей, справа выбранный (по умолчанию - первый, «Подписки»)
+    var layout = createLayout(1);
     var modCards = createModuleCards({ layout: layout, mods: mods, model: model, savedWords: savedWords, edit: edit, msg: msg,
       redraw: draw, changed: refreshChanges });
 
@@ -491,6 +491,10 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function draw() {
+      // Перерисовка сначала опустошает список: страница на миг укорачивается,
+      // и браузер сбрасывает прокрутку вверх. Держим высоту и позицию.
+      var keepY = window.pageYOffset;
+      svcHost.style.minHeight = svcHost.offsetHeight + 'px';
       modCards.render();
       var services = model.services();
       clear(svcHost);
@@ -542,6 +546,8 @@ export function renderConstructor(modeBar, opts) {
       if (!any) { rows2.appendChild(el('div', 'xk-empty', 'Своих доменов пока нет.')); }
       domHost.appendChild(rows2);
       domHost.appendChild(addDomainRow(services, null));
+      svcHost.style.minHeight = '';
+      if (window.pageYOffset !== keepY) { window.scrollTo(window.pageXOffset, keepY); }
       refreshChanges();
     }
 

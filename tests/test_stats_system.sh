@@ -49,6 +49,17 @@ write(manifest, "RELEASE_VERSION=9\nRELEASE_TAG=v26.10.2\n")
 if mod.system_status(proc=proc, manifest=manifest, cpu_delay=0, sleep=lambda d: None)["release_version"] != "26.10.2":
     fail("версия релиза из RELEASE_TAG")
 
+# Путь манифеста по умолчанию: $DIR/.update (там его пишут install.sh и
+# update_transaction.sh), а не $MIHOMO_DIR/.update - иначе в футере пусто.
+for k in ("INSTALLED_MANIFEST_PATH", "UPDATE_STATE_DIR"):
+    os.environ.pop(k, None)
+os.environ["DIR"] = os.path.join(tmp, "app")
+os.environ["MIHOMO_DIR"] = os.path.join(tmp, "mihomo")
+write(os.path.join(tmp, "app", ".update", "installed-manifest.txt"), "RELEASE_TAG=v7.1\n")
+if mod.system_status(proc=proc, cpu_delay=0, sleep=lambda d: None)["release_version"] != "7.1":
+    fail("манифест по умолчанию должен читаться из $DIR/.update")
+del os.environ["DIR"], os.environ["MIHOMO_DIR"]
+
 # mihomo не запущен; нет манифеста; без MemAvailable берётся MemFree
 os.remove(os.path.join(proc, "42", "comm"))
 write(os.path.join(proc, "meminfo"), "MemTotal: 100000 kB\nMemFree: 50000 kB\n")

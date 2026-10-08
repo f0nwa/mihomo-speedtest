@@ -37,8 +37,10 @@ FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
 FILE|web|web/stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|0755|sh
 FILE|web|web/stats_xkeen.sh|/opt/etc/mihomo-speedtest/stats_xkeen.sh|0755|sh
+FILE|web|web/stats_components.sh|/opt/etc/mihomo-speedtest/stats_components.sh|0755|sh
 FILE|web|web/stats_constructor.sh|/opt/etc/mihomo-speedtest/stats_constructor.sh|0755|sh
 FILE|web|web/stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|0644|py
+FILE|web|web/stats_files.py|/opt/etc/mihomo-speedtest/stats_files.py|0644|py
 FILE|web|web/stats_auth.py|/opt/etc/mihomo-speedtest/stats_auth.py|0644|py
 FILE|web|web/stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|0755|sh
 FILE|web|web/stats_index.html|/opt/etc/mihomo-speedtest/stats_index.html|0644|none
@@ -50,7 +52,9 @@ FILE|web|web/stats_app_settings.js|/opt/etc/mihomo-speedtest/stats_app_settings.
 FILE|web|web/stats_app_updates.js|/opt/etc/mihomo-speedtest/stats_app_updates.js|0644|none
 FILE|web|web/stats_app_log.js|/opt/etc/mihomo-speedtest/stats_app_log.js|0644|none
 FILE|web|web/stats_app_config.js|/opt/etc/mihomo-speedtest/stats_app_config.js|0644|none
+FILE|web|web/stats_app_files.js|/opt/etc/mihomo-speedtest/stats_app_files.js|0644|none
 FILE|web|web/stats_app_xkeen.js|/opt/etc/mihomo-speedtest/stats_app_xkeen.js|0644|none
+FILE|web|web/stats_app_components.js|/opt/etc/mihomo-speedtest/stats_app_components.js|0644|none
 FILE|web|web/stats_app_constructor.js|/opt/etc/mihomo-speedtest/stats_app_constructor.js|0644|none
 FILE|web|web/stats_app_constructor_model.js|/opt/etc/mihomo-speedtest/stats_app_constructor_model.js|0644|none
 FILE|web|web/stats_app_constructor_modules.js|/opt/etc/mihomo-speedtest/stats_app_constructor_modules.js|0644|none

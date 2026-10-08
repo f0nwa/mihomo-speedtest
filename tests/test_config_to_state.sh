@@ -83,6 +83,12 @@ build "$WORK/st/services.tsv" '' '' > "$WORK/c1b.yaml" || fail "сборка с 
 grep -q 'gql.twitch' "$WORK/c1b.yaml" && fail "unrule - не убрал особое правило"
 grep -q 'IMPORTED|del|spotify' "$WORK/report" || fail "в отчёте нет del"
 
+# test_import_fresh_rule_not_unrule: конфиг старше шаблона (нет недавно
+# добавленных доменов) - они не считаются убранными пользователем
+grep -v 'ahc.ovh' "$WORK/c0.yaml" > "$WORK/c1f.yaml"
+import "$WORK/c1f.yaml" || fail "импорт без свежего правила с ошибкой"
+assert_eq "$(cat "$WORK/st/services.tsv")" "" "свежее правило не уходит в unrule"
+
 # test_import_dom_on_default + user rules + prov
 sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,kino.pub,KinoPub\
   - DOMAIN,www.youtube.com,YouTube\
