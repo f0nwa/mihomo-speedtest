@@ -676,6 +676,9 @@ reload_provider() {
 # определён; без external-controller остаётся API_MAIN по умолчанию.
 main_api_init() {
   MAIN_API_OK=0
+  # Ссылка config.yaml на начало прогона: по ней wg_publish_config замечает
+  # переключение профиля (пусто - config.yaml обычный файл).
+  RUN_CONFIG_LINK=$(readlink "$MAIN_CONFIG" 2>/dev/null || true)
   MAIN_CURL_CFG=$WORK/main-api.curl
   ( umask 077; : > "$MAIN_CURL_CFG" ) || { MAIN_CURL_CFG=; return 1; }
   [ -f "$MAIN_CONFIG" ] || return 1
@@ -836,23 +839,44 @@ wg_reload_config() {
     "http://$API_MAIN/configs" >/dev/null 2>&1
 }
 
+# Фактический файл рабочего конфига. config.yaml может быть ссылкой на профиль
+# внутри $MIHOMO_DIR (так переключает профили XKeen UI: config.yaml ->
+# profiles/<имя>.yaml) - тогда правится сам профиль, ссылка не трогается.
+# Правила те же, что у обновлятора (update_prepare.sh:config_path): одна
+# ссылка, цель внутри $MIHOMO_DIR, без "..", "." и цепочек; остальное - отказ.
+# Задаёт WG_CFG (файл) и WG_PROFILE (имя профиля, пусто без ссылки), WG_LINK -
+# текст ссылки для проверки, что профиль не переключили за время прогона.
+wg_config_resolve() {
+  WG_CFG=$MAIN_CONFIG; WG_PROFILE=; WG_LINK=
+  [ -L "$MAIN_CONFIG" ] || {
+    [ -f "$WG_CFG" ] || { say "WARN: Конфиг $MAIN_CONFIG не обычный файл"; return 1; }
+    return 0
+  }
+  WG_LINK=$(readlink "$MAIN_CONFIG") || { say "WARN: Не удалось прочитать ссылку конфига $MAIN_CONFIG"; return 1; }
+  case $WG_LINK in
+    "$MIHOMO_DIR"/*) WG_CFG=$WG_LINK ;;
+    /*|'') say "WARN: Ссылка конфига ведёт за пределы $MIHOMO_DIR: $WG_LINK; WG-победители не применены"; return 1 ;;
+    *) WG_CFG=$MIHOMO_DIR/$WG_LINK ;;
+  esac
+  case ${WG_CFG#"$MIHOMO_DIR"/} in
+    ''|.|..|./*|../*|*/.|*/..|*/./*|*/../*|*//*)
+      say "WARN: Недопустимая цель ссылки конфига: $WG_LINK"; return 1 ;;
+  esac
+  if [ -L "$WG_CFG" ] || [ ! -f "$WG_CFG" ]; then
+    say "WARN: Цель ссылки конфига ($WG_CFG) не обычный файл; цепочки ссылок не поддерживаются"; return 1
+  fi
+  WG_PROFILE=${WG_CFG##*/}; WG_PROFILE=${WG_PROFILE%.yaml}
+  return 0
+}
+
 # Подоболочка ограничивает время жизни блокировки редактора и отката.
 wg_publish_config() (
   [ -f "$FAST_WG_AWK" ] || {
     say "WARN: Нет обработчика WG ($FAST_WG_AWK); переустановите проект"; exit 1;
   }
-  # config.yaml может быть ссылкой (профили XKeen UI): правим её цель, ссылку не трогаем.
-  wg_cfg=$MAIN_CONFIG
-  if [ -L "$wg_cfg" ]; then
-    wg_link=$(readlink "$wg_cfg") || { say "WARN: Не удалось прочитать ссылку конфига $MAIN_CONFIG"; exit 1; }
-    case $wg_link in
-      /*) wg_cfg=$wg_link ;;
-      *) wg_cfg=${MAIN_CONFIG%/*}/$wg_link ;;
-    esac
-  fi
-  [ -f "$wg_cfg" ] && [ ! -L "$wg_cfg" ] || {
-    say "WARN: Конфиг $MAIN_CONFIG не обычный файл (цель: $wg_cfg)"; exit 1;
-  }
+  wg_config_resolve || exit 1
+  wg_cfg=$WG_CFG
+  [ -z "$WG_PROFILE" ] || say "WG: Активный профиль: $WG_PROFILE"
   grep -q '^[ ]*# --- FAST_WG_REF:BEGIN ---' "$wg_cfg" || {
     say "WARN: В конфиге нет блока WG-победителей; обновите конфиг"; exit 1;
   }
@@ -893,6 +917,11 @@ wg_publish_config() (
   fi
   # Чужие изменения без общей блокировки тоже не перезаписываем.
   cmp -s "$wg_cfg" "$WORK/wg-config.old" || exit 1
+  # Профиль переключили, пока шёл прогон: победители относятся к прежнему, а
+  # config.yaml теперь указывает на другой.
+  [ "${RUN_CONFIG_LINK-$WG_LINK}" = "$WG_LINK" ] || {
+    say "WARN: Профиль конфига переключён во время прогона; WG-победители не применены"; exit 1
+  }
   wg_pending=1
   publish_file "$WORK/wg-config.new" "$wg_cfg" || exit 1
   if ! wg_reload_config; then
