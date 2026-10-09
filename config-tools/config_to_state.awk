@@ -81,6 +81,9 @@ function unescape(w,  out, i, c) {
   return out
 }
 function flush_sub() {
+  # type: file подпиской не считается: в состояние не берётся, о нём - в отчёт
+  # (printf, а не rep(): busybox awk требует функцию объявлять до вызова)
+  if (sub_name != "" && sub_name != "fast" && sub_file) printf "REVIEW|file-provider-dropped|%s\n", sub_name > report
   if (sub_name != "" && sub_name != "fast" && !sub_file && sub_url != "")
     subs_out = subs_out sub_url "\t" sub_ua "\t" sub_name "\n"
   sub_name = ""; sub_url = ""; sub_ua = ""; sub_file = 0; in_ua = 0

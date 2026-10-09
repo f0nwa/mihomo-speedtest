@@ -20,7 +20,7 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh rule-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh reset_config.sh rule-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
