@@ -49,6 +49,15 @@ function target(b,  n, f) {
   if (f[n] == "no-resolve" && n > 1) return f[n - 1]
   return f[n]
 }
+# Правило b с целью, заменённой на to ("no-resolve" в конце остаётся).
+function retarget(b, to,  n, f, k, i, out) {
+  n = split(b, f, ",")
+  k = (f[n] == "no-resolve" && n > 1) ? n - 1 : n
+  f[k] = to
+  out = f[1]
+  for (i = 2; i <= n; i++) out = out "," f[i]
+  return out
+}
 function geo_value(line) {
   if (match(line, /exclude-filter: &geofilter '[^']*'/)) {
     line = substr(line, RSTART, RLENGTH)
@@ -194,6 +203,7 @@ BEGIN {
     next
   }
   if (sect == "proxies") {
+    if (line ~ /^  - name:/) { nm = line; sub(/^  - name:/, "", nm); prox_name[unq(body(nm))] = 1 }
     if (line ~ /^  [^ #]/ || line ~ /^    /) prox_out = prox_out line "\n"
     next
   }
@@ -237,7 +247,6 @@ END {
     if ((nm in name_to_id) || (nm in base_group)) continue
     # Группы FAST-WG <нода> (и прежняя MST-FAST-WG) ведёт fast_wg.awk.
     if (nm ~ /^(MST-)?FAST-WG( |$)/) continue
-    if (!gr_select[i]) { rep("REVIEW", "custom-group|" nm); continue }
     # имя идёт и в правила: , # : кавычки и пробелы по краям недопустимы
     if (nm == "" || nm ~ /[,#:'"]/ || nm ~ /^ / || nm ~ / $/) { rep("REVIEW", "custom-group-name|" i); continue }
     id = new_id(nm)
@@ -245,11 +254,29 @@ END {
     cust_out = cust_out "svc\t" id "\t" nm "\tother\n"
     if ((i in gr_icon) && gr_icon[i] ~ /^https?:\/\/[^ "'#]+$/) cust_out = cust_out "icon\t" id "\t" gr_icon[i] "\n"
     else if (i in gr_icon) rep("REVIEW", "custom-group-icon|" nm)
-    n = split(gr_keys[i], f, "\n")
-    for (j = 1; j < n; j++) cust_out = cust_out "gkey\t" id "\t" f[j] "\n"
-    if (i in gr_nested) rep("REVIEW", "custom-group-keys|" nm)
+    if (gr_select[i]) {
+      n = split(gr_keys[i], f, "\n")
+      for (j = 1; j < n; j++) cust_out = cust_out "gkey\t" id "\t" f[j] "\n"
+      if (i in gr_nested) rep("REVIEW", "custom-group-keys|" nm)
+    } else {
+      # Группа без <<: *select-default (url-test, свой proxies: и т.п.):
+      # остаётся группа с тем же именем на общем пуле шаблона. Её type:,
+      # proxies: и прочие ключи не переносятся - они перебили бы select-default.
+      rep("REVIEW", "custom-group-pool|" nm)
+    }
     rep("IMPORTED", "svc|" id)
   }
+  # Допустимые цели правил: группы шаблона, живые встроенные сервисы,
+  # свои сервисы, свои ноды и служебные слова. Правило на любую другую цель
+  # (группу пользователя, которую нельзя перенести, и т.п.) уходит на
+  # запасную цель - иначе собранный конфиг не пройдёт mihomo -t.
+  for (nm in base_group) ok_target[nm] = 1
+  for (i = 1; i <= nds; i++) if (!(ds_id[i] in deleted)) ok_target[ds_name[ds_id[i]]] = 1
+  for (nm in custom_id) ok_target[nm] = 1
+  for (nm in prox_name) ok_target[nm] = 1
+  split("DIRECT REJECT REJECT-DROP PASS COMPATIBLE", kw, " ")
+  for (i = 1; i in kw; i++) ok_target[kw[i]] = 1
+  fallback = (("🚀 Авто по пингу") in base_group) ? "🚀 Авто по пингу" : "DIRECT"
   # Правила.
   for (i = 1; i <= nrules; i++) {
     b = cfg_rule[i]
@@ -272,6 +299,10 @@ END {
       src_out = src_out "src\t" id "\t" pn "\t" kind "\t" url "\n"
       prov_done[f[2]] = 1
       continue
+    }
+    if (n >= 2 && !(tg in ok_target) && tg !~ /^(MST-)?FAST-WG( |$)/) {
+      b = retarget(b, fallback)
+      rep("REVIEW", "rule-retargeted|" i)
     }
     user_out = user_out b "\n"
     carry_provs(b)
