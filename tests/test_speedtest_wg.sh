@@ -161,6 +161,40 @@ grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "медленная WG �
 : > "$WORK/res.txt"; : > "$T/put"
 wg_publish_fast 1000000
 [ ! -s "$T/put" ] || fail "без результатов состав изменён"
+
+# config.yaml - ссылка на профиль (XKeen UI): правится цель, ссылка остаётся
+mkdir -p "$T/profiles"
+cp "$MAIN_CONFIG" "$T/profiles/p1.yaml"
+sed -i "s/^proxies: \['Other WG'\]//" "$T/profiles/p1.yaml"
+REAL_CONFIG=$MAIN_CONFIG
+MAIN_CONFIG=$T/link.yaml
+ln -s profiles/p1.yaml "$MAIN_CONFIG"
+main_api_init || true
+printf '2000000 n0002\n3000000 n0003\n' > "$WORK/res.txt"
+: > "$RUN_LOG"; wg_publish_fast 1000000
+[ -L "$MAIN_CONFIG" ] || fail "ссылка конфига заменена файлом"
+grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$T/profiles/p1.yaml" || fail "победители не записаны в цель ссылки"
+grep -qF "Активный профиль: p1" "$RUN_LOG" || fail "профиль не определён"
+# профиль переключили во время прогона - ничего не пишем
+cp "$T/profiles/p1.yaml" "$T/profiles/p2.yaml"
+sed -i "s/'Blanc_NL_AMS_1', //" "$T/profiles/p2.yaml"
+cp "$T/profiles/p2.yaml" "$T/p2.before"
+rm "$MAIN_CONFIG"; ln -s profiles/p2.yaml "$MAIN_CONFIG"
+: > "$RUN_LOG"; wg_publish_fast 1000000
+grep -qF "переключён" "$RUN_LOG" || fail "переключение профиля не замечено"
+cmp -s "$T/profiles/p2.yaml" "$T/p2.before" || fail "записан не тот профиль"
+# цель вне каталога Mihomo, с .. и цепочка - отказ
+for bad in /etc/passwd ../outside.yaml profiles/../profiles/p1.yaml; do
+  rm "$MAIN_CONFIG"; ln -s "$bad" "$MAIN_CONFIG"; main_api_init || true
+  : > "$RUN_LOG"; wg_publish_fast 1000000
+  grep -q WARN "$RUN_LOG" || fail "ссылка $bad принята"
+done
+ln -s p1.yaml "$T/profiles/chain.yaml"
+rm "$MAIN_CONFIG"; ln -s profiles/chain.yaml "$MAIN_CONFIG"; main_api_init || true
+: > "$RUN_LOG"; wg_publish_fast 1000000
+grep -qF "цепочки" "$RUN_LOG" || fail "цепочка ссылок принята"
+rm "$MAIN_CONFIG"; RUN_CONFIG_LINK=
+MAIN_CONFIG=$REAL_CONFIG
 unset -f curl
 
 # --- main(): пул только из WG - второе ядро не запускается, замер через
