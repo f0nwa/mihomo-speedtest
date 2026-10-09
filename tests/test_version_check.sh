@@ -88,7 +88,82 @@ chmod +x "$FAKEBIN/pidof"
 
 assert_eq "$(PATH="$FAKEBIN:$PATH" xkeen_version)" "2.0" "xkeen_version"
 assert_eq "$(PATH="$FAKEBIN:$PATH" mihomo_version)" "1.19.29" "mihomo_version"
-assert_eq "$(PATH="$FAKEBIN:$PATH" keeneticos_version)" "5.1.4" "keeneticos_version (пропускает пустое поле version)"
+assert_eq "$(PATH="$FAKEBIN:$PATH" keeneticos_version)" "5.1.4" "keeneticos_version (старый формат ndm.core.version)"
+
+# Реальный вывод `ndmc -c "show version"` (сокращён): строк со словом
+# "version" несколько, и берётся не первая попавшаяся.
+ndmc_version_of() {
+  FAKEBINK=$(mktemp -d)
+  { printf '#!/bin/sh\ncat <<'"'"'EOF3'"'"'\n'; cat; printf 'EOF3\n'; } > "$FAKEBINK/ndmc"
+  chmod +x "$FAKEBINK/ndmc"
+  PATH="$FAKEBINK:$PATH" keeneticos_version
+  rm -rf "$FAKEBINK"
+}
+
+# KN-3811, preview: ndw4 version "5.1.C.4.1" раньше давало "5.1".
+got=$(ndmc_version_of <<'EOF2'
+          release: 5.01.C.4.0-1
+          sandbox: preview
+            title: 5.1.4
+             arch: aarch64
+              ndw:
+             features: dual_image,usb_3_conf
+             ndw4:
+              version: 5.1.C.4.1
+     manufacturer: Keenetic Ltd.
+EOF2
+)
+assert_eq "$got" "5.1.4" "keeneticos_version (KN-3811, preview: title 5.1.4, ndw4 5.1.C.4.1)"
+
+# KN-1011, stable: ndw3 version "5.1.17" раньше принималось за версию ОС.
+got=$(ndmc_version_of <<'EOF2'
+          release: 5.01.C.6.0-1
+          sandbox: stable
+            title: 5.1.6
+             arch: mips
+             ndw3:
+              version: 5.1.17
+
+             ndw4:
+              version: 5.1.C.6.0
+EOF2
+)
+assert_eq "$got" "5.1.6" "keeneticos_version (KN-1011, stable: title 5.1.6, ndw3 5.1.17)"
+
+# Нет title: версия собирается из release.
+got=$(ndmc_version_of <<'EOF2'
+          release: 5.01.C.4.0-1
+             ndw3:
+              version: 5.1.17
+EOF2
+)
+assert_eq "$got" "5.1.4" "keeneticos_version (без title - из release)"
+
+# Нет title и release: версия собирается из блока ndw4.
+got=$(ndmc_version_of <<'EOF2'
+             ndw3:
+              version: 5.1.17
+             ndw4:
+              version: 5.1.C.6.0
+EOF2
+)
+assert_eq "$got" "5.1.6" "keeneticos_version (только ndw4)"
+
+# title без патча ("5.1") неполный - предпочитаем release.
+got=$(ndmc_version_of <<'EOF2'
+          release: 5.01.C.4.0-1
+            title: 5.1
+EOF2
+)
+assert_eq "$got" "5.1.4" "keeneticos_version (неполный title - из release)"
+
+# Ничего не распознано - пустой вывод, check_versions отклонит.
+got=$(ndmc_version_of <<'EOF2'
+             ndw3:
+              version: (unassigned)
+EOF2
+)
+assert_eq "$got" "" "keeneticos_version (нет данных)"
 
 MIN_XKEEN_VERSION=2.0 MIN_MIHOMO_VERSION=1.19.29 MIN_KEENETICOS_VERSION=5.1.4 \
   PATH="$FAKEBIN:$PATH" assert_ok check_versions
