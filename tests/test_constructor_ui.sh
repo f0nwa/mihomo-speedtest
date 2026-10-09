@@ -86,6 +86,15 @@ grep -q "model.changes(initial)" "$UI" || fail "блоки не помечают
 # режим по умолчанию - YAML (иначе каждый переход по вкладкам спрашивал бы подтверждение)
 grep -q "=== 'constructor' ? 'constructor' : 'yaml'" "$CFG" || fail "по умолчанию должен открываться YAML"
 
+# замена шаблоном (подписки и ноды остаются) и баннер при непроходящем конфиге
+grep -q '/api/constructor/reset-preview' "$CFG" || fail "нет предпросмотра замены шаблоном"
+grep -q '/api/constructor/reset?base=' "$CFG" || fail "замена шаблоном применяется без base"
+grep -q 'Заменить шаблоном' "$CFG" || fail "нет пункта «Заменить шаблоном»"
+grep -q 'function resetFromTemplate' "$CFG" || fail "нет resetFromTemplate()"
+grep -q 'nothing_to_keep' "$CFG" || fail "нет сообщения «нечего переносить»"
+grep -q "postText('/api/config/check'" "$CFG" || fail "баннер: нет автоматической проверки при открытии"
+grep -q 'config-broken' "$CFG" || fail "нет баннера config-broken"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
