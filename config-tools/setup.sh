@@ -110,6 +110,13 @@ collect_subscriptions() {
       if [ -z "$url" ]; then
         if [ "$n" -gt 0 ]; then break; fi
         if [ "$read_eof" = 0 ]; then SETUP_SKIPPED=1; break; fi
+        # Ввода нет вовсе (curl | sh без терминала). Конфига ещё нет - мягкий
+        # режим: конфиг без нод, подписку добавят в веб-интерфейсе. Конфиг уже
+        # есть - молчаливый пропуск заменил бы его пустым, поэтому отказ.
+        if [ ! -f "$CONFIG" ]; then
+          ui_warn "Ввода нет: подписка не указана, конфиг будет собран без нод (подписку можно добавить в веб-интерфейсе)"
+          SETUP_SKIPPED=1; break
+        fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 3 ]; then
           ui_fail "Нужна хотя бы одна ссылка на подписку"
@@ -397,16 +404,33 @@ main() {
     rm -f "$subs_file"
 
     if [ ! -s "$specs_file" ]; then
-      ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+      # Конфига ещё нет: вместо отказа предлагаем собрать его без нод и
+      # продолжить установку (веб-интерфейс поднимется, подписку добавят
+      # оттуда). Конфиг уже есть - его не заменяем пустым, отказ как раньше.
+      soft_ans=n
+      if [ ! -f "$CONFIG" ]; then
+        ui_warn "Ни одна подписка не прошла проверку"
+        ui_ask "Собрать конфиг без нод и продолжить установку (подписку добавите в веб-интерфейсе)? [Y/n]"
+        read -r soft_ans || soft_ans=""
+      fi
+      case "$soft_ans" in
+        [Nn]*)
+          ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+          rm -f "$specs_file"
+          return 1
+          ;;
+      esac
+      no_nodes=1
+      ui_ok "Конфиг будет собран без нод, ядро не запустится"
+      ui_step 3 4 "Имена провайдеров"
+      ui_ok "Не нужны"
+    else
+      ui_step 3 4 "Имена провайдеров"
+      named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
+      assign_provider_names "$specs_file" > "$named_file"
       rm -f "$specs_file"
-      return 1
+      specs_file=$named_file
     fi
-
-    ui_step 3 4 "Имена провайдеров"
-    named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
-    assign_provider_names "$specs_file" > "$named_file"
-    rm -f "$specs_file"
-    specs_file=$named_file
   fi
 
   ui_step 4 4 "Конфиг"
