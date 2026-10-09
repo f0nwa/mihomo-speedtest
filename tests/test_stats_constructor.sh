@@ -29,7 +29,7 @@ chmod +x "$TMP/bin/mihomo" "$TMP/bin/xkeen" "$TMP/bin/pidof"
 echo up > "$TMP/state"
 for f in config-tools/config.example.yaml config-tools/services.default.tsv config-tools/render_services.awk \
          config-tools/config_to_state.awk config-tools/constructor_build.sh config-tools/migrate_config.sh \
-         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/rule-catalog.tsv config-tools/wg_import.awk config-tools/detect_ua.sh speedtest-runtime/sub_convert.awk web/stats_config.sh; do
+         config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/reset_config.sh config-tools/rule-catalog.tsv config-tools/wg_import.awk config-tools/detect_ua.sh speedtest-runtime/sub_convert.awk web/stats_config.sh; do
   cp "$ROOT/$f" "$D/"
 done
 cp "$D/config.example.yaml" "$M/config.yaml"
@@ -446,5 +446,71 @@ assert_contains 'Status: 500' "$(printf 'https://a.test/1\nUA\n' | BIN="$TMP/noc
 # временное ядро не остаётся запущенным
 sleep 1
 ! pgrep -f "$TMP/fakecore" > /dev/null 2>&1 || fail "17: временное ядро осталось запущенным"
+
+# --- 18: замена шаблоном (reset-preview / reset): остаются подписки и ноды
+cat > "$TMP/old18.yaml" <<'Y'
+secret: topsecret
+proxy-providers:
+  blancvpn:
+    type: http
+    url: "https://sub.example/AAA"
+proxies:
+  - name: node1
+    type: ss
+    server: 1.2.3.4
+    port: 1
+    cipher: aes-128-gcm
+    password: p1
+proxy-groups:
+  - name: FaceTime
+    type: url-test
+rules:
+  - DOMAIN-SUFFIX,facetime.apple.com,FaceTime
+  - MATCH,Ghost
+Y
+cp "$TMP/old18.yaml" "$M/config.yaml"
+rm -rf "$ST" "$M/config-backups"
+out=$(cgi reset-preview POST '' </dev/null)
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["kept"]["subscriptions"]')" = 1 ] || fail "18: kept subscriptions"
+[ "$(printf '%s' "$out" | jget '["kept"]["nodes"]')" = 1 ] || fail "18: kept nodes"
+txt=$(printf '%s' "$out" | jget '["text"]')
+assert_contains 'https://sub.example/AAA' "$txt"
+assert_not_contains 'topsecret' "$txt"
+assert_not_contains 'FaceTime' "$txt"
+[ "$(printf '%s' "$out" | jget '["check"]["ok"]')" = True ] || fail "18: check"
+cmp -s "$TMP/old18.yaml" "$M/config.yaml" || fail "18: preview изменил config.yaml"
+[ ! -d "$ST" ] || fail "18: preview создал состояние"
+# применение: бэкап, новый конфиг, состояние только из подписок и нод
+out=$(cgi reset POST '' </dev/null)
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["ok"]')" = True ] || fail "18: reset ok: $out"
+grep -q 'https://sub.example/AAA' "$M/config.yaml" || fail "18: подписка потеряна"
+grep -q 'topsecret' "$M/config.yaml" && fail "18: secret старого конфига остался"
+grep -q 'FaceTime' "$M/config.yaml" && fail "18: чужая группа осталась"
+bk=$(printf '%s' "$out" | jget '["backup"]')
+cmp -s "$TMP/old18.yaml" "$M/config-backups/$bk" || fail "18: бэкап не равен прежнему конфигу"
+[ -f "$ST/subscriptions.tsv" ] && [ -f "$ST/proxies.yaml" ] && [ -f "$ST/managed.sig" ] || fail "18: состояние не сохранено"
+[ ! -s "$ST/services.tsv" ] || fail "18: services.tsv должен быть пустым"
+# mihomo -t не принял кандидата - конфиг не тронут, состояние не меняется
+sed 's#sub.example/AAA#sub.example/BROKEN#' "$TMP/old18.yaml" > "$M/config.yaml"
+cp "$M/config.yaml" "$TMP/broken18.yaml"
+out=$(cgi reset POST '' </dev/null)
+assert_contains 'Status: 422' "$out"
+assert_contains 'check_failed' "$out"
+cmp -s "$TMP/broken18.yaml" "$M/config.yaml" || fail "18: config.yaml изменён при отказе mihomo -t"
+# ни подписок, ни нод - отказ
+printf 'log-level: info\nrules:\n  - MATCH,DIRECT\n' > "$M/config.yaml"
+out=$(cgi reset-preview POST '' </dev/null)
+assert_contains 'Status: 422' "$out"
+assert_contains 'nothing_to_keep' "$out"
+out=$(cgi reset POST '' </dev/null)
+assert_contains 'nothing_to_keep' "$out"
+# нет конфига - 404
+rm -f "$M/config.yaml"
+assert_contains 'Status: 404' "$(cgi reset-preview POST '' </dev/null)"
+assert_contains 'no_config' "$(cgi reset POST '' </dev/null)"
+# GET не разрешён
+assert_contains 'Status: 405' "$(cgi reset GET '' </dev/null)"
 
 echo "test_stats_constructor.sh: OK"
