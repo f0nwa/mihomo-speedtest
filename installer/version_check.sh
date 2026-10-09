@@ -84,8 +84,46 @@ mihomo_version() {
     }'
 }
 
+# Версию KeeneticOS берём не из любой строки со словом "version" - в выводе
+# `ndmc -c show version` их несколько, и это разные версии (ndw3: 5.1.17 -
+# версия компонента, ndw4: 5.1.C.4.1 - сборка с буквой канала). Источники
+# по убыванию надёжности:
+#   1. title: 5.1.4                  - человекочитаемая версия прошивки;
+#   2. release: 5.01.C.4.0-1         - N.NN.<канал>.<патч>.<сборка>-<ревизия>;
+#   3. ndw4 -> version: 5.1.C.6.0    - тот же шаблон, только внутри блока ndw4;
+#   4. ndm.core.version: "5.1.4 ..." - старый формат вывода.
+# title без патч-сегмента (например "5.1" у предрелизной сборки) считается
+# неполным, и тогда берётся версия, собранная из release/ndw4. Пример
+# вывода обоих форматов - в tests/test_version_check.sh.
 keeneticos_version() {
-  ndmc -c show version 2>/dev/null | grep -F 'version' | grep -oE '[0-9]+\.[0-9.]*[0-9]' | head -1
+  ndmc -c show version 2>/dev/null | awk '
+    function from_build(s,    t, a) {
+      # "5.01.C.4.0-1" / "5.1.C.6.0" -> "5.1.4" / "5.1.6"
+      if (!match(s, /[0-9]+\.[0-9]+\.[A-Za-z]+\.[0-9]+/)) return ""
+      split(substr(s, RSTART, RLENGTH), a, ".")
+      return (a[1] + 0) "." (a[2] + 0) "." (a[4] + 0)
+    }
+    function plain(s) {
+      return match(s, /[0-9]+(\.[0-9]+)+/) ? substr(s, RSTART, RLENGTH) : ""
+    }
+    function value(s) {
+      sub(/^[ \t]*[^:]*:[ \t]*"?/, "", s)
+      return s
+    }
+    { sub(/\r$/, "") }
+    /^[ \t]*[A-Za-z0-9_.]+:[ \t]*$/ { blk = $0; gsub(/[ \t:]/, "", blk); next }
+    /^[ \t]*title:/   { title = plain(value($0)); next }
+    /^[ \t]*release:/ { rel = from_build(value($0)); next }
+    /^[ \t]*version:/ && blk == "ndw4" { ndw4 = from_build(value($0)); next }
+    /^[ \t]*ndm\.core\.version:/ { legacy = plain(value($0)); next }
+    END {
+      if (split(title, p, ".") >= 3) r = title
+      else if (rel != "")            r = rel
+      else if (ndw4 != "")           r = ndw4
+      else if (title != "")          r = title
+      else                           r = legacy
+      if (r != "") print r
+    }'
 }
 
 xkeen_ui_dns_protection_active() {
