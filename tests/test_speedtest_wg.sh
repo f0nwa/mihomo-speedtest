@@ -161,6 +161,19 @@ grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "медленная WG �
 : > "$WORK/res.txt"; : > "$T/put"
 wg_publish_fast 1000000
 [ ! -s "$T/put" ] || fail "без результатов состав изменён"
+
+# config.yaml - ссылка на профиль (XKeen UI): правится цель, ссылка остаётся
+mkdir -p "$T/profiles"
+cp "$MAIN_CONFIG" "$T/profiles/p1.yaml"
+sed -i "s/^proxies: \['Other WG'\]//" "$T/profiles/p1.yaml"
+REAL_CONFIG=$MAIN_CONFIG
+MAIN_CONFIG=$T/link.yaml
+ln -s profiles/p1.yaml "$MAIN_CONFIG"
+printf '2000000 n0002\n3000000 n0003\n' > "$WORK/res.txt"
+wg_publish_fast 1000000
+[ -L "$MAIN_CONFIG" ] || fail "ссылка конфига заменена файлом"
+grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$T/profiles/p1.yaml" || fail "победители не записаны в цель ссылки"
+MAIN_CONFIG=$REAL_CONFIG
 unset -f curl
 
 # --- main(): пул только из WG - второе ядро не запускается, замер через

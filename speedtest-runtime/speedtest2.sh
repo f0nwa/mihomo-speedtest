@@ -838,10 +838,22 @@ wg_reload_config() {
 
 # Подоболочка ограничивает время жизни блокировки редактора и отката.
 wg_publish_config() (
-  [ -f "$FAST_WG_AWK" ] && [ -f "$MAIN_CONFIG" ] && [ ! -L "$MAIN_CONFIG" ] || {
-    say "WARN: Нет обработчика WG или обычного файла конфига"; exit 1;
+  [ -f "$FAST_WG_AWK" ] || {
+    say "WARN: Нет обработчика WG ($FAST_WG_AWK); переустановите проект"; exit 1;
   }
-  grep -q '^[ ]*# --- FAST_WG_REF:BEGIN ---' "$MAIN_CONFIG" || {
+  # config.yaml может быть ссылкой (профили XKeen UI): правим её цель, ссылку не трогаем.
+  wg_cfg=$MAIN_CONFIG
+  if [ -L "$wg_cfg" ]; then
+    wg_link=$(readlink "$wg_cfg") || { say "WARN: Не удалось прочитать ссылку конфига $MAIN_CONFIG"; exit 1; }
+    case $wg_link in
+      /*) wg_cfg=$wg_link ;;
+      *) wg_cfg=${MAIN_CONFIG%/*}/$wg_link ;;
+    esac
+  fi
+  [ -f "$wg_cfg" ] && [ ! -L "$wg_cfg" ] || {
+    say "WARN: Конфиг $MAIN_CONFIG не обычный файл (цель: $wg_cfg)"; exit 1;
+  }
+  grep -q '^[ ]*# --- FAST_WG_REF:BEGIN ---' "$wg_cfg" || {
     say "WARN: В конфиге нет блока WG-победителей; обновите конфиг"; exit 1;
   }
   if ! mkdir "$CONFIGEDIT_LOCK" 2>/dev/null; then
@@ -850,7 +862,7 @@ wg_publish_config() (
   wg_pending=0
   wg_config_cleanup() {
     if [ "$wg_pending" = 1 ]; then
-      if publish_file "$WORK/wg-config.old" "$MAIN_CONFIG"; then
+      if publish_file "$WORK/wg-config.old" "$wg_cfg"; then
         wg_reload_config || say "WARN: Прежний конфиг восстановлен на диске, но API не подтвердил его применение"
       else
         say "WARN: Не удалось восстановить прежний конфиг после ошибки применения"
@@ -863,8 +875,8 @@ wg_publish_config() (
   trap 'exit 130' INT
   trap 'exit 143' TERM HUP
   echo $$ > "$CONFIGEDIT_LOCK/pid" || exit 1
-  cp -p "$MAIN_CONFIG" "$WORK/wg-config.old" || exit 1
-  cp -p "$MAIN_CONFIG" "$WORK/wg-config.new" || exit 1
+  cp -p "$wg_cfg" "$WORK/wg-config.old" || exit 1
+  cp -p "$wg_cfg" "$WORK/wg-config.new" || exit 1
   : > "$WORK/wg-winners" || exit 1
   : > "$WORK/wg-tested" || exit 1
   awk -F '\t' -v results="$WORK/res.txt" -v min="$1" \
@@ -880,9 +892,9 @@ wg_publish_config() (
     say "WARN: Конфиг с WG-победителями не прошёл проверку; прежний сохранён"; exit 1
   fi
   # Чужие изменения без общей блокировки тоже не перезаписываем.
-  cmp -s "$MAIN_CONFIG" "$WORK/wg-config.old" || exit 1
+  cmp -s "$wg_cfg" "$WORK/wg-config.old" || exit 1
   wg_pending=1
-  publish_file "$WORK/wg-config.new" "$MAIN_CONFIG" || exit 1
+  publish_file "$WORK/wg-config.new" "$wg_cfg" || exit 1
   if ! wg_reload_config; then
     say "WARN: API не применил WG-победителей; восстанавливаю прежний конфиг"; exit 1
   fi
