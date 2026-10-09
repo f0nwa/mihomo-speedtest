@@ -104,14 +104,6 @@ read_state_body() {
   [ "$rc" = 0 ] || fail_json 400 bad_body "Тело должно состоять из блоков ### MST-STATE с файлами: $STATE_FILES"
 }
 
-# Замена состояния прервалась между двумя mv (осталась только копия .old) -
-# вернуть её на место. Вызывается перед чтением и перед записью.
-recover_state() {
-  if [ ! -d "$CONFIG_STATE_DIR" ] && [ -d "$CONFIG_STATE_DIR.old" ]; then
-    mv "$CONFIG_STATE_DIR.old" "$CONFIG_STATE_DIR" 2>/dev/null || true
-  fi
-}
-
 # Список нод, которые спидтест не проверяет (BLOCK в speedtest2.env), -
 # тот же фильтр, что exclude-filter подписок: слова из geofilter.txt нового
 # состояния, а без него - слова шаблона. Единственное место правки фильтра -
@@ -138,29 +130,11 @@ sync_block() {
   fi
 }
 
-# Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR: собирается в
-# соседнем .new и меняется местами, managed.sig - от нового config.yaml.
-# Любой сбой - WARN в журнал: конфиг уже применён, ответ должен уйти.
+# Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
+# stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
   [ -n "${NEW_STATE:-}" ] || return 0
-  recover_state
-  ns=$CONFIG_STATE_DIR.new
-  rm -rf "$ns" "$CONFIG_STATE_DIR.old" 2>/dev/null || true
-  if mkdir -p "$ns" && { [ -z "$(ls "$NEW_STATE")" ] || cp -p "$NEW_STATE"/* "$ns"/; } &&
-      { [ -f "$ns/services.tsv" ] || : > "$ns/services.tsv"; } &&
-      managed_sig "$(config_target)" > "$ns/managed.sig"; then
-    if [ ! -d "$CONFIG_STATE_DIR" ] || mv "$CONFIG_STATE_DIR" "$CONFIG_STATE_DIR.old"; then
-      if mv "$ns" "$CONFIG_STATE_DIR"; then
-        rm -rf "$CONFIG_STATE_DIR.old" 2>/dev/null || true
-        alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
-        sync_block
-        return 0
-      fi
-      recover_state
-    fi
-  fi
-  rm -rf "$ns" 2>/dev/null || true
-  alog "WARN: конфиг применён, но состояние конструктора не сохранилось ($CONFIG_STATE_DIR)"
+  if persist_state "$NEW_STATE"; then sync_block; fi
   return 0
 }
 

@@ -318,6 +318,37 @@ assert_contains 'tail-key: 1' "$(printf '%s' "$out" | jget '["text"]')"
 out=$(printf '### MST-WG x\n%s\n' "$WGC" | cgi import-wg POST '')
 assert_contains 'bad_body' "$out"
 
+# --- 14: «Миграция к шаблону» (save?schema=N) без состояния конструктора
+# сохраняет состояние: иначе конструктор при каждом открытии заново
+# выводит его из config.yaml и показывает те же «Убрать сервис…» как правки
+D2=$TMP/dir2; mkdir -p "$D2"
+for f in constructor_build.sh config.example.yaml services.default.tsv render_services.awk config_to_state.awk migrate_config.sh migrate_config.awk fast_wg.awk; do
+  cp "$ROOT/config-tools/$f" "$D2/$f"
+done
+printf 'proxy-providers:\n  sub1:\n    type: http\n    url: "https://sub.example/T"\nproxies: []\n' > "$TMP/src14.yaml"
+sh "$D2/constructor_build.sh" --import --source "$TMP/src14.yaml" --output "$TMP/mig14.yaml" --report "$TMP/mig14.report" >/dev/null 2>&1 || fail "14: сборка миграции"
+cgi14() { ( export DIR=$D2 CONFIG_STATE_DIR=$TMP/cstate14; cgi "$@" ); }
+base=$(cgi14 read GET '' </dev/null | jget '["base"]')
+# без ?schema состояние не создаётся
+out=$(cgi14 save POST "base=$base" < "$TMP/mig14.yaml")
+assert_contains 'Status: 200' "$out"
+[ ! -e "$TMP/cstate14/services.tsv" ] || fail "14: состояние создано обычным save"
+# с ?schema состояние и managed.sig сохраняются
+base=$(cgi14 read GET '' </dev/null | jget '["base"]')
+out=$(cgi14 save POST "base=$base&schema=1" < "$TMP/mig14.yaml")
+assert_contains 'Status: 200' "$out"
+[ -f "$TMP/cstate14/services.tsv" ] || fail "14: состояние не сохранено после миграции"
+[ -f "$TMP/cstate14/managed.sig" ] || fail "14: нет managed.sig"
+[ -f "$TMP/cstate14/subscriptions.tsv" ] || fail "14: подписки не в состоянии"
+# текст, который сборка из состояния не воспроизводит (комментарий в rules:),
+# состояние не создаёт
+rm -rf "$TMP/cstate14"
+awk '{print} /^rules:/ && !d {print "  # заметка пользователя"; d=1}' "$TMP/mig14.yaml" > "$TMP/mig14b.yaml"
+base=$(cgi14 read GET '' </dev/null | jget '["base"]')
+out=$(cgi14 save POST "base=$base&schema=1" < "$TMP/mig14b.yaml")
+assert_contains 'Status: 200' "$out"
+[ ! -e "$TMP/cstate14/services.tsv" ] || fail "14: состояние создано для не воспроизводимого текста"
+
 # --- lib: подключение без действия
 out=$(MST_CONFIG_LIB=1 sh -c '. "$1"; type reply >/dev/null && type jstr_file >/dev/null && echo LOADED' _ "$SCRIPT")
 [ "$out" = LOADED ] || fail "lib: $out"

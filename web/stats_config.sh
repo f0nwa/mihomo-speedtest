@@ -52,6 +52,8 @@ FAST_WG_AWK=${FAST_WG_AWK:-$DIR/fast_wg.awk}
 # Конструктор конфига: сборка шаблона с состоянием пользователя (свои
 # сервисы, домены, фильтр нод) - см. config-tools/constructor_build.sh.
 CONSTRUCTOR_BUILD=${CONSTRUCTOR_BUILD:-$DIR/constructor_build.sh}
+CONSTRUCTOR_DEFAULTS=${CONSTRUCTOR_DEFAULTS:-$DIR/services.default.tsv}
+CONFIG_TO_STATE_AWK=${CONFIG_TO_STATE_AWK:-$DIR/config_to_state.awk}
 CONFIG_STATE_DIR=${CONFIG_STATE_DIR:-$DIR/config-state}
 # Схема конфига: доступная - CONFIG_SCHEMA_VERSION установленного релиза,
 # применённая - config-schema-version (её пишет save мигрированного текста,
@@ -405,6 +407,58 @@ state_matches() {
     [ "$(cat "$CONFIG_STATE_DIR/managed.sig")" = "$(managed_sig "$1")" ]
 }
 
+# Замена состояния прервалась между двумя mv (осталась только копия .old) -
+# вернуть её на место. Вызывается перед чтением и перед записью.
+recover_state() {
+  if [ ! -d "$CONFIG_STATE_DIR" ] && [ -d "$CONFIG_STATE_DIR.old" ]; then
+    mv "$CONFIG_STATE_DIR.old" "$CONFIG_STATE_DIR" 2>/dev/null || true
+  fi
+}
+
+# Состояние конструктора из каталога $1 - на место $CONFIG_STATE_DIR:
+# собирается в соседнем .new и меняется местами, managed.sig - от нового
+# config.yaml. 0 - сохранено; сбой - WARN в журнал и 1: конфиг уже применён,
+# ответ должен уйти.
+persist_state() {
+  recover_state
+  ps_new=$CONFIG_STATE_DIR.new
+  rm -rf "$ps_new" "$CONFIG_STATE_DIR.old" 2>/dev/null || true
+  if mkdir -p "$ps_new" && { [ -z "$(ls "$1")" ] || cp -p "$1"/* "$ps_new"/; } &&
+      { [ -f "$ps_new/services.tsv" ] || : > "$ps_new/services.tsv"; } &&
+      managed_sig "$(config_target)" > "$ps_new/managed.sig"; then
+    if [ ! -d "$CONFIG_STATE_DIR" ] || mv "$CONFIG_STATE_DIR" "$CONFIG_STATE_DIR.old"; then
+      if mv "$ps_new" "$CONFIG_STATE_DIR"; then
+        rm -rf "$CONFIG_STATE_DIR.old" 2>/dev/null || true
+        alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
+        return 0
+      fi
+      recover_state
+    fi
+  fi
+  rm -rf "$ps_new" 2>/dev/null || true
+  alog "WARN: конфиг применён, но состояние конструктора не сохранилось ($CONFIG_STATE_DIR)"
+  return 1
+}
+
+# Состояния ещё нет, а текст получен «Миграцией к шаблону» (?schema=N):
+# состояние выводится из применённого config.yaml и сохраняется, если сборка
+# из него воспроизводит управляемые разделы. Иначе конструктор при каждом
+# открытии заново выводил бы его из config.yaml и показывал те же правки
+# («Убрать сервис …») несохранёнными.
+adopt_imported_state() {
+  [ -n "$(query_param schema)" ] || return 0
+  [ -f "$CONSTRUCTOR_BUILD" ] && [ -f "$CONFIG_TO_STATE_AWK" ] && [ -f "$CONSTRUCTOR_DEFAULTS" ] || return 0
+  ai_t=$(config_target) || return 0
+  ai_dir=$WORK/adopt
+  rm -rf "$ai_dir"; mkdir "$ai_dir" || return 0
+  awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$ai_dir" \
+      -v report="$WORK/adopt.report" -f "$CONFIG_TO_STATE_AWK" "$ai_t" > /dev/null 2>&1 || return 0
+  sh "$CONSTRUCTOR_BUILD" --state "$ai_dir" --source "$ai_t" --output "$WORK/adopt.yaml" \
+    --report "$WORK/adopt.build.report" > /dev/null 2>&1 || return 0
+  [ "$(managed_sig "$ai_t")" = "$(managed_sig "$WORK/adopt.yaml")" ] || return 0
+  persist_state "$ai_dir" || return 0
+}
+
 # Вызывается после каждого успешного применения (в том числе "не
 # изменился"), рядом с record_schema. По умолчанию: если состояние
 # конструктора есть и применённый config.yaml совпадает со сборкой из него
@@ -412,7 +466,8 @@ state_matches() {
 # конструктор считал бы такую миграцию ручной правкой. stats_constructor.sh
 # переопределяет (пишет само состояние).
 after_apply_ok() {
-  [ -f "$CONFIG_STATE_DIR/services.tsv" ] && [ -f "$CONSTRUCTOR_BUILD" ] || return 0
+  if [ ! -f "$CONFIG_STATE_DIR/services.tsv" ]; then adopt_imported_state; return 0; fi
+  [ -f "$CONSTRUCTOR_BUILD" ] || return 0
   aa_t=$(config_target) || return 0
   sh "$CONSTRUCTOR_BUILD" --state "$CONFIG_STATE_DIR" --source "$aa_t" --output "$WORK/sigcheck.yaml" \
     --report "$WORK/sigcheck.report" > /dev/null 2>&1 || return 0
