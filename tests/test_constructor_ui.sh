@@ -99,6 +99,16 @@ grep -q 'config-broken' "$CFG" || fail "нет баннера config-broken"
 grep -q 'переименованы' "$ROOT/web/stats_app_constructor_modules.js" || fail "нет сообщения о переименовании повторяющегося имени ноды"
 grep -q 'renamed' "$ROOT/web/stats_app_constructor_modules.js" || fail "addPasted не собирает переименованные ноды"
 
+# кнопки починки шаблоном - на панелях обоих режимов, а не в меню «Ещё»
+grep -q "btn(row1, 'Миграция к шаблону'" "$CFG" || fail "YAML: «Миграция к шаблону» должна быть кнопкой панели"
+grep -q "btn(row1, 'Заменить шаблоном…'" "$CFG" || fail "YAML: «Заменить шаблоном…» должна быть кнопкой панели"
+grep -q "menuItem('Миграция к шаблону'" "$CFG" && fail "«Миграция к шаблону» осталась в меню «Ещё»"
+grep -q "menuItem('Заменить шаблоном" "$CFG" && fail "«Заменить шаблоном…» осталась в меню «Ещё»"
+grep -q "button('Миграция к шаблону'" "$UI" || fail "конструктор: нет кнопки «Миграция к шаблону»"
+grep -q "button('Заменить шаблоном…'" "$UI" || fail "конструктор: нет кнопки «Заменить шаблоном…»"
+grep -q "templateAction: templateActionFromConstructor" "$CFG" || fail "панель конструктора не получает templateAction"
+[ "$(grep -c 'templateAction: opts.templateAction' "$UI")" = 3 ] || fail "перерисовка конструктора теряет templateAction"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

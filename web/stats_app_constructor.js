@@ -117,7 +117,7 @@ export function renderConstructor(modeBar, opts) {
       var importBtn = button('Перенести в конструктор');
       importBtn.addEventListener('click', function () {
         if (v.dirty && !window.confirm('Несохранённые правки конструктора пропадут. Продолжить?')) { return; }
-        renderConstructor(modeBar, { forceImport: true, renderDiff: opts.renderDiff, again: true });
+        renderConstructor(modeBar, { forceImport: true, renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true });
       });
       wt.appendChild(importBtn);
       w.appendChild(wt);
@@ -145,7 +145,19 @@ export function renderConstructor(modeBar, opts) {
     var applyBtn = button('Проверить и применить', 'submit');
     var bar = el('div', 'cx-topbar');
     bar.appendChild(chStatus); bar.appendChild(el('span', 'xk-grow'));
-    bar.appendChild(diffBtn); bar.appendChild(resetBtn); bar.appendChild(applyBtn);
+    bar.appendChild(diffBtn); bar.appendChild(resetBtn);
+    // Те же две кнопки, что на панели YAML-режима (app-config.js открывает YAML
+    // и запускает действие там).
+    if (opts.templateAction) {
+      var migrateBtn = button('Миграция к шаблону', 'submit secondary');
+      migrateBtn.title = 'Служебные разделы из шаблона, подписки и локальные настройки сохраняются; результат - в редакторе YAML';
+      migrateBtn.addEventListener('click', function () { opts.templateAction('migrate'); });
+      var replaceBtn = button('Заменить шаблоном…', 'submit secondary');
+      replaceBtn.title = 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; старый конфиг уходит в бэкап';
+      replaceBtn.addEventListener('click', function () { opts.templateAction('reset'); });
+      bar.appendChild(migrateBtn); bar.appendChild(replaceBtn);
+    }
+    bar.appendChild(applyBtn);
     var chOut = el('div');
     head.className += ' config-apply';
     var actions = el('div');
@@ -583,7 +595,7 @@ export function renderConstructor(modeBar, opts) {
         if (!alive()) { return; }
         v.dirty = false;
         // перечитать состояние с роутера, сообщение - сверху новой страницы
-        renderConstructor(modeBar, { renderDiff: opts.renderDiff, again: true, flash: r.unchanged
+        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true, flash: r.unchanged
           ? 'Конфиг не изменился, настройки конструктора сохранены.'
           : ('Применено' + (r.restarted === false ? ' (ядро не перезапускалось - перезапустите XKeen вручную)' : ', ядро перезапущено') +
              (r.backup ? '. Бэкап прежнего конфига: ' + r.backup : '') + '.') });
@@ -612,7 +624,7 @@ export function renderConstructor(modeBar, opts) {
     resetBtn.addEventListener('click', function () {
       if (v.dirty && !window.confirm('Отменить все несохранённые изменения конструктора?')) { return; }
       v.dirty = false;
-      renderConstructor(modeBar, { renderDiff: opts.renderDiff, again: true });
+      renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true });
     });
 
     draw();
