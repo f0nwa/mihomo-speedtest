@@ -233,7 +233,9 @@ export function renderConstructor(modeBar, opts) {
       diffBtn.disabled = !!rulesErr.textContent;
       // пометки «изменён» и сводки свёрнутых блоков
       var ch = model.changes(initial);
-      modCards.markChanged(mods.changes(initialMods));
+      var modCh = mods.changes(initialMods);
+      if (ch.proxies) { modCh.proxies = true; }   // «куда попадают свои прокси» хранится в services.tsv
+      modCards.markChanged(modCh);
       modCards.blocks.base.changed(ch.base);
       svcBlk.changed(ch.services); domBlk.changed(ch.domains); rulesBlk.changed(ch.rules);
       var live = model.services().filter(function (s) { return !s.deleted; }).length;

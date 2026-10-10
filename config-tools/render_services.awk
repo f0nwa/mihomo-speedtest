@@ -45,6 +45,13 @@
 #   prov<TAB>-<TAB>строка provider       provider для своих правил
 #   bset<TAB>группа<TAB>ключ<TAB>число   базовая группа шаблона: interval
 #                                        (10..86400 с) или tolerance (0..10000 мс)
+#   ownscope<TAB>all                     свои ноды (блок proxies:) попадают не
+#                                        только в базовые группы, но и во все
+#                                        сервисные: в список якоря select-default
+#                                        добавляется служебный токен __OWN_NODES__,
+#                                        который migrate_config.awk заменяет
+#                                        именами своих нод (или убирает, если
+#                                        своих нод нет)
 #   bfirst<TAB>группа|*<TAB>значение     поставить значение первым в
 #                                        proxies: [...] базовой группы
 #                                        (по умолчанию выбирается первое);
@@ -279,13 +286,18 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       if (f[3] == "tolerance" && f[4] + 0 > 10000) err(at() "tolerance - от 0 до 10000 мс")
       if ((id SUBSEP f[3]) in bset) err(at() f[3] " группы " id " задан повторно")
       bset[id SUBSEP f[3]] = f[4] + 0
+    } else if (kind == "ownscope") {
+      need(n, 2, kind)
+      if (f[2] != "all") err(at() "ownscope: единственное значение - all")
+      if (ownscope) err(at() "ownscope задан повторно")
+      ownscope = 1
     } else if (kind == "bfirst") {
       need(n, 3, kind)
       if (f[3] == "" || f[3] ~ /[\r]/) err(at() "bfirst: пустое значение")
       if (id in bfirst) err(at() "bfirst для " id " задан повторно")
       bfirst[id] = f[3]
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset или bfirst)")
+      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset, bfirst или ownscope)")
     }
   }
   if (rc < 0) err("не удалось прочитать " overlay_file)
@@ -373,6 +385,18 @@ function gen_rules(  out, i, prev) {
   }
   return out
 }
+# Список "proxies: [...]" в строке l с добавленным служебным токеном свои-ноды
+# (см. ownscope в шапке); токен уже есть - строка как есть.
+function add_own(l,  st, e, inner) {
+  if (index(l, "__OWN_NODES__")) return l
+  st = index(l, "proxies: [")
+  if (!st) return l
+  e = index(substr(l, st), "]")
+  if (!e) return l
+  e = st + e - 1
+  inner = substr(l, st + 10, e - (st + 10))
+  return substr(l, 1, e - 1) (inner ~ /[^ ]/ ? ", " : "") "__OWN_NODES__" substr(l, e)
+}
 BEGIN {
   failed = 0; nsec = 0; nsvc = 0; nprov = 0; nrule = 0; nuprov = 0; nsrc = 0; ndom = 0; nuser = 0; geoval = ""
   if (services_file == "") err("не задан -v services_file")
@@ -415,6 +439,7 @@ BEGIN {
   } else if (sect == "anchors" && ("*" in bfirst) && line ~ /^  select-default: &select-default /) {
     r = reorder(line, bfirst["*"]); if (r != "") line = r
   }
+  if (ownscope && sect == "anchors" && line ~ /^  select-default: &select-default /) line = add_own(line)
   if (geoval != "" && match(line, /exclude-filter: &geofilter '[^']*'/)) {
     line = substr(line, 1, RSTART - 1) "exclude-filter: &geofilter '" geoval "'" substr(line, RSTART + RLENGTH)
     geohits++

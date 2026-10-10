@@ -109,6 +109,14 @@ grep -q "button('Заменить шаблоном…'" "$UI" || fail "конс�
 grep -q "templateAction: templateActionFromConstructor" "$CFG" || fail "панель конструктора не получает templateAction"
 [ "$(grep -c 'templateAction: opts.templateAction' "$UI")" = 3 ] || fail "перерисовка конструктора теряет templateAction"
 
+# переключатель «куда попадают свои прокси» (ownscope) в разделе «Свои прокси»
+M="$ROOT/web/stats_app_constructor_modules.js"
+grep -q 'model.setOwnScope' "$M" || fail "«Свои прокси»: нет переключателя ownscope"
+grep -q 'model.ownScope()' "$M" || fail "«Свои прокси»: переключатель не читает состояние"
+grep -q 'Только в базовые группы' "$M" || fail "«Свои прокси»: нет варианта «только в базовые группы»"
+grep -q 'Ещё и во все сервисные группы' "$M" || fail "«Свои прокси»: нет варианта «во все сервисные группы»"
+grep -q 'ch.proxies' "$UI" || fail "пометка «изменён» у «Свои прокси» не учитывает ownscope"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
