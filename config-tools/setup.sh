@@ -33,6 +33,21 @@ UI_G_BAR=${UI_G_BAR:-|}; UI_SLEEP=${UI_SLEEP:-sleep 1}
 DETECT_UA_LIB_ONLY=1
 . "$SELFDIR/detect_ua.sh"
 
+# Есть ли в текущем config.yaml то, что нельзя потерять: подписки или свои
+# ноды. У заготовки XKeen (порты, listeners, ни подписок, ни нод) содержимого
+# нет - мастер ведёт себя с ней как без конфига: не требует запущенный mihomo,
+# при отсутствии ввода собирает конфиг без нод.
+# Копия логики config_no_nodes() из install.sh.
+config_has_content() {
+  [ -f "$CONFIG" ] || return 1
+  awk '
+    /^[A-Za-z0-9_-]+:/ { sect = ($0 ~ /^proxy-providers:/) ? 1 : (($0 ~ /^proxies:/) ? 2 : 0); next }
+    sect == 1 && /^  [A-Za-z0-9_-]+:[ ]*$/ { if ($1 != "fast:") found = 1 }
+    sect == 2 && /^  - / { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$CONFIG" 2>/dev/null
+}
+
 collect_subscriptions() {
   # Печатает в stdout URL по одному на строку - итоговый список подписок
   # до автоподбора UA. Порядок: импорт из старого CONFIG (за вычетом
@@ -110,6 +125,14 @@ collect_subscriptions() {
       if [ -z "$url" ]; then
         if [ "$n" -gt 0 ]; then break; fi
         if [ "$read_eof" = 0 ]; then SETUP_SKIPPED=1; break; fi
+        # Ввода нет вовсе (curl | sh без терминала). Конфига нет или в нём нет
+        # подписок и нод - мягкий режим: конфиг без нод, подписку добавят в
+        # веб-интерфейсе. Иначе молчаливый пропуск заменил бы рабочий конфиг
+        # пустым, поэтому отказ.
+        if ! config_has_content; then
+          ui_warn "Ввода нет: подписка не указана, конфиг будет собран без нод (подписку можно добавить в веб-интерфейсе)"
+          SETUP_SKIPPED=1; break
+        fi
         attempt=$((attempt + 1))
         if [ "$attempt" -ge 3 ]; then
           ui_fail "Нужна хотя бы одна ссылка на подписку"
@@ -366,9 +389,10 @@ main() {
   # раздела; отдельный запуск мастера показывает полный баннер.
   ui_banner "MIHOMO-SPEEDTEST" "Настройка нового роутера"
 
-  # Нет конфига - ядро ещё не запускали (его запускают, когда есть ноды),
-  # процесс mihomo не требуется, достаточно версий.
-  if [ ! -f "$CONFIG" ]; then check_versions || return 1; else check_mihomo_process && check_versions || return 1; fi
+  # Нет конфига или он без подписок и нод (заготовка XKeen) - ядро ещё не
+  # запускали (его запускают, когда есть ноды), процесс mihomo не требуется,
+  # достаточно версий.
+  if ! config_has_content; then check_versions || return 1; else check_mihomo_process && check_versions || return 1; fi
 
   confirm_config_replace || return 1
 
@@ -397,16 +421,33 @@ main() {
     rm -f "$subs_file"
 
     if [ ! -s "$specs_file" ]; then
-      ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+      # Конфига нет (или в нём нет подписок и нод): вместо отказа предлагаем
+      # собрать его без нод и продолжить установку (веб-интерфейс поднимется,
+      # подписку добавят оттуда). Рабочий конфиг пустым не заменяем - отказ.
+      soft_ans=n
+      if ! config_has_content; then
+        ui_warn "Ни одна подписка не прошла проверку"
+        ui_ask "Собрать конфиг без нод и продолжить установку (подписку добавите в веб-интерфейсе)? [Y/n]"
+        read -r soft_ans || soft_ans=""
+      fi
+      case "$soft_ans" in
+        [Nn]*)
+          ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
+          rm -f "$specs_file"
+          return 1
+          ;;
+      esac
+      no_nodes=1
+      ui_ok "Конфиг будет собран без нод, ядро не запустится"
+      ui_step 3 4 "Имена провайдеров"
+      ui_ok "Не нужны"
+    else
+      ui_step 3 4 "Имена провайдеров"
+      named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
+      assign_provider_names "$specs_file" > "$named_file"
       rm -f "$specs_file"
-      return 1
+      specs_file=$named_file
     fi
-
-    ui_step 3 4 "Имена провайдеров"
-    named_file=$(mktemp "${TMPDIR:-/tmp}/setup_named.XXXXXX")
-    assign_provider_names "$specs_file" > "$named_file"
-    rm -f "$specs_file"
-    specs_file=$named_file
   fi
 
   ui_step 4 4 "Конфиг"

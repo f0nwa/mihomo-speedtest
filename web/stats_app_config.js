@@ -418,6 +418,10 @@ function renderYaml(bar) {
       'текущая версия сохраняется в бэкап; если ядро после перезапуска не поднимется, конфиг откатится сам.'));
     var status = el('p', 'hint config-status', 'Изменений нет.');
     main.appendChild(status);
+    // Баннер «конфиг не проходит mihomo -t»: заполняется после открытия вкладки.
+    var brokenBox = el('div', 'config-broken');
+    brokenBox.hidden = true;
+    main.appendChild(brokenBox);
 
     function btn(row, text, secondary) {
       var b = el('button', 'submit' + (secondary ? ' secondary' : ''), text);
@@ -446,6 +450,7 @@ function renderYaml(bar) {
     menuGroup('Починка');
     var fmtBtn = menuItem('Исправить формат', false, 'Только меняет текст в редакторе: BOM, CRLF, табы, пробелы в конце строк');
     var tplBtn = menuItem('Миграция к шаблону', false, 'Только меняет текст в редакторе; после применения карточка обновления конфига исчезнет');
+    var resetTplBtn = menuItem('Заменить шаблоном…', true, 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; применяется сразу, старый конфиг уходит в бэкап');
     var wgBtn = menuItem('Импорт WireGuard…', false, 'Добавляет ноды из .conf (WireGuard и AmneziaWG) в proxies и группы; только меняет текст в редакторе');
     moreMenu.appendChild(el('div', 'config-more-sep'));
     menuGroup('История');
@@ -913,6 +918,56 @@ function renderYaml(bar) {
         clearOutput(); msg('Импорт отменён - текст в редакторе как до импорта.', '');
       });
     }
+    // Замена шаблоном: из config.yaml остаются только подписки и свои ноды.
+    // Сначала предпросмотр (ничего не пишет), потом подтверждение и применение.
+    function resetPreviewLines(r) {
+      var k = r.kept || {};
+      var lines = ['Останется: ' + (k.subscriptions || 0) + ' подписок, ' + (k.nodes || 0) + ' своих нод.',
+        'Будет из шаблона: dns, listeners, secret, порты, группы, правила, гео-фильтр.'];
+      (r.report || []).forEach(function (l) {
+        var p = String(l).split('|');
+        if (p[0] === 'REVIEW' && p[1] === 'file-provider-dropped') { lines.push('Не переносится провайдер type: file: ' + p[2]); }
+      });
+      return lines;
+    }
+    function applyReset() {
+      return applyRequest('/api/constructor/reset?base=' + encodeURIComponent(view.base), null,
+        'Конфиг заменён шаблоном: подписки и ноды сохранены.');
+    }
+    function resetFromTemplate() {
+      if (view.dirty && !window.confirm('Несохранённые правки в редакторе будут потеряны. Продолжить?')) { return; }
+      clearOutput(); msg('Собираю замену из шаблона...', '');
+      busy(true);
+      var preview = null;
+      fetchJson('/api/constructor/reset-preview', { method: 'POST' })
+        .then(function (r) { preview = r; })
+        ['catch'](function (e) {
+          if (e.message === 'nothing_to_keep') {
+            msg('В config.yaml нет ни подписок, ни своих нод - заменять нечем. Сначала добавьте подписку в конструкторе или ноды в YAML.', 'err');
+          } else {
+            msg('Не удалось подготовить замену: ' + ((e.data && e.data.message) || e.message), 'err');
+          }
+        })
+        .then(function () {
+          busy(false);
+          if (!preview) { return; }
+          showOutput('Замена шаблоном', resetPreviewLines(preview));
+          if (!preview.check || !preview.check.ok) {
+            msg('Новый конфиг не прошёл проверку mihomo -t - замена не применена.', 'err');
+            output.appendChild(el('h2', null, 'Вывод mihomo -t'));
+            var pre = el('div', 'update-console');
+            String((preview.check && preview.check.output) || '').replace(/\n$/, '').split('\n').forEach(function (l) { pre.appendChild(el('div', 'log-line', l)); });
+            output.appendChild(pre);
+            return;
+          }
+          var k = preview.kept || {};
+          if (!window.confirm('Заменить config.yaml шаблоном? Останется ' + (k.subscriptions || 0) + ' подписок и ' +
+            (k.nodes || 0) + ' нод; dns, listeners, secret, порты, группы и правила будут из шаблона. ' +
+            'Старый конфиг сохранится в бэкап, ядро перезапустится.')) { msg('Замена отменена.', ''); return; }
+          return applyReset();
+        });
+    }
+    resetTplBtn.addEventListener('click', resetFromTemplate);
     tplBtn.addEventListener('click', function () {
       if (!window.confirm('Миграция заменит служебные разделы проекта (группы, правила, провайдеры) на версии из ' +
         'шаблона, сохранив подписки и локальные настройки. Результат попадёт в редактор, применение - отдельно. Продолжить?')) { return; }
@@ -932,6 +987,25 @@ function renderYaml(bar) {
         })
         .then(function () { busy(false); return stopApplyLog(); });
     });
+    // Конфиг, не проходящий mihomo -t (или ещё без нод), - сразу предложить
+    // починку; проверка идёт один раз при открытии и ничего не пишет.
+    function renderBrokenBanner(check) {
+      while (brokenBox.firstChild) { brokenBox.removeChild(brokenBox.firstChild); }
+      brokenBox.appendChild(el('p', 'msg-err', 'Конфиг не проходит проверку mihomo -t' +
+        (check.line ? ' (строка ' + check.line + ')' : '') + '. Если вы ещё не добавили подписку или ноды, это нормально.'));
+      var first = String(check.output || '').split('\n').filter(function (l) { return l.trim(); })[0];
+      if (first) { brokenBox.appendChild(el('p', 'hint', first)); }
+      var row = el('div', 'btn-row');
+      [['Исправить формат', fmtBtn], ['Миграция к шаблону', tplBtn], ['Заменить шаблоном…', resetTplBtn]].forEach(function (a) {
+        var b = btn(row, a[0], true);
+        b.addEventListener('click', function () { a[1].click(); });
+      });
+      brokenBox.appendChild(row);
+      brokenBox.hidden = false;
+    }
+    postText('/api/config/check', data.text || '').then(function (check) {
+      if (alive() && check && check.ok === false) { renderBrokenBanner(check); }
+    })['catch'](function () {});
   })['catch'](function (err) {
     pendingMigration = false;   // миграцию с карточки «Обновлений» не откладываем до следующего открытия
     if (!alive()) { return; }

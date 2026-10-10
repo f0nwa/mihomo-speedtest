@@ -535,6 +535,8 @@ API_ROUTES = {
     "api/constructor/probe-nodes": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "probe-nodes", "MST_CGI_TIMEOUT": "120"}),
     "api/constructor/preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "preview", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/apply": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "apply", "MST_CGI_TIMEOUT": "180"}),
+    "api/constructor/reset-preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "reset-preview", "MST_CGI_TIMEOUT": "60"}),
+    "api/constructor/reset": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "reset", "MST_CGI_TIMEOUT": "180"}),
     # Команды XKeen: run запускает команду в фоне и отвечает сразу, вывод
     # окно забирает опросом run-log - длинные таймауты не нужны.
     "api/xkeen/run": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "run"}),

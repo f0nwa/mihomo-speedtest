@@ -37,6 +37,13 @@
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
 #                   состояние и managed.sig пишутся только после успешного
 #                   применения.
+#   reset-preview POST - замена шаблоном (reset_config.sh): из config.yaml
+#                   остаются только подписки и свои ноды; без записи:
+#                   {"ok","text","report","check","kept":{"subscriptions",
+#                   "nodes"}}. Нет config.yaml - 404 no_config; нет ни
+#                   подписок, ни нод - 422 nothing_to_keep.
+#   reset    POST - то же и применить (бэкап, mihomo -t, перезапуск, откат,
+#                   ?base=); состояние - только подписки и ноды.
 # Тело preview/apply - блоки "### MST-STATE <файл>" (services.tsv,
 # geofilter.txt, user-rules.txt, subscriptions.tsv, proxies.yaml), за строкой блока - содержимое файла; нет
 # блока - нет файла.
@@ -50,6 +57,7 @@ DIR=${DIR:-/opt/etc/mihomo-speedtest}
 CONFIG_LIB=${CONFIG_LIB:-$DIR/stats_config.sh}
 MST_CONFIG_LIB=1 . "$CONFIG_LIB"
 CONSTRUCTOR_DEFAULTS=${CONSTRUCTOR_DEFAULTS:-$DIR/services.default.tsv}
+RESET_CONFIG=${RESET_CONFIG:-$DIR/reset_config.sh}
 CONFIG_TO_STATE_AWK=${CONFIG_TO_STATE_AWK:-$DIR/config_to_state.awk}
 CONSTRUCTOR_CATALOG=${CONSTRUCTOR_CATALOG:-$DIR/rule-catalog.tsv}
 APPLY_LOG=${CONSTRUCTOR_APPLY_LOG:-$APPLY_LOG}
@@ -98,18 +106,32 @@ build_candidate() {
   fi
 }
 
+# Кандидат замены шаблоном: $WORK/cand.yaml, отчёт - $WORK/report, состояние
+# (подписки и ноды) - $WORK/state.
+build_reset_candidate() {
+  target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+  [ -f "$target" ] || fail_json 404 no_config "Файл $CONFIG не найден"
+  [ -f "$RESET_CONFIG" ] || fail_json 500 no_tools "reset_config.sh не найден - переустановите проект"
+  if ! sh "$RESET_CONFIG" --source "$target" --output "$WORK/cand.yaml" --report "$WORK/report" \
+      --state-out "$WORK/state" > "$WORK/reset.log" 2>&1; then
+    reason=$(sed -n 's/^ERROR: //p' "$WORK/reset.log" | head -n 1)
+    case $reason in
+      'нет ни подписок'*) fail_json 422 nothing_to_keep "В config.yaml нет ни подписок, ни своих нод - заменять нечем" ;;
+    esac
+    fail_json 422 reset_failed "$reason"
+  fi
+}
+
+# Число из строки отчёта "RESET|имя|N" (0, если строки нет).
+reset_kept() {
+  rk=$(sed -n "s/^RESET|$1|//p" "$WORK/report" | head -n 1)
+  printf '%s' "${rk:-0}"
+}
+
 read_state_body() {
   read_body "$WORK/body"
   rc=0; parse_state "$WORK/body" "$WORK/state" || rc=$?
   [ "$rc" = 0 ] || fail_json 400 bad_body "Тело должно состоять из блоков ### MST-STATE с файлами: $STATE_FILES"
-}
-
-# Замена состояния прервалась между двумя mv (осталась только копия .old) -
-# вернуть её на место. Вызывается перед чтением и перед записью.
-recover_state() {
-  if [ ! -d "$CONFIG_STATE_DIR" ] && [ -d "$CONFIG_STATE_DIR.old" ]; then
-    mv "$CONFIG_STATE_DIR.old" "$CONFIG_STATE_DIR" 2>/dev/null || true
-  fi
 }
 
 # Список нод, которые спидтест не проверяет (BLOCK в speedtest2.env), -
@@ -138,29 +160,11 @@ sync_block() {
   fi
 }
 
-# Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR: собирается в
-# соседнем .new и меняется местами, managed.sig - от нового config.yaml.
-# Любой сбой - WARN в журнал: конфиг уже применён, ответ должен уйти.
+# Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
+# stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
   [ -n "${NEW_STATE:-}" ] || return 0
-  recover_state
-  ns=$CONFIG_STATE_DIR.new
-  rm -rf "$ns" "$CONFIG_STATE_DIR.old" 2>/dev/null || true
-  if mkdir -p "$ns" && { [ -z "$(ls "$NEW_STATE")" ] || cp -p "$NEW_STATE"/* "$ns"/; } &&
-      { [ -f "$ns/services.tsv" ] || : > "$ns/services.tsv"; } &&
-      managed_sig "$(config_target)" > "$ns/managed.sig"; then
-    if [ ! -d "$CONFIG_STATE_DIR" ] || mv "$CONFIG_STATE_DIR" "$CONFIG_STATE_DIR.old"; then
-      if mv "$ns" "$CONFIG_STATE_DIR"; then
-        rm -rf "$CONFIG_STATE_DIR.old" 2>/dev/null || true
-        alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
-        sync_block
-        return 0
-      fi
-      recover_state
-    fi
-  fi
-  rm -rf "$ns" 2>/dev/null || true
-  alog "WARN: конфиг применён, но состояние конструктора не сохранилось ($CONFIG_STATE_DIR)"
+  if persist_state "$NEW_STATE"; then sync_block; fi
   return 0
 }
 
@@ -390,6 +394,17 @@ UALIST
   apply:POST)
     read_state_body
     build_candidate "$WORK/state"
+    NEW_STATE=$WORK/state
+    apply_candidate "$WORK/cand.yaml" ;;
+  reset-preview:POST)
+    build_reset_candidate
+    rc=0; check_file "$WORK/cand.yaml" || rc=$?
+    printf '{"ok":true,"text":%s,"report":%s,"check":%s,"kept":{"subscriptions":%s,"nodes":%s}}\n' \
+      "$(jstr_file "$WORK/cand.yaml")" "$(lines_json "$WORK/report")" "$(check_json "$rc")" \
+      "$(reset_kept kept-subscriptions)" "$(reset_kept kept-nodes)" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  reset:POST)
+    build_reset_candidate
     NEW_STATE=$WORK/state
     apply_candidate "$WORK/cand.yaml" ;;
   *)

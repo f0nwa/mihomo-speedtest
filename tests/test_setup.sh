@@ -812,7 +812,8 @@ EOF
 chmod +x "$WORK9/install.sh" "$WORK9/setup.sh"
 run_setup9() {
   # $1 - файл со входом, остальное - дополнительное окружение; конфиг каждый раз новый
-  rm -f "$WORK9/config.yaml" "$MARK9/restart" "$MARK9/mihomo"
+  [ "${KEEP_CONFIG9:-}" = 1 ] || rm -f "$WORK9/config.yaml"
+  rm -f "$MARK9/restart" "$MARK9/mihomo"
   inp=$1; shift
   env PATH="$FAKEBIN9:$PATH" DIR="$WORK9" MIHOMO_DIR="$WORK9/mh" BIN=mihomo CONFIG="$WORK9/config.yaml" \
     TEMPLATE="$ROOT/config-tools/config.example.yaml" SELFDIR="$WORK9" API_MAIN=127.0.0.1:9090 \
@@ -834,11 +835,103 @@ check_nonodes9 "Enter"
 # б) SKIP_SUBSCRIPTION=1 - то же без вопросов (неинтерактивно)
 run_setup9 /dev/null SKIP_SUBSCRIPTION=1 || { echo "FAIL: SKIP_SUBSCRIPTION=1 должен завершаться успешно" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
 check_nonodes9 "SKIP_SUBSCRIPTION"
-# в) нет ввода вовсе (EOF) - не пропуск, как раньше: отказ, конфиг не создан
-rc9=0; run_setup9 /dev/null || rc9=$?
-[ "$rc9" != 0 ] || { echo "FAIL: без ввода и без SKIP_SUBSCRIPTION мастер не должен молча пропускать подписку" >&2; FAILED=1; }
-grep -q 'Нужна хотя бы одна ссылка на подписку' "$WORK9/run.log" || { echo "FAIL: нет отказа 'Нужна хотя бы одна ссылка'" >&2; FAILED=1; }
+# в) нет ввода вовсе (EOF) и конфига нет: мягкий режим - конфиг без нод, как
+# при Enter (раньше отказ после трёх попыток)
+run_setup9 /dev/null || { echo "FAIL: без ввода и без конфига мастер должен собрать конфиг без нод" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_nonodes9 "EOF без конфига"
+grep -q 'Ввода нет' "$WORK9/run.log" || { echo "FAIL: нет предупреждения, что ввода нет" >&2; FAILED=1; }
+# г) конфиг со своей нодой (есть что терять): подписку не прошла проверку - отказ
+# без вопроса, существующий конфиг не заменяется пустым (см. ниже, сценарий д)
+PIDOK9=$(mktemp -d)
+printf '#!/bin/sh\nexit 0\n' > "$PIDOK9/pidof"; chmod +x "$PIDOK9/pidof"
+write_content9() {
+  printf 'proxies:\n  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK9/config.yaml"
+  cp "$WORK9/config.yaml" "$WORK9/config.before"
+}
+# д) подписка не прошла проверку (ни один User-Agent не подошёл)
+CURLFAIL9=$(mktemp -d)
+cat > "$CURLFAIL9/curl" <<'CURLEOF'
+#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = -o ] && { shift; : > "$1"; }; shift; done
+exit 22
+CURLEOF
+chmod +x "$CURLFAIL9/curl"
+run_failed_sub9() { run_setup9 "$1" SUB_URLS=http://sub.fail.test/x PATH="$CURLFAIL9:$FAKEBIN9:$PATH"; }
+#   Enter на вопросе «собрать без нод?» (по умолчанию да)
+printf '\n' > "$WORK9/in_enter"
+run_failed_sub9 "$WORK9/in_enter" || { echo "FAIL: подписка не прошла проверку - по умолчанию конфиг без нод" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_nonodes9 "подписка не прошла, Enter"
+grep -q 'не подобран рабочий User-Agent' "$WORK9/run.log" || { echo "FAIL: нет причины, почему подписка исключена" >&2; FAILED=1; }
+#   нет ввода (EOF) - тоже мягко
+run_failed_sub9 /dev/null || { echo "FAIL: подписка не прошла и ввода нет - конфиг без нод" >&2; FAILED=1; }
+check_nonodes9 "подписка не прошла, EOF"
+#   ответ n - прежний отказ, конфиг не создан
+printf 'n\n' > "$WORK9/in_no"
+rc9=0; run_failed_sub9 "$WORK9/in_no" || rc9=$?
+[ "$rc9" != 0 ] || { echo "FAIL: ответ n - мастер должен отказать" >&2; FAILED=1; }
+grep -q 'Ни одна подписка не прошла проверку' "$WORK9/run.log" || { echo "FAIL: нет отказа 'Ни одна подписка не прошла проверку'" >&2; FAILED=1; }
 [ ! -f "$WORK9/config.yaml" ] || { echo "FAIL: при отказе config.yaml создан" >&2; FAILED=1; }
+#   конфиг со своей нодой - при непройденной подписке прежний отказ без вопроса
+write_content9
+rc9=0; KEEP_CONFIG9=1 run_setup9 "$WORK9/in_enter" SUB_URLS=http://sub.fail.test/x PATH="$CURLFAIL9:$PIDOK9:$FAKEBIN9:$PATH" || rc9=$?
+[ "$rc9" != 0 ] || { echo "FAIL: существующий конфиг не должен заменяться пустым при непройденной подписке" >&2; FAILED=1; }
+cmp -s "$WORK9/config.before" "$WORK9/config.yaml" || { echo "FAIL: существующий config.yaml изменён" >&2; FAILED=1; }
+rm -rf "$PIDOK9" "$CURLFAIL9"
+# е) заготовка XKeen (порты и listeners, ни подписок, ни нод) - как без
+# конфига: нет требования запущенного mihomo (pidof здесь его не видит),
+# подписка спрашивается; свои входы переносятся, старый файл остаётся в бэкапе.
+write_stub9() {
+  cat > "$WORK9/config.yaml" <<'STUBEOF'
+find-process-mode: off # снижает нагрузку на роутер
+# Не открывайте external-controller в LAN без secret
+
+listeners:
+  - name: tproxy
+    type: tproxy
+    port: 1181
+    udp: true
+
+  - name: redir
+    type: redir
+    port: 1182
+
+# Руководство по конфигурации Mihomo
+STUBEOF
+  cp "$WORK9/config.yaml" "$WORK9/stub.before"
+  rm -f "$WORK9"/config.yaml.*.bak
+}
+check_stub9() {
+  stub_label=$1
+  [ -f "$WORK9/config.yaml" ] || { echo "FAIL: ($stub_label) config.yaml пропал" >&2; FAILED=1; return; }
+  grep -q 'sub-names: &sub-names \[\]' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) конфиг должен быть без нод" >&2; FAILED=1; }
+  grep -q 'name: tproxy' "$WORK9/config.yaml" && grep -q 'name: redir' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) входы tproxy/redir из заготовки потеряны" >&2; FAILED=1; }
+  grep -q 'find-process-mode: off' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) find-process-mode потерян" >&2; FAILED=1; }
+  set -- "$WORK9"/config.yaml.*.bak
+  { [ -f "$1" ] && cmp -s "$1" "$WORK9/stub.before"; } || { echo "FAIL: заготовка не сохранена в бэкап" >&2; FAILED=1; }
+  grep -q 'Процесс mihomo не найден' "$WORK9/run.log" && { echo "FAIL: для заготовки процесс mihomo не требуется" >&2; FAILED=1; }
+  grep -q 'install.sh (заглушка): запущен' "$WORK9/run.log" || { echo "FAIL: ($stub_label) install.sh не запущен после мастера" >&2; FAILED=1; }
+}
+STUBENV9=""
+#   Enter на вопросе о подписке
+write_stub9; printf '\n' > "$WORK9/in_enter"
+KEEP_CONFIG9=1 run_setup9 "$WORK9/in_enter" $STUBENV9 || { echo "FAIL: заготовка, Enter: мастер должен завершиться успешно" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_stub9 "заготовка, Enter"
+#   нет ввода (curl | sh без терминала) - мягко
+write_stub9
+KEEP_CONFIG9=1 run_setup9 /dev/null $STUBENV9 || { echo "FAIL: заготовка, нет ввода: конфиг без нод, а не отказ" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_stub9 "заготовка, EOF"
+#   подписка не прошла проверку (ни один UA) - предложение собрать без нод, Enter = да
+CURLFAIL9=$(mktemp -d)
+cat > "$CURLFAIL9/curl" <<'CURLEOF'
+#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = -o ] && { shift; : > "$1"; }; shift; done
+exit 22
+CURLEOF
+chmod +x "$CURLFAIL9/curl"
+write_stub9
+KEEP_CONFIG9=1 run_setup9 "$WORK9/in_enter" $STUBENV9 SUB_URLS=http://sub.fail.test/x PATH="$CURLFAIL9:$FAKEBIN9:$PATH" || { echo "FAIL: заготовка, подписка не прошла: конфиг без нод" >&2; cat "$WORK9/run.log" >&2; FAILED=1; }
+check_stub9 "заготовка, подписка не прошла"
+rm -rf "$CURLFAIL9"
 rm -rf "$FAKEBIN9" "$WORK9" "$MARK9"
 
 if [ "$FAILED" = 1 ]; then

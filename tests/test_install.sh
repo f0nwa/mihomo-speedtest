@@ -440,7 +440,7 @@ rm -rf "$MISSING_PIDOF" "$WORK"
 
 FIXDIR=$TEST_ROOT/install-fixture
 mkdir -p "$FIXDIR/proxy-providers" "$FIXDIR/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/reset_config.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR/"
 
 # Порция 3 (независимая служба): реальный STATS_HTTPD_PY/STATS_HTTPD_CMD
 # ни к чему - main() ниже теперь сам вызывает "$INITD_SCRIPT restart" не
@@ -624,6 +624,17 @@ if ! config_no_nodes "$FIXDIR3/config.yaml"; then fail "config_no_nodes: кон�
 if config_no_nodes "$FIXDIR/config.yaml"; then fail "config_no_nodes: конфиг с подпиской demo - не пустой"; fi
 printf 'proxies:\n  - name: n\n    type: ss\n' > "$TEST_ROOT/c-static.yaml"
 if config_no_nodes "$TEST_ROOT/c-static.yaml"; then fail "config_no_nodes: своя нода в proxies - не пустой конфиг"; fi
+# install_config_is_stub: заготовка (XKeen) без подписок, нод и быстрого пула -
+# для неё установщик запускает мастер, как без конфига. Конфиг проекта без
+# нод (есть провайдер fast) и конфиг с подпиской - не заготовка.
+printf 'find-process-mode: off\nlisteners:\n  - name: tproxy\n    type: tproxy\n    port: 1181\n' > "$TEST_ROOT/c-stub.yaml"
+install_config_is_stub "$TEST_ROOT/c-stub.yaml" || fail "install_config_is_stub: заготовка XKeen должна считаться заготовкой"
+: > "$TEST_ROOT/c-empty.yaml"
+install_config_is_stub "$TEST_ROOT/c-empty.yaml" || fail "install_config_is_stub: пустой файл - заготовка"
+if install_config_is_stub "$FIXDIR3/config.yaml"; then fail "install_config_is_stub: конфиг проекта без нод (есть fast) не заготовка"; fi
+if install_config_is_stub "$FIXDIR/config.yaml"; then fail "install_config_is_stub: конфиг с подпиской не заготовка"; fi
+if install_config_is_stub "$TEST_ROOT/c-static.yaml"; then fail "install_config_is_stub: конфиг со своей нодой не заготовка"; fi
+if MST_CONFIG_FROM_TEMPLATE=1 install_config_is_stub "$TEST_ROOT/c-stub.yaml"; then fail "install_config_is_stub: после мастера (MST_CONFIG_FROM_TEMPLATE=1) мастер повторно не нужен"; fi
 [ "$(config_geofilter_block "$FIXDIR3/config.yaml")" = 'Russia|Moscow' ] || fail "config_geofilter_block: $(config_geofilter_block "$FIXDIR3/config.yaml")"
 (
   PATH="$FIXDIR3/bin:$PATH"
@@ -667,6 +678,88 @@ grep -q 'Открыть: *http://' "$TEST_ROOT/main3.err" || fail "в итоге
   "$FIXDIR3/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
 )
 
+# --- Мягкая установка: конфиг есть, но mihomo -t его не принимает. Установка
+# не останавливается: Enter (или нет терминала) - оставить как есть, файлы и
+# веб-интерфейс ставятся, пробный прогон пропускается, в конце - жёлтый блок.
+FIXDIR4=$TEST_ROOT/install-fixture-soft
+mkdir -p "$FIXDIR4"
+cp -R "$FIXDIR"/. "$FIXDIR4"/
+rm -rf "$FIXDIR4/runtime" "$FIXDIR4/speedtest2.env" "$FIXDIR4/crontab.txt"
+cat > "$FIXDIR4/bin/pidof" <<'BINEOF'
+#!/bin/sh
+exit 0
+BINEOF
+cat > "$FIXDIR4/bin/mihomo" <<'BINEOF'
+#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = -f ] && f=$2; shift; done
+if grep -q BROKEN "$f"; then echo "yaml: line 3: bad" >&2; exit 1; fi
+exit 0
+BINEOF
+chmod +x "$FIXDIR4/bin/pidof" "$FIXDIR4/bin/mihomo"
+printf '# BROKEN\n' >> "$FIXDIR4/config.yaml"
+cp "$FIXDIR4/config.yaml" "$FIXDIR4/config.before"
+run_main_soft() {
+  # $1 - файл stdin, $2 - файл stderr; остальное окружение - из вызова
+  (
+    PATH="$FIXDIR4/bin:$PATH"
+    export PATH
+    DIR=$FIXDIR4
+    BIN=$FIXDIR4/bin/mihomo
+    SELFDIR=$FIXDIR4
+    CONFIG=$FIXDIR4/config.yaml
+    MIHOMO_DIR=$FIXDIR4
+    TMPROOT=$FIXDIR4
+    SKIP_TRIAL=1
+    INSTALL_CHANNEL=stable
+    BLOCK='forced-for-this-test'
+    INITD_DIR=$FIXDIR4/etc-init.d
+    export DIR
+    export MIHOMO_DIR
+    export STATS_SERVICE_RUNTIME_DIR="$FIXDIR4/runtime"
+    export STATS_HTTPD_PY_CMD=sh
+    export STATS_HTTPD_PY="$FAKE_HTTPD"
+    export STATS_HTTPD_CMD="sh $FAKE_HTTPD"
+    unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
+    INSTALL_LIB_ONLY=1 . "$SCRIPT"
+    main
+  ) 2>"$2" <"$1"
+}
+stop_soft_web() {
+  (
+    STATS_SERVICE_RUNTIME_DIR=$FIXDIR4/runtime
+    export STATS_SERVICE_RUNTIME_DIR
+    STOP_WAIT=3
+    export STOP_WAIT
+    "$FIXDIR4/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
+  )
+}
+# Оставить конфиг как есть. CONFIG_MODE=own - без вопроса: меню читает ввод из
+# терминала (reopen_tty), а в тесте он не должен участвовать; само меню
+# проверяет test_install_config_mode.sh.
+soft_rc=0
+CONFIG_MODE=own run_main_soft /dev/null "$TEST_ROOT/main4.err" || soft_rc=$?
+[ "$soft_rc" = 0 ] || fail "мягкая установка: код $soft_rc вместо 0: $(cat "$TEST_ROOT/main4.err")"
+grep -q 'Пробный прогон пропущен: конфиг не проходит mihomo -t' "$TEST_ROOT/main4.err" || fail "пробный прогон должен пропускаться: $(cat "$TEST_ROOT/main4.err")"
+grep -q 'установка завершена в мягком режиме' "$TEST_ROOT/main4.err" || fail "нет жёлтого блока мягкого режима"
+grep -q 'Открыть: *http://' "$TEST_ROOT/main4.err" || fail "мягкая установка: нет ссылки на веб-интерфейс"
+[ -f "$FIXDIR4/runtime/supervisor.pid" ] || fail "мягкая установка: веб-интерфейс не запущен"
+[ -f "$FIXDIR4/speedtest2.env" ] || fail "мягкая установка: speedtest2.env не записан"
+cmp -s "$FIXDIR4/config.before" "$FIXDIR4/config.yaml" || fail "мягкая установка изменила конфиг"
+stop_soft_web
+# CONFIG_MODE=reset - замена шаблоном без вопроса, дальше обычная установка
+rm -rf "$FIXDIR4/runtime" "$FIXDIR4/speedtest2.env" "$FIXDIR4/crontab.txt"
+cp "$FIXDIR4/config.before" "$FIXDIR4/config.yaml"
+soft_rc=0
+CONFIG_MODE=reset run_main_soft /dev/null "$TEST_ROOT/main5.err" || soft_rc=$?
+[ "$soft_rc" = 0 ] || fail "замена при установке: код $soft_rc: $(cat "$TEST_ROOT/main5.err")"
+grep -q BROKEN "$FIXDIR4/config.yaml" && fail "после замены в конфиге остались чужие данные"
+grep -q 'https://example.com/sub' "$FIXDIR4/config.yaml" || fail "замена потеряла подписку"
+grep -q 'установка завершена в мягком режиме' "$TEST_ROOT/main5.err" && fail "после удачной замены мягкий режим не нужен"
+grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main5.err" || fail "замена при установке: нет итоговой строки: $(cat "$TEST_ROOT/main5.err")"
+set -- "$FIXDIR4"/config.yaml.*.bak
+[ -f "$1" ] && cmp -s "$1" "$FIXDIR4/config.before" || fail "замена при установке: нет бэкапа прежнего конфига"
+stop_soft_web
+
 if (
   curl() { return 7; }
   result=$(measure_channel)
@@ -688,7 +781,7 @@ fi
 
 FIXDIR2=$TEST_ROOT/install-fixture-curlfail
 mkdir -p "$FIXDIR2/proxy-providers" "$FIXDIR2/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR2/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/reset_config.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR2/"
 
 FAKE_HTTPD2=$FIXDIR2/fake_httpd.sh
 cat > "$FAKE_HTTPD2" <<'EOF'
@@ -878,7 +971,7 @@ printf '%s' "$OUT" | grep -q "Не удалось автоматически п�
 # реальном роутере ломало бы пробный запуск mihomo (там нет geo-баз).
 FIXDIR3=$TEST_ROOT/install-fixture-mihomo-dir-arg
 mkdir -p "$FIXDIR3/proxy-providers" "$FIXDIR3/bin"
-cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR3/"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$ROOT/speedtest-runtime/prep.awk" "$ROOT/speedtest-runtime/providers.awk" "$ROOT/installer/version_check.sh" "$ROOT/installer/ui.sh" "$ROOT/web/render_stats.awk" "$ROOT/web/stats_cgi.sh" "$ROOT/web/stats_run.sh" "$ROOT/web/stats_update.sh" "$ROOT/web/stats_config.sh" "$ROOT/web/stats_xkeen.sh" "$ROOT/web/stats_components.sh" "$ROOT/web/stats_constructor.sh" "$ROOT/web/stats_codemirror.js" "$ROOT/web/stats_codemirror.css" "$ROOT/web/stats_httpd.py" "$ROOT/web/stats_files.py" "$ROOT/web/stats_auth.py" "$ROOT/web/stats_auth.sh" "$ROOT/web/stats_index.html" "$ROOT/web/stats_style.css" "$ROOT/web/stats_app.js" "$ROOT/web/stats_app_core.js" "$ROOT/web/stats_app_stats.js" "$ROOT/web/stats_app_settings.js" "$ROOT/web/stats_app_updates.js" "$ROOT/web/stats_app_log.js" "$ROOT/web/stats_app_config.js" "$ROOT/web/stats_app_xkeen.js" "$ROOT/web/stats_app_files.js" "$ROOT/web/stats_app_components.js" "$ROOT/web/stats_app_constructor.js" "$ROOT/web/stats_app_constructor_model.js" "$ROOT/web/stats_app_constructor_modules.js" "$ROOT/web/stats_app_constructor_modules_model.js" "$ROOT/speedtest-runtime/node_stats_update.awk" "$ROOT/speedtest-runtime/sub_convert.awk" "$ROOT/web/render_progress.awk" "$ROOT/web/stats_service.sh" "$ROOT/web/stats_init.sh" "$ROOT/install.sh" "$ROOT/uninstall.sh" "$ROOT/mihomo-speedtest.sh" "$ROOT/installer/update_interactive.sh" "$ROOT/config-tools/setup.sh" "$ROOT/config-tools/detect_ua.sh" "$ROOT/config-tools/render_config.awk" "$ROOT/config-tools/fast_wg.awk" "$ROOT/config-tools/wg_import.awk" "$ROOT/config-tools/existing_config.awk" "$ROOT/config-tools/config.example.yaml" "$ROOT/config-tools/render_services.awk" "$ROOT/config-tools/services.default.tsv" "$ROOT/config-tools/config_to_state.awk" "$ROOT/config-tools/constructor_build.sh" "$ROOT/config-tools/reset_config.sh" "$ROOT/config-tools/rule-catalog.tsv" "$ROOT/updater/update.sh" "$ROOT/updater/update_plan.awk" "$ROOT/updater/update_prepare.sh" "$ROOT/updater/update_transaction.sh" "$ROOT/config-tools/migrate_config.sh" "$ROOT/config-tools/migrate_config.awk" "$ROOT/config-tools/config_diff.awk" "$FIXDIR3/"
 
 cat > "$FIXDIR3/config.yaml" <<'EOF'
 proxy-providers:

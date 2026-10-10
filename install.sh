@@ -20,7 +20,7 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh rule-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh reset_config.sh rule-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
@@ -829,9 +829,9 @@ fi
 # `[ -f ] && .` при отсутствии файла прервал бы скрипт, поэтому if.
 if [ -f "$SELFDIR/ui.sh" ]; then . "$SELFDIR/ui.sh"; fi
 
-# Минимальный гео-фильтр, если в конфиге его нет: только российские ноды
+# Минимальный гео-фильтр, если в конфиге его нет: российские и белорусские ноды
 # (подстроки без учёта регистра, см. prep.awk).
-MIN_BLOCK='🇷🇺|Russia|Россия|RU-|RU_|Moscow|Москва|MSK|SPB|СПб'
+MIN_BLOCK='🇷🇺|Russia|Россия|RU-|RU_|Moscow|Москва|MSK|SPB|СПб|🇧🇾|Belarus|Беларусь|Белоруссия|Minsk|Минск'
 
 normalize_block() {
   # BLOCK - список подстрок через | (см. prep.awk), не regex: убираем
@@ -885,6 +885,10 @@ config_geofilter_block() {
 # работать (так и задумано - его не запускают без нод), нужны только версии.
 install_env_check() {
   if [ ! -f "$CONFIG" ] || config_no_nodes "$CONFIG"; then
+    check_versions
+  elif [ -x "$BIN" ] && ! "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" >/dev/null 2>&1; then
+    # Конфиг не проходит mihomo -t: ядро могло не запуститься как раз из-за
+    # него. Процесс не требуем - дальше main() переходит в мягкий режим.
     check_versions
   else
     check_mihomo_process && check_versions
@@ -952,14 +956,14 @@ resolve_block_raw() {
   fi
 
   # Фильтра в конфиге нет (или parser его не нашёл). Не отказываем, а
-  # предлагаем выбор: минимальный (только российские ноды), стандартный
+  # предлагаем выбор: минимальный (российские и белорусские ноды), стандартный
   # (якорь &geofilter из config.example.yaml - тот же, что мастер setup.sh
   # пишет в новый конфиг) или свой. Enter и отсутствие ответа (нет
   # терминала) - минимальный: он всегда есть и решает главную задачу.
   default=$(default_block)
   # Заголовок меню - две строки (перевод строки внутри), пункт 2 - только
   # если в config.example.yaml нашёлся якорь &geofilter.
-  set -- "минимальный - только российские ноды: $MIN_BLOCK"
+  set -- "минимальный - российские и белорусские ноды: $MIN_BLOCK"
   if [ -n "$default" ]; then
     set -- "$@" "стандартный из config.example.yaml - Россия, ряд дальних стран, служебные группы"
   fi
@@ -1522,6 +1526,16 @@ no_nodes_notice() {
   } | ui_note warn
 }
 
+broken_config_notice() {
+  {
+    echo "Конфиг не проходит mihomo -t - установка завершена в мягком режиме."
+    echo "  Файлы и веб-интерфейс установлены; запуск ядра и пробный прогон пропущены."
+    echo "  Откройте веб-интерфейс (адрес ниже), вкладка «Конфиг»: «Исправить формат»,"
+    echo "  «Миграция к шаблону» или «Заменить шаблоном…» (оставит подписки и ноды)."
+    echo "  Или переустановите с CONFIG_MODE=template (миграция) либо CONFIG_MODE=reset"
+    echo "  (замена шаблоном)."
+  } | ui_note warn
+}
 own_config_notice() {
   # Жёлтый блок; пустые строки по краям не нужны - блок и так отделён чертой.
   {
@@ -1540,15 +1554,15 @@ own_config_notice() {
 }
 
 # Конфиг без быстрого пула: мигрировать к шаблону или остаться на своём.
-# Результат - в CONFIG_MODE_CHOSEN (template/own). CONFIG_MODE=template|own
-# в окружении - ответ без вопроса. Enter и отсутствие терминала (cron,
+# Результат - в CONFIG_MODE_CHOSEN (template/own/reset). CONFIG_MODE=template|
+# own|reset в окружении - ответ без вопроса. Enter и отсутствие терминала (cron,
 # обновлятор) - свой конфиг: это ничего не меняет в рабочем config.yaml.
 choose_config_mode() {
   CONFIG_MODE_CHOSEN=own
   case "${CONFIG_MODE:-}" in
-    template|own) CONFIG_MODE_CHOSEN=$CONFIG_MODE; return 0 ;;
+    template|own|reset) CONFIG_MODE_CHOSEN=$CONFIG_MODE; return 0 ;;
     '') ;;
-    *) ui_warn "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template или own) - оставляю свой конфиг"; return 0 ;;
+    *) ui_warn "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template, own или reset) - оставляю свой конфиг"; return 0 ;;
   esac
   # Пояснения к пункту 1 - продолжение того же пункта (перевод строки
   # внутри): ui_menu печатает пункт как есть, ui_note ставит черту на
@@ -1557,11 +1571,14 @@ choose_config_mode() {
     "мигрировать конфиг к шаблону проекта: подписки, свои ноды, DNS, свои входы
     и локальные настройки (порты, external-controller, sniffer и т.п.) сохранятся;
     группы, rule-providers и правила будут из шаблона (ваши останутся только в бэкапе)" \
-    "оставить свой конфиг - только статистика, быстрый пул настраиваете сами"
+    "оставить свой конфиг - только статистика, быстрый пул настраиваете сами" \
+    "заменить шаблоном полностью: останутся только подписки и свои ноды, всё остальное
+    (dns, свои входы, порты, группы и правила) будет из шаблона; старый конфиг - в бэкапе"
   ui_ask "Введите номер или Enter для 2"
   read -r cm_input || { cm_input=""; echo >&2; }
   case $cm_input in
     1) CONFIG_MODE_CHOSEN=template ;;
+    3) CONFIG_MODE_CHOSEN=reset ;;
   esac
 }
 
@@ -1584,6 +1601,21 @@ print_migration_report() {
       if (list["replaced"] != "") print "будут заменены шаблоном: " list["replaced"]
       if (list["dropped"] != "") print "НЕ перенесутся (шаблон их не знает): " list["dropped"]
       if (list["files"] != "") print "НЕ перенесутся file-провайдеры: " list["files"]
+    }
+  ' "$1" | ui_note info
+}
+
+# Сводка отчёта reset_config.sh: только числа и имена, без значений.
+print_reset_report() {
+  awk -F'|' '
+    $1 == "RESET" && $2 == "kept-subscriptions" { subs = $3 }
+    $1 == "RESET" && $2 == "kept-nodes" { nodes = $3 }
+    $1 == "REVIEW" && $2 == "file-provider-dropped" { files = files sep $3; sep = ", " }
+    END {
+      print "Замена шаблоном подготовлена:"
+      print "останутся подписки и свои ноды: подписок " subs + 0 ", нод " nodes + 0
+      print "будут из шаблона: dns, свои входы, порты, группы, правила, гео-фильтр"
+      if (files != "") print "НЕ перенесутся file-провайдеры: " files
     }
   ' "$1" | ui_note info
 }
@@ -1649,33 +1681,71 @@ migrate_to_template() {
     [Yy]*) ;;
     *) ui_warn "Миграция отменена, конфиг не тронут"; rm -rf "$mt_work"; return 1 ;;
   esac
+  apply_candidate_config "$mt_work/config.yaml" "$mt_target" "Конфиг мигрирован к шаблону, ядро работает" "$mt_work"
+}
+
+# Замена конфига шаблоном: из прежнего берутся только подписки и свои ноды
+# (reset_config.sh). Коды возврата те же, что у migrate_to_template. При
+# CONFIG_MODE=reset вопрос о подтверждении не задаётся: переменная окружения -
+# явное согласие, прежний конфиг остаётся в бэкапе.
+reset_to_template() {
+  rt_work=$(mktemp -d "$TMPROOT/mst-install-reset.XXXXXX") || { ui_fail "Не удалось создать временный каталог"; return 1; }
+  rt_target=$(config_target) || { ui_fail "Не удалось определить файл конфига"; rm -rf "$rt_work"; return 1; }
+  if ! cp "$CONFIG" "$rt_work/source.yaml"; then
+    ui_fail "Не удалось прочитать $CONFIG"; rm -rf "$rt_work"; return 1
+  fi
+  if ! sh "$SELFDIR/reset_config.sh" --source "$rt_work/source.yaml" --output "$rt_work/config.yaml" \
+      --report "$rt_work/report" --state-out "$rt_work/state" >"$rt_work/log" 2>&1; then
+    rt_reason=$(sed -n 's/^ERROR: //p' "$rt_work/log" | head -n 1)
+    ui_warn "Замена шаблоном невозможна: ${rt_reason:-$(tail -n 1 "$rt_work/log")}"
+    rm -rf "$rt_work"; return 1
+  fi
+  print_reset_report "$rt_work/report"
+  if [ "${CONFIG_MODE:-}" != reset ]; then
+    ui_ask "Заменить конфиг шаблоном (старый сохранится бэкапом рядом)? [y/N]"
+    read -r rt_ans || { rt_ans=""; echo >&2; }
+    case $rt_ans in
+      [Yy]*) ;;
+      *) ui_warn "Замена отменена, конфиг не тронут"; rm -rf "$rt_work"; return 1 ;;
+    esac
+  fi
+  apply_candidate_config "$rt_work/config.yaml" "$rt_target" "Конфиг заменён шаблоном, ядро работает" "$rt_work"
+}
+
+# Применение кандидата $1 к файлу конфига $2: mihomo -t, бэкап рядом с
+# $CONFIG, замена, перезапуск ядра, при неудаче - возврат из бэкапа.
+# $3 - строка успеха, $4 - временный каталог (удаляется). Коды: 0 - ядро
+# работает с новым конфигом; 1 - конфиг не тронут (или возвращён и ядро
+# поднялось); 2 - ядро не поднялось даже на прежнем конфиге.
+apply_candidate_config() {
+  ac_new=$1; ac_target=$2; ac_ok=$3; ac_work=$4
   # Вывод mihomo -t - в журнал установки; ui_run при ошибке сам покажет его
   # последние строки (раньше это делал tail -n 5).
-  if ! ui_run "Новый конфиг: mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$mt_work/config.yaml"; then
+  if ! ui_run "Новый конфиг: mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$ac_new"; then
     ui_warn "Новый конфиг не прошёл mihomo -t, $CONFIG не тронут"
-    rm -rf "$mt_work"; return 1
+    rm -rf "$ac_work"; return 1
   fi
-  mt_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
-  if ! cp -p "$CONFIG" "$mt_backup"; then
-    ui_fail "Не удалось сохранить бэкап $mt_backup, конфиг не тронут"
-    rm -rf "$mt_work"; return 1
+  ac_backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
+  if ! cp -p "$CONFIG" "$ac_backup"; then
+    ui_fail "Не удалось сохранить бэкап $ac_backup, конфиг не тронут"
+    rm -rf "$ac_work"; return 1
   fi
-  ui_ok "Старый конфиг сохранён в $mt_backup"
-  if ! replace_config_file "$mt_work/config.yaml" "$mt_target"; then
-    ui_fail "Не удалось записать $mt_target, конфиг не тронут"
-    rm -rf "$mt_work"; return 1
+  ui_ok "Старый конфиг сохранён в $ac_backup"
+  if ! replace_config_file "$ac_new" "$ac_target"; then
+    ui_fail "Не удалось записать $ac_target, конфиг не тронут"
+    rm -rf "$ac_work"; return 1
   fi
-  rm -rf "$mt_work"
+  rm -rf "$ac_work"
   if ui_run "Перезапускаю ядро с новым конфигом (xkeen -restart)" restart_core_and_wait; then
-    ui_ok "Конфиг мигрирован к шаблону, ядро работает"
+    ui_ok "$ac_ok"
     return 0
   fi
-  ui_warn "mihomo не поднялся с новым конфигом - возвращаю прежний из $mt_backup"
-  if replace_config_file "$mt_backup" "$mt_target" && ui_run "Перезапуск ядра на прежнем конфиге" restart_core_and_wait; then
+  ui_warn "mihomo не поднялся с новым конфигом - возвращаю прежний из $ac_backup"
+  if replace_config_file "$ac_backup" "$ac_target" && ui_run "Перезапуск ядра на прежнем конфиге" restart_core_and_wait; then
     ui_ok "Ядро работает на прежнем конфиге"
     return 1
   fi
-  ui_fail "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH (бэкап: $mt_backup)"
+  ui_fail "ОШИБКА: ядро не поднялось и на прежнем конфиге - проверьте по SSH (бэкап: $ac_backup)"
   return 2
 }
 
@@ -1697,6 +1767,17 @@ record_config_schema() {
   return 0
 }
 
+# Заготовка конфига (например, XKeen после установки mihomo: порты и
+# listeners): ни подписок, ни своих нод, ни быстрого пула проекта. Для неё
+# установщик запускает мастер настройки, как без конфига: он спросит ссылку
+# на подписку (Enter - пропустить) и соберёт конфиг из шаблона, сохранив входы
+# заготовки. Конфиг проекта без нод (есть fast) заготовкой не считается, как и
+# конфиг, который только что собрал сам мастер (MST_CONFIG_FROM_TEMPLATE=1).
+install_config_is_stub() {
+  [ "${MST_CONFIG_FROM_TEMPLATE:-0}" != 1 ] || return 1
+  config_no_nodes "${1:-$CONFIG}" && ! has_fast_group "${1:-$CONFIG}"
+}
+
 # Нет провайдера fast: спросить, что делать с конфигом. 0 - продолжать
 # установку (конфиг мигрирован или остаётся свой), 1 - остановиться.
 # MST_CONFIG_FROM_TEMPLATE=1 - конфиг только что собрал мастер setup.sh.
@@ -1715,7 +1796,47 @@ resolve_config_mode() {
     if [ "$mtt_rc" = 0 ]; then record_config_schema; return 0; fi
     [ "$mtt_rc" = 2 ] && return 1
   fi
+  if [ "$CONFIG_MODE_CHOSEN" = reset ]; then
+    mtt_rc=0; reset_to_template || mtt_rc=$?
+    if [ "$mtt_rc" = 0 ]; then record_config_schema; return 0; fi
+    [ "$mtt_rc" = 2 ] && return 1
+  fi
   MST_OWN_CONFIG=1
+  return 0
+}
+
+# Конфиг есть, но mihomo -t его не принимает. Установку это не останавливает
+# (мягкий режим): меню - мигрировать к шаблону, оставить как есть, заменить
+# шаблоном; Enter и отсутствие терминала - оставить. CONFIG_MODE=template|own|
+# reset отвечает без вопроса. Результат - MST_SOFT_CONFIG: 0 - конфиг приведён
+# в порядок (миграцией или заменой), 1 - остаётся как есть и main() пропускает
+# разбор подписок, запуск ядра и пробный прогон. Всегда возвращает 0.
+handle_broken_config() {
+  MST_SOFT_CONFIG=1
+  hb_choice=2
+  case "${CONFIG_MODE:-}" in
+    template) hb_choice=1 ;;
+    own) hb_choice=2 ;;
+    reset) hb_choice=3 ;;
+    '')
+      reopen_tty
+      ui_menu "Конфиг не проходит mihomo -t - что делать" 2 \
+        "мигрировать конфиг к шаблону проекта: подписки, свои ноды, DNS, свои входы
+    и локальные настройки сохранятся; группы и правила будут из шаблона" \
+        "оставить как есть и продолжить установку (исправите в веб-интерфейсе: Конфиг)" \
+        "заменить шаблоном полностью: останутся только подписки и свои ноды"
+      ui_ask "Введите номер или Enter для 2"
+      read -r hb_in || { hb_in=""; echo >&2; }
+      case $hb_in in 1|3) hb_choice=$hb_in ;; esac ;;
+    *) ui_warn "Неизвестный CONFIG_MODE=$CONFIG_MODE (ждали template, own или reset) - оставляю конфиг как есть" ;;
+  esac
+  hb_rc=0
+  case $hb_choice in
+    1) migrate_to_template || hb_rc=$? ;;
+    3) reset_to_template || hb_rc=$? ;;
+    *) return 0 ;;
+  esac
+  [ "$hb_rc" != 0 ] || MST_SOFT_CONFIG=0
   return 0
 }
 
@@ -1885,14 +2006,18 @@ main() {
   [ "$env_err" = /dev/null ] || rm -f "$env_err" 2>/dev/null || :
   ui_ok "Процесс mihomo, версии"
 
-  if [ ! -f "$CONFIG" ]; then
+  if [ ! -f "$CONFIG" ] || install_config_is_stub "$CONFIG"; then
     # Новый роутер: config.yaml ещё нет. Вместо отказа передаём управление
     # мастеру настройки (setup.sh, который сам в конце вызывает install.sh
     # ещё раз - см. setup.sh) - это второй из двух сценариев однострочной
     # установки (см. bootstrap-блок в начале файла): "конфиг уже настроен"
     # обрабатывается штатным продолжением main() ниже, "конфига нет" - тут.
     [ -f "$SELFDIR/setup.sh" ] || { ui_fail "$CONFIG не найден и $SELFDIR/setup.sh недоступен для настройки"; return 1; }
-    ui_ok "config.yaml не найден - запускаю мастер настройки"
+    if [ -f "$CONFIG" ]; then
+      ui_ok "В config.yaml нет ни подписок, ни нод (заготовка XKeen?) - запускаю мастер настройки"
+    else
+      ui_ok "config.yaml не найден - запускаю мастер настройки"
+    fi
     # Мастер продолжит оформление строкой раздела (без второй рамки) и
     # пишет в тот же журнал; env переживает exec.
     export UI_CONTINUE=1 UI_LOG
@@ -1910,14 +2035,13 @@ main() {
   done
   ui_ok "Файлы проекта на месте"
   NO_NODES=0
+  MST_SOFT_CONFIG=0
   if config_no_nodes "$CONFIG"; then NO_NODES=1; fi
   if [ "$NO_NODES" = 1 ]; then
     ui_warn "В конфиге нет ни подписок, ни нод: проверка mihomo -t и запуск ядра пропущены"
-  else
-    ui_run "Конфиг проходит mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" || {
-      ui_fail "$CONFIG не проходит mihomo -t"
-      return 1
-    }
+  elif ! ui_run "Конфиг проходит mihomo -t" "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG"; then
+    ui_warn "$CONFIG не проходит mihomo -t - установка продолжится, конфиг можно исправить в веб-интерфейсе"
+    handle_broken_config
   fi
 
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Конфиг и фильтр"
@@ -1926,8 +2050,9 @@ main() {
   # разбора провайдеров: дальше всё работает уже с итоговым конфигом
   # (в том числе гео-фильтр &geofilter из шаблона).
   reopen_tty
-  if [ "$NO_NODES" = 1 ]; then
-    # Нет подписок - нечего разбирать и кэшировать; фильтр - из конфига.
+  if [ "$NO_NODES" = 1 ] || [ "$MST_SOFT_CONFIG" = 1 ]; then
+    # Нет подписок (или конфиг не проходит mihomo -t и разбирать его нельзя) -
+    # нечего разбирать и кэшировать; фильтр - из конфига.
     SOURCES=
     BLOCK_COUNT=1
     BLOCK_1=$(config_geofilter_block "$CONFIG")
@@ -2023,6 +2148,8 @@ main() {
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Пробный прогон"
   if [ "$NO_NODES" = 1 ]; then
     ui_warn "Пробный прогон пропущен: в конфиге нет нод"
+  elif [ "$MST_SOFT_CONFIG" = 1 ]; then
+    ui_warn "Пробный прогон пропущен: конфиг не проходит mihomo -t"
   elif [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
     print_trial_log_tail
@@ -2037,6 +2164,7 @@ main() {
   # Свой конфиг без быстрого пула - жёлтый блок прямо перед сводкой.
   [ "${MST_OWN_CONFIG:-0}" != 1 ] || own_config_notice
   [ "$NO_NODES" != 1 ] || no_nodes_notice
+  [ "$MST_SOFT_CONFIG" != 1 ] || broken_config_notice
   ui_done "mihomo-speedtest ${done_tag}установлен"
   # Ссылку выделяем цветом рамки заголовка (жирный акцент); пояснения вроде
   # «веб-интерфейс отключён» остаются обычным текстом.

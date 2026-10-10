@@ -38,6 +38,8 @@ function header(s, t) { t=s; sub(/:.*/,"",t); return t }
     order[side,++nkeys[side]]=key
   } else if (line ~ /^[^ #]/) bad(where() ": строка без отступа не похожа на ключ верхнего уровня (ключ в кавычках, список или поток?)")
   sections[side,key]=sections[side,key] line "\n"
+  # Группа источника ссылается на провайдеров (use:): конфиг ждёт подписок.
+  if(side==1 && line ~ /(^|[ {,])use:/) uses_providers=1
 }
 # Строка "    url: ..." подписки (первая, как есть).
 function provider_url(part, a,n,j) {
@@ -238,7 +240,14 @@ END {
   if(failed) exit 1
   override_from_state()
   if(failed) exit 1
-  if(!seen[1,"proxy-providers"]) bad("в конфиге нет секции proxy-providers: - миграция переносит подписки оттуда")
+  # Нет секции proxy-providers: у голого конфига (пустой файл, заглушка XKeen,
+  # только свои ноды) подписок нет - секция считается пустой. Если же группы
+  # ссылаются на провайдеров (use:), а секции нет, подписки потерялись бы -
+  # отказ (имя секции могли изменить).
+  if(!seen[1,"proxy-providers"]) {
+    if(uses_providers) bad("в конфиге нет секции proxy-providers: - миграция переносит подписки оттуда")
+    seen[1,"proxy-providers"]=1; sections[1,"proxy-providers"]="proxy-providers:\n"
+  }
   if(sections[1,"proxy-providers"] !~ /^proxy-providers:[ ]*\n/) bad("proxy-providers: поддерживается только блочная запись (proxy-providers: и провайдеры на следующих строках), не { ... }")
   # Нет своих нод - то же, что "proxies: []" (многие конфиги живут только
   # на подписках и секцию proxies не заводят вовсе).

@@ -21,6 +21,8 @@ anchors:
 proxy-groups:
   - name: 'Заблок. сервисы'
     type: select
+  - name: '⚙️Manual'
+    type: select
   # --- SERVICE_GROUPS:BEGIN ---
   # --- SERVICE_GROUPS:END ---
 rule-providers:
@@ -111,9 +113,50 @@ awk '{print} /# --- SERVICE_GROUPS:END ---/{print "  - name: Netflix"; print "  
   - DOMAIN-KEYWORD,nflx,Netflix\
   - MATCH,DIRECT/' > "$WORK/c3.yaml"
 import "$WORK/c3.yaml" || fail "импорт своего сервиса с ошибкой"
-assert_eq "$(cat "$WORK/st/services.tsv")" "$(printf 'svc\tnetflix\tNetflix\tother\nicon\tnetflix\thttps://i/n.png\nsrc\tnetflix\tnetflix\tdomain\thttps://n/d.mrs\nsrc\tnetflix\tnetflix\tipcidr\thttps://n/i.mrs\ndom\tnetflix\tkeyword\tnflx')" "свой сервис"
-grep -q 'REVIEW|custom-group|Mine' "$WORK/report" || fail "своя не-select группа - в отчёт"
+assert_eq "$(cat "$WORK/st/services.tsv")" "$(printf 'svc\tnetflix\tNetflix\tother\nicon\tnetflix\thttps://i/n.png\nsvc\tmine\tMine\tother\nsrc\tnetflix\tnetflix\tdomain\thttps://n/d.mrs\nsrc\tnetflix\tnetflix\tipcidr\thttps://n/i.mrs\ndom\tnetflix\tkeyword\tnflx')" "свой сервис"
+grep -q 'REVIEW|custom-group-pool|Mine' "$WORK/report" || fail "своя не-select группа - сервис с пометкой в отчёте"
 grep -q 'FAST-WG' "$WORK/report" && fail "группы FAST-WG ведёт fast_wg.awk - не в отчёт"
+
+# test_import_orphan_rules: группы пользователя вне шаблона становятся
+# сервисами, правило на несуществующую цель перенаправляется - в собранном
+# конфиге нет висящих ссылок
+dangling_targets() {
+  awk '
+    /^[A-Za-z0-9_-]+:/ { sect = $0; sub(/:.*/, "", sect); next }
+    sect == "proxy-groups" && /^  - name:/ { n = $0; sub(/^  - name:[ ]*/, "", n); gsub(/^[\047"]|[\047"]$/, "", n); grp[n] = 1 }
+    sect == "rules" && /^  - / {
+      r = $0; sub(/^  - /, "", r); sub(/[ \t]+#.*$/, "", r)
+      k = split(r, f, ","); t = f[k]; if (t == "no-resolve" && k > 1) t = f[k - 1]
+      rules[++nr] = t
+    }
+    END { for (i = 1; i <= nr; i++) if (!(rules[i] in grp) && rules[i] !~ /^(DIRECT|REJECT|REJECT-DROP|PASS|COMPATIBLE|MATCH)$/) print rules[i] }
+  ' "$1"
+}
+awk '{print} /# --- SERVICE_GROUPS:END ---/{
+    print "  - name: FaceTime"; print "    type: select"; print "    proxies: [DIRECT]"
+    print "  - name: 🚀Auto-Best"; print "    type: url-test"; print "    interval: 300"
+    print "  - name: \"A, B\""; print "    <<: *select-default"}' "$WORK/c0.yaml" |
+  sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,facetime.apple.com,FaceTime\
+  - AND,((NETWORK,UDP),(DST-PORT,3478-3497)),FaceTime\
+  - DOMAIN-SUFFIX,xhamster.com,🚀Auto-Best\
+  - GEOSITE,foo,Ghost,no-resolve\
+  - OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # хвост\
+  - MATCH,DIRECT/' > "$WORK/c11.yaml"
+import "$WORK/c11.yaml" || fail "импорт групп вне шаблона с ошибкой"
+grep -q "^svc	facetime	FaceTime	other$" "$WORK/st/services.tsv" || fail "группа FaceTime не стала сервисом"
+grep -q "^svc	auto-best	🚀Auto-Best	other$" "$WORK/st/services.tsv" || fail "группа 🚀Auto-Best не стала сервисом"
+grep -q '^gkey' "$WORK/st/services.tsv" && fail "type:/proxies:/interval: не-select группы не должны попадать в gkey"
+grep -q "^dom	facetime	suffix	facetime.apple.com$" "$WORK/st/services.tsv" || fail "домен FaceTime не перенесён как dom"
+grep -qxF 'AND,((NETWORK,UDP),(DST-PORT,3478-3497)),FaceTime' "$WORK/st/user-rules.txt" || fail "правило на сервис потеряно"
+grep -qxF 'GEOSITE,foo,DIRECT,no-resolve' "$WORK/st/user-rules.txt" || fail "правило на Ghost не перенаправлено на запасную цель"
+grep -qxF 'OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual # хвост' "$WORK/st/user-rules.txt" && fail "тело правила хранится без комментария"
+grep -qxF 'OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),⚙️Manual' "$WORK/st/user-rules.txt" || fail "правило на базовую группу ⚙️Manual тронуто"
+grep -q 'REVIEW|custom-group-pool|FaceTime' "$WORK/report" || fail "FaceTime: нет custom-group-pool"
+grep -q 'REVIEW|custom-group-pool|🚀Auto-Best' "$WORK/report" || fail "🚀Auto-Best: нет custom-group-pool"
+grep -q 'REVIEW|custom-group-name' "$WORK/report" || fail "группа с запятой: нет custom-group-name"
+grep -q '^REVIEW|rule-retargeted|' "$WORK/report" || fail "нет rule-retargeted"
+build "$WORK/st/services.tsv" '' "$WORK/st/user-rules.txt" > "$WORK/c11b.yaml" || fail "сборка из состояния с группами пользователя"
+assert_eq "$(dangling_targets "$WORK/c11b.yaml")" "" "в собранном конфиге нет правил с несуществующей целью"
 
 # test_import_geofilter
 sed "s/&geofilter '(?i)RU|old'/\&geofilter '(?i)RU|Россия|whitelist'/" "$WORK/c0.yaml" > "$WORK/c4.yaml"
