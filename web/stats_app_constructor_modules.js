@@ -5,7 +5,7 @@
 // конструктором (см. app-constructor.js): сборка на роутере, mihomo -t.
 
 import { el, fetchJson } from './app-core.js';
-import { UA_PRESETS } from './app-constructor-modules-model.js';
+import { UA_PRESETS, linkToProxy, proxiesFromYaml } from './app-constructor-modules-model.js';
 
 // ----- фильтр нод: страны и свои слова -----
 // Один фильтр на всё: слова идут в exclude-filter подписок в config.yaml и в
@@ -617,19 +617,29 @@ export function createModuleCards(ctx) {
   }
 
   // Вставленный текст: ссылки по одной в строке или YAML нод. Возвращает
-  // {added, errs, rest}: сколько нод добавлено, ошибки по строкам и строки,
-  // которые не добавились (остаются в поле для правки).
+  // {added, errs, rest, renamed}: сколько нод добавлено, ошибки по строкам,
+  // строки, которые не добавились (остаются в поле для правки), и ноды, чьё
+  // имя было занято и изменилось ("hy2 → hy2 nl.example").
   function addPasted(text) {
     var t = String(text || '');
     if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://) или YAML'); }
     if (/^\s*-\s/m.test(t) || /^\s*name:/m.test(t)) {
-      return { added: mods.addProxyYaml(t).length, errs: [], rest: [] };
+      var orig = proxiesFromYaml(t).map(function (p) { return p.name; });
+      var got = mods.addProxyYaml(t);
+      var ren = [];
+      got.forEach(function (n, i) { if (n !== orig[i]) { ren.push(orig[i] + ' → ' + n); } });
+      return { added: got.length, errs: [], rest: [], renamed: ren };
     }
-    var res = { added: 0, errs: [], rest: [] };
+    var res = { added: 0, errs: [], rest: [], renamed: [] };
     t.split(/\r?\n/).forEach(function (l, i) {
       var line = l.trim();
       if (!line) { return; }
-      try { mods.addProxyLink(line); res.added++; } catch (e) { res.errs.push('строка ' + (i + 1) + ': ' + e.message); res.rest.push(line); }
+      try {
+        var want = linkToProxy(line).name;
+        var got2 = mods.addProxyLink(line);
+        res.added++;
+        if (got2 !== want) { res.renamed.push(want + ' → ' + got2); }
+      } catch (e) { res.errs.push('строка ' + (i + 1) + ': ' + e.message); res.rest.push(line); }
     });
     return res;
   }
@@ -667,8 +677,9 @@ export function createModuleCards(ctx) {
       try { res = addPasted(area.value); } catch (e) { ctx.msg(e.message, 'err'); return; }
       proxDraft = res.rest.join('\n');
       ctx.redraw();
-      if (res.errs.length) { ctx.msg((res.added ? 'Добавлено нод: ' + res.added + '. ' : '') + 'Не добавлено - ' + res.errs.join('; '), 'err'); }
-      else { ctx.msg('Добавлено нод: ' + res.added, 'ok'); }
+      var renNote = res.renamed.length ? '. Имя было занято, переименованы: ' + res.renamed.join('; ') : '';
+      if (res.errs.length) { ctx.msg((res.added ? 'Добавлено нод: ' + res.added + renNote + '. ' : '') + 'Не добавлено - ' + res.errs.join('; '), 'err'); }
+      else { ctx.msg('Добавлено нод: ' + res.added + renNote, 'ok'); }
     });
     var file = el('input'); file.type = 'file'; file.accept = '.conf'; file.multiple = true; file.hidden = true;
     file.setAttribute('aria-label', 'WireGuard .conf');
@@ -695,7 +706,7 @@ export function createModuleCards(ctx) {
         var name = f.name.replace(/\.conf$/i, '');
         return fetchJson('/api/constructor/wgconf', { method: 'POST', body: '### MST-WG ' + name + '\n' + text,
           headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (r) {
-          try { mods.addProxyYaml(r.yaml || ''); done.push(name); } catch (e) { errs.push(f.name + ': ' + e.message); }
+          try { mods.addProxyYaml(r.yaml || '', true); done.push(name); } catch (e) { errs.push(f.name + ': ' + e.message); }
         }, function (e) { errs.push(f.name + ': ' + errText(e)); });
       });
     });

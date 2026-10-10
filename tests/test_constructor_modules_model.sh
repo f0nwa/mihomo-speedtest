@@ -41,7 +41,23 @@ eq(m.proxies().map(p => [p.name, p.type, p.server, p.port]), [['🇩🇪 Hysteri
 m.addProxyLink('hy2://p%40ss@nl.example:8443?sni=nl.example&obfs=salamander&obfs-password=ob&insecure=1&alpn=h3,h2#%F0%9F%87%B3%F0%9F%87%B1%20NL');
 let nl = m.serialize().proxies;
 eq(nl.includes("  - name: '🇳🇱 NL'\n    type: hysteria2\n    server: 'nl.example'\n    port: 8443\n    password: 'p@ss'\n    obfs: 'salamander'\n    obfs-password: 'ob'\n    sni: 'nl.example'\n    alpn: ['h3', 'h2']\n    skip-cert-verify: true\n    udp: true\n"), true, 'hy2 -> YAML');
-throws(() => m.addProxyLink('hy2://p@nl.example:8443#🇳🇱 NL'), /уже есть/, 'повтор имени ноды');
+// Имя занято (одинаковый #фрагмент у разных серверов, например "hy2"): вместо
+// отказа к имени добавляется адрес сервера, а если и оно занято - номер.
+eq(m.addProxyLink('hy2://p@nl2.example:8443#🇳🇱 NL'), '🇳🇱 NL nl2.example', 'повтор имени: добавлен адрес сервера');
+eq(m.addProxyLink('hy2://p@nl2.example:9443#🇳🇱 NL'), '🇳🇱 NL-2', 'повтор имени и адреса: номер');
+eq(m.addProxyLink('hy2://p@nl2.example:9444#🇳🇱 NL'), '🇳🇱 NL-3', 'третий повтор: следующий номер');
+eq(m.addProxyLink('hy2://p@a.example:443#hy2'), 'hy2', 'первое hy2 без изменений');
+eq(m.addProxyLink('hy2://p@b.example:443#hy2'), 'hy2 b.example', 'второе hy2 получает адрес сервера');
+eq(m.addProxyLink('hy2://p@c.example:443'), 'c.example:443', 'без #фрагмента имя - адрес:порт');
+eq(m.addProxyLink('hy2://p@c.example:443'), 'c.example:443-2', 'повтор адреса:порта - номер (адрес в имени уже есть)');
+eq(m.proxies().filter(p => p.name === 'hy2 b.example')[0].server, 'b.example', 'нода записана под новым именем');
+eq(m.serialize().proxies.includes("  - name: 'hy2 b.example'\n    type: hysteria2"), true, 'YAML ноды с новым именем');
+// Длинное имя укладывается в 64 символа и после переименования
+const longName = 'я'.repeat(64);
+m.addProxyLink('hy2://p@l1.example:443#' + longName);
+const longRes = m.addProxyLink('hy2://p@l2.example:443#' + longName);
+eq(Array.from(longRes).length <= 64 && longRes.endsWith('l2.example') && longRes !== longName, true, 'длинное имя при повторе укладывается в 64');
+['🇳🇱 NL nl2.example', '🇳🇱 NL-2', '🇳🇱 NL-3', 'hy2', 'hy2 b.example', 'c.example:443', 'c.example:443-2', longName, longRes].forEach(n => m.removeProxy(n));
 // vless reality
 let r = M.linkToProxy('vless://11111111-2222-3333-4444-555555555555@v.example:443?type=tcp&security=reality&sni=sni.example&fp=chrome&pbk=PUB&sid=ab&flow=xtls-rprx-vision#R1');
 eq(r.yaml, "  - name: 'R1'\n    type: vless\n    server: 'v.example'\n    port: 443\n    uuid: '11111111-2222-3333-4444-555555555555'\n    flow: 'xtls-rprx-vision'\n    udp: true\n    tls: true\n    servername: 'sni.example'\n    client-fingerprint: 'chrome'\n    reality-opts: { public-key: 'PUB', short-id: 'ab' }\n    network: tcp\n", 'vless reality');
@@ -81,7 +97,11 @@ eq(m.serialize().proxies.includes("  - name: Own\n    type: hysteria2\n"), true,
 throws(() => m.addProxyYaml('type: x'), /Нужны записи/, 'YAML без нод');
 throws(() => m.addProxyYaml("- type: x\n  name: y\n"), /name/, 'name не первым');
 throws(() => m.addProxyYaml("- name: z\n\tport: 1\n"), /Табуляция/, 'табуляция');
-throws(() => m.addProxyYaml("- name: Own\n  type: ss\n"), /уже есть/, 'повтор имени в YAML');
+// Повтор имени в YAML тоже переименовывается, а не отклоняется
+eq(m.addProxyYaml("- name: Own\n  type: ss\n"), ['Own-2'], 'повтор имени в YAML: номер (адреса у ноды нет)');
+eq(m.addProxyYaml("- name: Own\n  type: ss\n  server: srv.example\n"), ['Own srv.example'], 'повтор имени в YAML: адрес сервера');
+m.removeProxy('Own-2'); m.removeProxy('Own srv.example');
+throws(() => m.addProxyYaml("- name: Own\n  type: ss\n", true), /уже есть/, 'strict (WireGuard-импорт): повтор имени отклоняется');
 m.renameProxy('Own', 'Own2');
 eq(m.proxies().map(p => p.name).includes('Own2') && !m.proxies().map(p => p.name).includes('Own'), true, 'переименование');
 throws(() => m.renameProxy('Own2', '🇩🇪 Hysteria2'), /уже есть/, 'переименование в занятое');
