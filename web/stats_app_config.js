@@ -55,8 +55,8 @@ function modeBar(current) {
 }
 
 export function renderConfig() {
-  if (pendingMigration || savedMode() !== 'constructor') { renderYaml(modeBar('yaml')); return; }
-  renderConstructor(modeBar('constructor'), { renderDiff: renderDiff });
+  if (pendingMigration || pendingAction || savedMode() !== 'constructor') { renderYaml(modeBar('yaml')); return; }
+  renderConstructor(modeBar('constructor'), { renderDiff: renderDiff, templateAction: templateActionFromConstructor });
 }
 
 // Карточка «Доступно обновление конфига» (вкладка «Обновления») просит
@@ -64,6 +64,19 @@ export function renderConfig() {
 // повторного подтверждения, всё объяснено в карточке.
 var pendingMigration = false;
 export function requestTemplateMigration() { pendingMigration = true; }
+
+// «Миграция к шаблону» / «Заменить шаблоном…» нажали в панели конструктора:
+// действия работают с текстом и применением config.yaml, поэтому открывается
+// режим YAML и действие запускается там (со своими подтверждениями).
+var pendingAction = null;
+function templateActionFromConstructor(name) {
+  if (configDirty() && !window.confirm('Несохранённые правки конструктора пропадут. Перейти в YAML и выполнить действие?')) { return; }
+  pendingAction = name;
+  saveMode('yaml');
+  leaveConfig();
+  nextView();
+  renderConfig();
+}
 var codeMirrorPromise = null;
 
 function loadCodeMirror() {
@@ -432,6 +445,12 @@ function renderYaml(bar) {
     var checkBtn = btn(row1, 'Проверить', true);
     var diffBtn = btn(row1, 'Изменения', true);
     var resetBtn = btn(row1, 'Отменить правки', true);
+    // Починка конфига шаблоном - на самой панели, а не в меню «Ещё»: нужна
+    // новичку первой. Те же две кнопки есть в панели конструктора.
+    var tplBtn = btn(row1, 'Миграция к шаблону', true);
+    tplBtn.title = 'Только меняет текст в редакторе: служебные разделы из шаблона, подписки и локальные настройки сохраняются; после применения карточка обновления конфига исчезнет';
+    var resetTplBtn = btn(row1, 'Заменить шаблоном…', true);
+    resetTplBtn.title = 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; применяется сразу, старый конфиг уходит в бэкап';
     // «Ещё»: редкие действия (починка, откат, журнал) - меню справа в той же панели.
     var moreWrap = el('div', 'config-more');
     var moreBtn = btn(moreWrap, 'Ещё ▾', true);
@@ -449,8 +468,6 @@ function renderYaml(bar) {
     }
     menuGroup('Починка');
     var fmtBtn = menuItem('Исправить формат', false, 'Только меняет текст в редакторе: BOM, CRLF, табы, пробелы в конце строк');
-    var tplBtn = menuItem('Миграция к шаблону', false, 'Только меняет текст в редакторе; после применения карточка обновления конфига исчезнет');
-    var resetTplBtn = menuItem('Заменить шаблоном…', true, 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; применяется сразу, старый конфиг уходит в бэкап');
     var wgBtn = menuItem('Импорт WireGuard…', false, 'Добавляет ноды из .conf (WireGuard и AmneziaWG) в proxies и группы; только меняет текст в редакторе');
     moreMenu.appendChild(el('div', 'config-more-sep'));
     menuGroup('История');
@@ -721,6 +738,10 @@ function renderYaml(bar) {
       ed.refresh();
       loadBackups();
       if (pendingMigration) { pendingMigration = false; repair('template'); }
+      if (pendingAction) {
+        var pa = pendingAction; pendingAction = null;
+        (pa === 'reset' ? resetTplBtn : tplBtn).click();
+      }
     });
 
     checkBtn.addEventListener('click', function () {
@@ -1007,6 +1028,7 @@ function renderYaml(bar) {
       if (alive() && check && check.ok === false) { renderBrokenBanner(check); }
     })['catch'](function () {});
   })['catch'](function (err) {
+    pendingAction = null;
     pendingMigration = false;   // миграцию с карточки «Обновлений» не откладываем до следующего открытия
     if (!alive()) { return; }
     var d = err.data || {};
