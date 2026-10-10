@@ -28,7 +28,7 @@ export var GEO_CATALOG = [
   geoCountry('RU', '🇷🇺', 'Россия', 'Russia', ['RU-', 'RU_', 'Moscow', 'Москва', 'MSK', 'МСК', 'SPB', 'СПб'], true),
   geoCountry('UA', '🇺🇦', 'Украина', 'Ukraine', [], true),
   geoCountry('KZ', '🇰🇿', 'Казахстан', 'Kazakhstan', [], true),
-  geoCountry('BY', '🇧🇾', 'Беларусь', 'Belarus', ['Minsk', 'Минск'], true),
+  geoCountry('BY', '🇧🇾', 'Беларусь', 'Belarus', ['Minsk', 'Минск', 'Белоруссия'], true),
   geoCountry('TR', '🇹🇷', 'Турция', 'Turkey', ['Türkiye'], true),
   geoCountry('IL', '🇮🇱', 'Израиль', 'Israel', [], true),
   geoCountry('IN', '🇮🇳', 'Индия', 'India', [], true),
