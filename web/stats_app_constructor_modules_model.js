@@ -111,6 +111,28 @@ export function serializeProxies(list) {
   return out.length ? out.join('\n') + '\n' : '';
 }
 
+// Укладывает имя в 64 символа, сохраняя хвост tail (адрес или номер).
+function fitName(base, tail) {
+  var room = 64 - Array.from(tail).length;
+  return Array.from(base).slice(0, Math.max(room, 1)).join('') + tail;
+}
+
+// Свободное имя ноды. Занято (одинаковый #фрагмент у разных серверов,
+// например "hy2") - к имени добавляется адрес сервера ("hy2 nl.example"), а
+// если и оно занято или адреса нет - номер ("hy2-2", "hy2-3"). Имя, уже
+// содержащее адрес, адресом не дополняется.
+export function uniqueProxyName(base, server, taken) {
+  var name = String(base);
+  if (taken.indexOf(name) < 0) { return name; }
+  if (server && name.indexOf(server) < 0) {
+    var withHost = fitName(name, ' ' + server);
+    if (taken.indexOf(withHost) < 0) { return withHost; }
+  }
+  var k = 2, cand = fitName(name, '-' + k);
+  while (taken.indexOf(cand) >= 0) { k++; cand = fitName(name, '-' + k); }
+  return cand;
+}
+
 export function checkProxyName(name, others) {
   var n = String(name || '');
   if (!n || /[\x00-\x1f\x7f|]/.test(n) || /^\s|\s$/.test(n)) { throw new Error('Имя ноды: непустое, без | и управляющих символов, без пробелов по краям'); }
@@ -281,7 +303,7 @@ export function linkToProxy(link) {
   }
   if (!name) { name = (a ? a.host + ':' + a.port : 'node'); }
   noCtl(name, 'имя');
-  return { name: name, yaml: '  - name: ' + yq(name) + '\n' + out.join('\n') + '\n' };
+  return { name: name, server: a ? a.host : (j && j.add ? String(j.add) : ''), yaml: '  - name: ' + yq(name) + '\n' + out.join('\n') + '\n' };
 }
 
 // ----- исключения нод (exclude-filter) -----
@@ -350,15 +372,31 @@ export function createModules(data) {
     proxies: function () {
       return proxies.map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port }; });
     },
+    // Ссылка -> нода; возвращает итоговое имя (при занятом оно получает адрес
+    // сервера или номер, см. uniqueProxyName).
     addProxyLink: function (link) {
-      var r = linkToProxy(link);
-      checkProxyName(r.name, proxyNames());
-      proxies.push(parseProxies(r.yaml)[0]);
-      return r.name;
+      var r = linkToProxy(link), taken = proxyNames();
+      var name = uniqueProxyName(r.name, r.server, taken);
+      checkProxyName(name, taken);
+      var p = parseProxies(r.yaml)[0];
+      if (name !== r.name) { p.lines[0] = '  - name: ' + yq(name); p.name = name; }
+      proxies.push(p);
+      return name;
     },
-    addProxyYaml: function (text) {
+    // YAML нод -> имена добавленных (повтор имени переименовывается так же).
+    // strict - повтор имени отклоняется ("уже есть"), без переименования: так
+    // добавляется импорт WireGuard-файлов, чтобы повторный импорт не плодил дубли.
+    addProxyYaml: function (text, strict) {
       var list = proxiesFromYaml(text), taken = proxyNames();
-      list.forEach(function (p) { checkProxyName(p.name, taken); taken.push(p.name); });
+      list.forEach(function (p) {
+        var name = strict ? p.name : uniqueProxyName(p.name, fieldOf(p, 'server'), taken);
+        checkProxyName(name, taken);
+        if (name !== p.name) {
+          if (!/^  - name:/.test(p.lines[0])) { throw new Error('Первым ключом ноды должен идти name'); }
+          p.lines[0] = '  - name: ' + yq(name); p.name = name;
+        }
+        taken.push(name);
+      });
       list.forEach(function (p) { proxies.push(p); });
       return list.map(function (p) { return p.name; });
     },

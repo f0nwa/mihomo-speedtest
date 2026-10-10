@@ -95,6 +95,10 @@ grep -q 'nothing_to_keep' "$CFG" || fail "нет сообщения «нечег
 grep -q "postText('/api/config/check'" "$CFG" || fail "баннер: нет автоматической проверки при открытии"
 grep -q 'config-broken' "$CFG" || fail "нет баннера config-broken"
 
+# повтор имени своей ноды: панель говорит, как нода переименована
+grep -q 'переименованы' "$ROOT/web/stats_app_constructor_modules.js" || fail "нет сообщения о переименовании повторяющегося имени ноды"
+grep -q 'renamed' "$ROOT/web/stats_app_constructor_modules.js" || fail "addPasted не собирает переименованные ноды"
+
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
