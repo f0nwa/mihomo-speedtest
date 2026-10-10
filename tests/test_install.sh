@@ -667,6 +667,87 @@ grep -q 'Открыть: *http://' "$TEST_ROOT/main3.err" || fail "в итоге
   "$FIXDIR3/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
 )
 
+# --- Мягкая установка: конфиг есть, но mihomo -t его не принимает. Установка
+# не останавливается: Enter (или нет терминала) - оставить как есть, файлы и
+# веб-интерфейс ставятся, пробный прогон пропускается, в конце - жёлтый блок.
+FIXDIR4=$TEST_ROOT/install-fixture-soft
+mkdir -p "$FIXDIR4"
+cp -R "$FIXDIR"/. "$FIXDIR4"/
+rm -rf "$FIXDIR4/runtime" "$FIXDIR4/speedtest2.env" "$FIXDIR4/crontab.txt"
+cat > "$FIXDIR4/bin/pidof" <<'BINEOF'
+#!/bin/sh
+exit 0
+BINEOF
+cat > "$FIXDIR4/bin/mihomo" <<'BINEOF'
+#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = -f ] && f=$2; shift; done
+if grep -q BROKEN "$f"; then echo "yaml: line 3: bad" >&2; exit 1; fi
+exit 0
+BINEOF
+chmod +x "$FIXDIR4/bin/pidof" "$FIXDIR4/bin/mihomo"
+printf '# BROKEN\n' >> "$FIXDIR4/config.yaml"
+cp "$FIXDIR4/config.yaml" "$FIXDIR4/config.before"
+run_main_soft() {
+  # $1 - файл stdin, $2 - файл stderr; остальное окружение - из вызова
+  (
+    PATH="$FIXDIR4/bin:$PATH"
+    export PATH
+    DIR=$FIXDIR4
+    BIN=$FIXDIR4/bin/mihomo
+    SELFDIR=$FIXDIR4
+    CONFIG=$FIXDIR4/config.yaml
+    MIHOMO_DIR=$FIXDIR4
+    TMPROOT=$FIXDIR4
+    SKIP_TRIAL=1
+    INSTALL_CHANNEL=stable
+    BLOCK='forced-for-this-test'
+    INITD_DIR=$FIXDIR4/etc-init.d
+    export DIR
+    export MIHOMO_DIR
+    export STATS_SERVICE_RUNTIME_DIR="$FIXDIR4/runtime"
+    export STATS_HTTPD_PY_CMD=sh
+    export STATS_HTTPD_PY="$FAKE_HTTPD"
+    export STATS_HTTPD_CMD="sh $FAKE_HTTPD"
+    unset INSTALLED_SCRIPT STATS_SERVICE_DEST INITD_SCRIPT
+    INSTALL_LIB_ONLY=1 . "$SCRIPT"
+    main
+  ) 2>"$2" <"$1"
+}
+stop_soft_web() {
+  (
+    STATS_SERVICE_RUNTIME_DIR=$FIXDIR4/runtime
+    export STATS_SERVICE_RUNTIME_DIR
+    STOP_WAIT=3
+    export STOP_WAIT
+    "$FIXDIR4/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
+  )
+}
+# Enter / нет терминала - оставить конфиг как есть
+soft_rc=0
+run_main_soft /dev/null "$TEST_ROOT/main4.err" || soft_rc=$?
+[ "$soft_rc" = 0 ] || fail "мягкая установка: код $soft_rc вместо 0: $(cat "$TEST_ROOT/main4.err")"
+grep -q 'оставить как есть и продолжить установку' "$TEST_ROOT/main4.err" || fail "нет меню для конфига, не проходящего mihomo -t: $(cat "$TEST_ROOT/main4.err")"
+grep -q 'Пробный прогон пропущен: конфиг не проходит mihomo -t' "$TEST_ROOT/main4.err" || fail "пробный прогон должен пропускаться: $(cat "$TEST_ROOT/main4.err")"
+grep -q 'установка завершена в мягком режиме' "$TEST_ROOT/main4.err" || fail "нет жёлтого блока мягкого режима"
+grep -q 'Открыть: *http://' "$TEST_ROOT/main4.err" || fail "мягкая установка: нет ссылки на веб-интерфейс"
+[ -f "$FIXDIR4/runtime/supervisor.pid" ] || fail "мягкая установка: веб-интерфейс не запущен"
+[ -f "$FIXDIR4/speedtest2.env" ] || fail "мягкая установка: speedtest2.env не записан"
+cmp -s "$FIXDIR4/config.before" "$FIXDIR4/config.yaml" || fail "мягкая установка изменила конфиг"
+stop_soft_web
+# CONFIG_MODE=reset - замена шаблоном без вопроса, дальше обычная установка
+rm -rf "$FIXDIR4/runtime" "$FIXDIR4/speedtest2.env" "$FIXDIR4/crontab.txt"
+cp "$FIXDIR4/config.before" "$FIXDIR4/config.yaml"
+soft_rc=0
+CONFIG_MODE=reset run_main_soft /dev/null "$TEST_ROOT/main5.err" || soft_rc=$?
+[ "$soft_rc" = 0 ] || fail "замена при установке: код $soft_rc: $(cat "$TEST_ROOT/main5.err")"
+grep -q BROKEN "$FIXDIR4/config.yaml" && fail "после замены в конфиге остались чужие данные"
+grep -q 'https://example.com/sub' "$FIXDIR4/config.yaml" || fail "замена потеряла подписку"
+grep -q 'установка завершена в мягком режиме' "$TEST_ROOT/main5.err" && fail "после удачной замены мягкий режим не нужен"
+grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main5.err" || fail "замена при установке: нет итоговой строки: $(cat "$TEST_ROOT/main5.err")"
+set -- "$FIXDIR4"/config.yaml.*.bak
+[ -f "$1" ] && cmp -s "$1" "$FIXDIR4/config.before" || fail "замена при установке: нет бэкапа прежнего конфига"
+stop_soft_web
+
 if (
   curl() { return 7; }
   result=$(measure_channel)
