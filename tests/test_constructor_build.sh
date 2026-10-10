@@ -97,5 +97,34 @@ sh "$SCRIPT" --state "$WORK/st3" --source "$WORK/source.yaml" --output "$WORK/ou
 sh "$SCRIPT" --import --source "$WORK/source.yaml" --output "$WORK/out11.yaml" --report "$WORK/rep11" > "$WORK/log11" 2>&1 || fail "круг import: $(cat "$WORK/log11")"
 cmp -s "$WORK/out10.yaml" "$WORK/out11.yaml" || fail "круг: состояние и --import дали разные конфиги"
 
+# test_build_bare_source: голый конфиг (пустой файл, заглушка XKeen без
+# proxy-providers, только свои ноды) - нет подписок, которые можно потерять,
+# поэтому сборка из состояния идёт на шаблоне (раньше: «в конфиге нет секции
+# proxy-providers»).
+mkdir "$WORK/bare"
+printf '  - name: Blanc_DE_FRA_1\n    type: ss\n    server: 1.2.3.4\n    port: 1\n    cipher: aes-128-gcm\n    password: p\n' > "$WORK/bare/proxies.yaml"
+: > "$WORK/bare-empty.yaml"
+printf 'log-level: info\nmixed-port: 7890\n' > "$WORK/bare-stub.yaml"
+printf 'proxies:\n  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK/bare-static.yaml"
+for b in bare-empty bare-stub bare-static; do
+  if sh "$SCRIPT" --state "$WORK/bare" --source "$WORK/$b.yaml" --output "$WORK/out-$b.yaml" --report "$WORK/rep-$b" > "$WORK/log-$b" 2>&1; then
+    grep -q 'name: Blanc_DE_FRA_1' "$WORK/out-$b.yaml" || fail "$b: нода из состояния потеряна"
+    grep -q '^  - name: Spotify$' "$WORK/out-$b.yaml" || fail "$b: нет сервисов шаблона"
+    grep -q 'sub-names: &sub-names \[\]' "$WORK/out-$b.yaml" || fail "$b: подписок быть не должно"
+  else
+    fail "$b: $(cat "$WORK/log-$b")"
+  fi
+done
+grep -q 'name: Own1' "$WORK/out-bare-static.yaml" 2>/dev/null && fail "bare-static: с состоянием нод берётся состояние, а не источник"
+# с --import свои ноды голого конфига сохраняются
+sh "$SCRIPT" --import --source "$WORK/bare-static.yaml" --output "$WORK/out-bare-imp.yaml" --report "$WORK/rep-bare-imp" > "$WORK/log-bare-imp" 2>&1 || fail "bare --import: $(cat "$WORK/log-bare-imp")"
+grep -q 'name: Own1' "$WORK/out-bare-imp.yaml" || fail "bare --import: своя нода потеряна"
+# а конфиг, который ждёт подписок (группы с use:), но секции не имеет, - по-прежнему отказ
+sed 's/^proxy-providers:/old-providers:/' "$WORK/source.yaml" > "$WORK/noprov.yaml"
+rc=0; sh "$SCRIPT" --import --source "$WORK/noprov.yaml" --output "$WORK/out-noprov.yaml" --report "$WORK/rep-noprov" > "$WORK/log-noprov" 2>&1 || rc=$?
+[ "$rc" = 1 ] || fail "переименованные providers при группах с use: должны отклоняться, код $rc"
+grep -q 'нет секции proxy-providers' "$WORK/log-noprov" || fail "нет понятной причины отказа: $(cat "$WORK/log-noprov")"
+[ ! -e "$WORK/out-noprov.yaml" ] || fail "при отказе кандидат создан"
+
 [ "$FAILED" = 0 ] && echo "OK test_constructor_build"
 exit "$FAILED"

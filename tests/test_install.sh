@@ -624,6 +624,17 @@ if ! config_no_nodes "$FIXDIR3/config.yaml"; then fail "config_no_nodes: кон�
 if config_no_nodes "$FIXDIR/config.yaml"; then fail "config_no_nodes: конфиг с подпиской demo - не пустой"; fi
 printf 'proxies:\n  - name: n\n    type: ss\n' > "$TEST_ROOT/c-static.yaml"
 if config_no_nodes "$TEST_ROOT/c-static.yaml"; then fail "config_no_nodes: своя нода в proxies - не пустой конфиг"; fi
+# install_config_is_stub: заготовка (XKeen) без подписок, нод и быстрого пула -
+# для неё установщик запускает мастер, как без конфига. Конфиг проекта без
+# нод (есть провайдер fast) и конфиг с подпиской - не заготовка.
+printf 'find-process-mode: off\nlisteners:\n  - name: tproxy\n    type: tproxy\n    port: 1181\n' > "$TEST_ROOT/c-stub.yaml"
+install_config_is_stub "$TEST_ROOT/c-stub.yaml" || fail "install_config_is_stub: заготовка XKeen должна считаться заготовкой"
+: > "$TEST_ROOT/c-empty.yaml"
+install_config_is_stub "$TEST_ROOT/c-empty.yaml" || fail "install_config_is_stub: пустой файл - заготовка"
+if install_config_is_stub "$FIXDIR3/config.yaml"; then fail "install_config_is_stub: конфиг проекта без нод (есть fast) не заготовка"; fi
+if install_config_is_stub "$FIXDIR/config.yaml"; then fail "install_config_is_stub: конфиг с подпиской не заготовка"; fi
+if install_config_is_stub "$TEST_ROOT/c-static.yaml"; then fail "install_config_is_stub: конфиг со своей нодой не заготовка"; fi
+if MST_CONFIG_FROM_TEMPLATE=1 install_config_is_stub "$TEST_ROOT/c-stub.yaml"; then fail "install_config_is_stub: после мастера (MST_CONFIG_FROM_TEMPLATE=1) мастер повторно не нужен"; fi
 [ "$(config_geofilter_block "$FIXDIR3/config.yaml")" = 'Russia|Moscow' ] || fail "config_geofilter_block: $(config_geofilter_block "$FIXDIR3/config.yaml")"
 (
   PATH="$FIXDIR3/bin:$PATH"
