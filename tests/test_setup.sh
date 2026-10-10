@@ -879,7 +879,8 @@ cmp -s "$WORK9/config.before" "$WORK9/config.yaml" || { echo "FAIL: сущест
 rm -rf "$PIDOK9" "$CURLFAIL9"
 # е) заготовка XKeen (порты и listeners, ни подписок, ни нод) - как без
 # конфига: нет требования запущенного mihomo (pidof здесь его не видит),
-# подписка спрашивается; свои входы переносятся, старый файл остаётся в бэкапе.
+# подписка спрашивается; входы и dns заготовки не переносятся, старый файл
+# остаётся в бэкапе.
 write_stub9() {
   cat > "$WORK9/config.yaml" <<'STUBEOF'
 find-process-mode: off # снижает нагрузку на роутер
@@ -904,8 +905,12 @@ check_stub9() {
   stub_label=$1
   [ -f "$WORK9/config.yaml" ] || { echo "FAIL: ($stub_label) config.yaml пропал" >&2; FAILED=1; return; }
   grep -q 'sub-names: &sub-names \[\]' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) конфиг должен быть без нод" >&2; FAILED=1; }
-  grep -q 'name: tproxy' "$WORK9/config.yaml" && grep -q 'name: redir' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) входы tproxy/redir из заготовки потеряны" >&2; FAILED=1; }
-  grep -q 'find-process-mode: off' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) find-process-mode потерян" >&2; FAILED=1; }
+  # Заготовка почти пустая: входы и dns из неё не переносятся (они могли бы
+  # работать некорректно), config собирается из шаблона.
+  grep -q 'name: tproxy' "$WORK9/config.yaml" && { echo "FAIL: ($stub_label) входы заготовки не должны переноситься" >&2; FAILED=1; }
+  grep -q 'port: 1181\|port: 1182' "$WORK9/config.yaml" && { echo "FAIL: ($stub_label) порты заготовки не должны переноситься" >&2; FAILED=1; }
+  grep -q 'name: mst-speedtest' "$WORK9/config.yaml" || { echo "FAIL: ($stub_label) нет служебного входа шаблона" >&2; FAILED=1; }
+  grep -q 'Найдены свои входы' "$WORK9/run.log" && { echo "FAIL: ($stub_label) мастер не должен предлагать перенос входов заготовки" >&2; FAILED=1; }
   set -- "$WORK9"/config.yaml.*.bak
   { [ -f "$1" ] && cmp -s "$1" "$WORK9/stub.before"; } || { echo "FAIL: заготовка не сохранена в бэкап" >&2; FAILED=1; }
   grep -q 'Процесс mihomo не найден' "$WORK9/run.log" && { echo "FAIL: для заготовки процесс mihomo не требуется" >&2; FAILED=1; }

@@ -454,7 +454,14 @@ main() {
   static_file=""
   dns_file=""
   listeners_file=""
-  if [ -f "$CONFIG" ]; then
+  # Переносим static-ноды, dns и входы только из конфига с содержимым. У
+  # заготовки (XKeen: порты и listeners, ни подписок, ни нод) их брать не
+  # нужно - в новом конфиге они могли бы работать некорректно; заготовка
+  # остаётся в бэкапе ниже.
+  if [ -f "$CONFIG" ] && ! config_has_content; then
+    ui_ok "В текущем $CONFIG нет ни подписок, ни нод (заготовка): dns и входы из неё не переношу, файл сохранится бэкапом"
+  fi
+  if config_has_content; then
     candidate=$(mktemp "${TMPDIR:-/tmp}/setup_static.XXXXXX")
     dns_candidate=$(mktemp "${TMPDIR:-/tmp}/setup_dns.XXXXXX")
     listeners_candidate=$(mktemp "${TMPDIR:-/tmp}/setup_listeners.XXXXXX")

@@ -59,6 +59,23 @@ assert_contains 'Imported Node' "$OUT3"
 assert_not_contains "  - name: '🇩🇪 Hysteria2'" "$OUT3"
 assert_not_contains "  - name: '🇳🇱 Hysteria2'" "$OUT3"
 
+# Примерные ноды шаблона (🇩🇪/🇳🇱 Hysteria2, CHANGE_ME) - только образец: без своих
+# нод они не попадают ни в определения, ни в списки групп (раньше при чистой
+# установке оставались живым «мусором» в конфиге и в конструкторе).
+for rendered in "$OUT" "$OUT2" "$OUT3"; do
+  assert_not_contains "🇩🇪 Hysteria2" "$rendered"
+  assert_not_contains "🇳🇱 Hysteria2" "$rendered"
+  assert_not_contains "proxy-node-1.example.com" "$rendered"
+  assert_not_contains "proxy-node-2.example.com" "$rendered"
+done
+for rendered in "$OUT" "$OUT2"; do
+  assert_contains "proxies: []" "$rendered"
+done
+# Свои ноды занимают место примерных и в группах, а не остаются висячими ссылками.
+assert_contains "proxies: ['Imported Node']" "$OUT3"
+assert_contains "proxies: [DIRECT, 'Imported Node']" "$OUT3"
+assert_eq "$(printf '%s\n' "$OUT3" | grep -c "proxies: \['Imported Node'\]")" "2" "ссылка на свою ноду в Авто по пингу и Fallback-Stable"
+
 # Резерв «⚡ Самые быстрые + Fallback»
 # (видимый пул + fallback на Fallback-Stable)
 # должен сохраняться при рендере во всех сценариях: без импортов,
