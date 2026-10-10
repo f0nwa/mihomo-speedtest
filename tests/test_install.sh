@@ -722,11 +722,12 @@ stop_soft_web() {
     "$FIXDIR4/etc-init.d/S80speedtest-stats" stop >/dev/null 2>&1 || true
   )
 }
-# Enter / нет терминала - оставить конфиг как есть
+# Оставить конфиг как есть. CONFIG_MODE=own - без вопроса: меню читает ввод из
+# терминала (reopen_tty), а в тесте он не должен участвовать; само меню
+# проверяет test_install_config_mode.sh.
 soft_rc=0
-run_main_soft /dev/null "$TEST_ROOT/main4.err" || soft_rc=$?
+CONFIG_MODE=own run_main_soft /dev/null "$TEST_ROOT/main4.err" || soft_rc=$?
 [ "$soft_rc" = 0 ] || fail "мягкая установка: код $soft_rc вместо 0: $(cat "$TEST_ROOT/main4.err")"
-grep -q 'оставить как есть и продолжить установку' "$TEST_ROOT/main4.err" || fail "нет меню для конфига, не проходящего mihomo -t: $(cat "$TEST_ROOT/main4.err")"
 grep -q 'Пробный прогон пропущен: конфиг не проходит mihomo -t' "$TEST_ROOT/main4.err" || fail "пробный прогон должен пропускаться: $(cat "$TEST_ROOT/main4.err")"
 grep -q 'установка завершена в мягком режиме' "$TEST_ROOT/main4.err" || fail "нет жёлтого блока мягкого режима"
 grep -q 'Открыть: *http://' "$TEST_ROOT/main4.err" || fail "мягкая установка: нет ссылки на веб-интерфейс"

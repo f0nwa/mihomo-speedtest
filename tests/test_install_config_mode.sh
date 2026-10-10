@@ -214,6 +214,60 @@ CONFIG_MODE=reset run_mode ''
 grep -q "Замена шаблоном невозможна:.*нет ни подписок, ни нод" "$T/err" || fail "нет причины отказа замены: $(cat "$T/err")"
 unchanged "замена без подписок"; own_notice "замена без подписок"
 
+# 11. Конфиг не проходит mihomo -t: handle_broken_config (мягкий режим).
+# reopen_tty в тесте не нужен: ввод идёт из канала, а не из терминала.
+reopen_tty() { :; }
+cp "$T/own-link.yaml" "$T/own.yaml"
+# $1 - ответы на stdin; результат: $T/rc, $T/err, $T/soft (MST_SOFT_CONFIG)
+run_broken() {
+  cp "$T/own.yaml" "$CONFIG"
+  rm -f "$CONFIG".*.bak "$FAKE_XKEEN_LOG" "$SV"
+  rc=0
+  printf '%b' "$1" | ( handle_broken_config; hb=$?; echo "${MST_SOFT_CONFIG:-?}" > "$T/soft"; exit "$hb" ) 2>"$T/err" || rc=$?
+  echo "$rc" > "$T/rc"
+}
+# Enter / нет терминала - оставить как есть
+run_broken '\n'
+[ "$(cat "$T/rc")" = 0 ] && [ "$(cat "$T/soft")" = 1 ] || fail "Enter: должен остаться мягкий режим (rc $(cat "$T/rc"), soft $(cat "$T/soft"))"
+unchanged "мягкий режим, Enter"
+grep -q '^  | Конфиг не проходит mihomo -t' "$T/err" || fail "меню должно быть блоком: $(cat "$T/err")"
+grep -q '^  |  2) оставить как есть и продолжить установку.*(по умолчанию)' "$T/err" || fail "пункт 2 - оставить как есть, по умолчанию: $(cat "$T/err")"
+grep -q '^  |  3) заменить шаблоном' "$T/err" || fail "нет пункта 3 в меню"
+grep -q '^\[??\] Введите номер или Enter для 2: ' "$T/err" || fail "нет приглашения ввода"
+run_broken ''
+[ "$(cat "$T/soft")" = 1 ] || fail "нет терминала (EOF): мягкий режим"
+unchanged "мягкий режим, EOF"
+# 1 - миграция; успех снимает мягкий режим
+run_broken '1\ny\n'
+[ "$(cat "$T/soft")" = 0 ] || fail "миграция: мягкий режим должен сняться: $(cat "$T/err")"
+has_fast_group "$CONFIG" || fail "миграция при мягком режиме: нет провайдера fast"
+# 3 - замена шаблоном
+run_broken '3\ny\n'
+[ "$(cat "$T/soft")" = 0 ] || fail "замена: мягкий режим должен сняться: $(cat "$T/err")"
+grep -q 'name: Mine' "$CONFIG" && fail "замена из меню не заменила конфиг"
+# отказ на подтверждении - остаёмся в мягком режиме, конфиг не тронут
+run_broken '3\nn\n'
+[ "$(cat "$T/rc")" = 0 ] && [ "$(cat "$T/soft")" = 1 ] || fail "отказ от замены: мягкий режим"
+unchanged "отказ от замены в мягком режиме"
+# mihomo -t не принял кандидата - мягкий режим, установка не останавливается
+FAKE_MIHOMO_RC=1 run_broken '3\ny\n'
+[ "$(cat "$T/rc")" = 0 ] && [ "$(cat "$T/soft")" = 1 ] || fail "кандидат не прошёл mihomo -t: должен остаться мягкий режим"
+unchanged "кандидат не прошёл mihomo -t"
+# ядро не поднялось и на прежнем конфиге - тоже мягкий режим, а не остановка
+FAKE_CURL_RC=7 run_broken '3\ny\n'
+[ "$(cat "$T/rc")" = 0 ] && [ "$(cat "$T/soft")" = 1 ] || fail "ядро не поднялось: должен остаться мягкий режим"
+unchanged "ядро не поднялось"
+# CONFIG_MODE отвечает без вопроса
+CONFIG_MODE=reset run_broken ''
+[ "$(cat "$T/soft")" = 0 ] || fail "CONFIG_MODE=reset: замена без вопроса"
+CONFIG_MODE=template run_broken 'y\n'
+[ "$(cat "$T/soft")" = 0 ] || fail "CONFIG_MODE=template: миграция (подтверждение - y)"
+CONFIG_MODE=own run_broken ''
+[ "$(cat "$T/soft")" = 1 ] || fail "CONFIG_MODE=own: оставить как есть"
+CONFIG_MODE=nonsense run_broken ''
+[ "$(cat "$T/soft")" = 1 ] || fail "неизвестный CONFIG_MODE: оставить как есть"
+grep -q "Неизвестный CONFIG_MODE=nonsense" "$T/err" || fail "нет предупреждения про неизвестный CONFIG_MODE"
+
 # 9. Быстрый пул уже есть - ничего не спрашиваем и не трогаем.
 cp "$ROOT/config-tools/config.example.yaml" "$T/own.yaml"
 run_mode ''
