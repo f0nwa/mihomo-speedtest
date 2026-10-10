@@ -126,5 +126,30 @@ rc=0; sh "$SCRIPT" --import --source "$WORK/noprov.yaml" --output "$WORK/out-nop
 grep -q 'нет секции proxy-providers' "$WORK/log-noprov" || fail "нет понятной причины отказа: $(cat "$WORK/log-noprov")"
 [ ! -e "$WORK/out-noprov.yaml" ] || fail "при отказе кандидат создан"
 
+# test_build_own_scope: ownscope all - свои ноды ещё и во всех сервисных группах
+# (в якоре select-default), без него - только в базовых группах
+mkdir "$WORK/os"
+printf '  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK/os/proxies.yaml"
+printf 'https://sub.example/T\t\tprov1\n' > "$WORK/os/subscriptions.tsv"
+anchor_line() { sed -n 's/^  select-default: &select-default \(.*\)$/\1/p' "$1"; }
+: > "$WORK/os/services.tsv"
+sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os0.yaml" --report "$WORK/rep-os0" > "$WORK/log-os0" 2>&1 || fail "ownscope выключен: $(cat "$WORK/log-os0")"
+anchor_line "$WORK/out-os0.yaml" | grep -q 'Own1' && fail "без ownscope своя нода не должна быть в якоре сервисных групп"
+grep -q "name: '🚀 Авто по пингу'" "$WORK/out-os0.yaml" && sed -n "/name: '🚀 Авто по пингу'/,/^$/p" "$WORK/out-os0.yaml" | grep -q 'proxies: \[Own1\]' || fail "своя нода должна быть в базовых группах"
+printf 'ownscope\tall\n' > "$WORK/os/services.tsv"
+sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os1.yaml" --report "$WORK/rep-os1" > "$WORK/log-os1" 2>&1 || fail "ownscope all: $(cat "$WORK/log-os1")"
+anchor_line "$WORK/out-os1.yaml" | grep -q "Own1" || fail "ownscope all: своя нода не попала в якорь сервисных групп: $(anchor_line "$WORK/out-os1.yaml")"
+grep -q '__OWN_NODES__' "$WORK/out-os1.yaml" && fail "служебный токен остался в конфиге"
+# круг: собранный конфиг при импорте снова даёт ownscope all
+mkdir "$WORK/os-rt"
+awk -v defaults="$ROOT/config-tools/services.default.tsv" -v template="$ROOT/config-tools/config.example.yaml" \
+    -v out_dir="$WORK/os-rt" -v report="$WORK/os-rt.report" -f "$ROOT/config-tools/config_to_state.awk" "$WORK/out-os1.yaml" 2>/dev/null || fail "импорт собранного конфига"
+grep -qx 'ownscope	all' "$WORK/os-rt/services.tsv" || fail "круг: ownscope all потерян при импорте собранного конфига"
+# нод нет (пустой proxies.yaml) - токен просто убирается, якорь как в шаблоне
+: > "$WORK/os/proxies.yaml"
+sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os2.yaml" --report "$WORK/rep-os2" > "$WORK/log-os2" 2>&1 || fail "ownscope all без нод: $(cat "$WORK/log-os2")"
+grep -q '__OWN_NODES__' "$WORK/out-os2.yaml" && fail "без нод служебный токен остался в конфиге"
+[ "$(anchor_line "$WORK/out-os2.yaml")" = "$(anchor_line "$WORK/out-os0.yaml")" ] || fail "без нод якорь должен быть как без ownscope"
+
 [ "$FAILED" = 0 ] && echo "OK test_constructor_build"
 exit "$FAILED"

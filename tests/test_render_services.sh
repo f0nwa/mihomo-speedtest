@@ -294,6 +294,26 @@ assert_contains "proxies: ['⚙️Manual', DIRECT, 'Заблок. сервисы
 printf '%s\n' "$OB" > "$WORK/b2.yaml"
 OB2=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/b2.yaml")
 [ "$OB2" = "$OB" ] || fail "base: повторная сборка меняет результат"
+# test_own_scope: ownscope all - в якорь сервисных групп добавляется служебный
+# токен __OWN_NODES__; migrate_config.awk заменит его своими нодами (или уберёт)
+printf 'ownscope\tall\n' > "$WORK/o.tsv"
+OB=$(renderb) || fail "ownscope: ошибка сборки"
+assert_contains "proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual', __OWN_NODES__] }" "$OB" "ownscope: токен в якоре"
+assert_not_contains "__OWN_NODES__" "$(printf '%s\n' "$OB" | sed -n '/^proxy-groups:/,$p')" "ownscope: токен только в якоре, не в группах"
+printf '%s\n' "$OB" > "$WORK/b3.yaml"
+OB3=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/b3.yaml")
+[ "$OB3" = "$OB" ] || fail "ownscope: повторная сборка добавляет токен ещё раз"
+printf 'ownscope\tall\nbfirst\t*\t⚙️Manual\n' > "$WORK/o.tsv"
+OB=$(renderb) || fail "ownscope+bfirst: ошибка сборки"
+assert_contains "proxies: ['⚙️Manual', DIRECT, 'Заблок. сервисы', __OWN_NODES__] }" "$OB" "ownscope вместе с bfirst *"
+printf '' > "$WORK/o.tsv"
+assert_not_contains "__OWN_NODES__" "$(renderb)" "без ownscope токена нет"
+for bad in 'ownscope	none' 'ownscope	all	x' 'ownscope'; do
+  printf '%s\nownscope\tall\n' "$bad" | head -n 1 > "$WORK/o.tsv"
+  if renderb >/dev/null 2>&1; then fail "ownscope: '$bad' должен быть ошибкой"; fi
+done
+printf 'ownscope\tall\nownscope\tall\n' > "$WORK/o.tsv"
+if renderb >/dev/null 2>&1; then fail "ownscope задан повторно - ошибка"; fi
 # устаревшее (нет группы, ключа, значения) молча пропускается
 printf 'bset\tнет\tinterval\t300\nbfirst\tЗаблок. сервисы\tнет-такого\nbfirst\tнет\tx\n' > "$WORK/o.tsv"
 OB=$(renderb) || fail "base: устаревшее роняет сборку"

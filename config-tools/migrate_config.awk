@@ -140,7 +140,9 @@ function remap_refs(s, start,end,body,j,ch,quote,escape,token,count,result,inser
     } else if (ch=="\047" || ch=="\"") {quote=ch;token=token ch}
     else if (ch=="," || ch=="]") {
       token=trim(token)
-      if (token in template_names) {
+      # __OWN_NODES__ - служебный токен ownscope из render_services.awk (свои
+      # ноды во всех сервисных группах): заменяется так же, как примерная нода.
+      if (token in template_names || token=="__OWN_NODES__") {
         if (!inserted) {if (nstatic) result=result sep_next(count++) staticnames;inserted=1}
       } else if (token!="") result=result sep_next(count++) token
       token=""

@@ -136,6 +136,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var userRules = [];
   var bsets = [];            // [{group,key,value}] отличия базовых групп
   var bfirsts = [];          // [{group,value}] первое значение proxies
+  var ownScope = false;      // свои прокси и во всех сервисных группах (ownscope all)
 
   lines(servicesText).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
@@ -150,6 +151,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
     else if (f[0] === 'dom') { doms.push({ owner: f[1], type: f[2], value: f[3] }); }
     else if (f[0] === 'bset') { bsets.push({ group: f[1], key: f[2], value: Number(f[3]) }); }
     else if (f[0] === 'bfirst') { bfirsts.push({ group: f[1], value: f.slice(2).join(TAB) }); }
+    else if (f[0] === 'ownscope') { ownScope = true; }
     else { provLines.push(line); }
   });
   lines(userRulesText).forEach(function (l) { l = l.trim(); if (l) { userRules.push(l); } });
@@ -400,20 +402,27 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       provLines.forEach(function (l) { out.push(l); });
       bsets.forEach(function (x) { out.push(['bset', x.group, x.key, x.value].join(TAB)); });
       bfirsts.forEach(function (x) { out.push(['bfirst', x.group, x.value].join(TAB)); });
+      if (ownScope) { out.push('ownscope' + TAB + 'all'); }
       return {
         services: out.length ? out.join('\n') + '\n' : '',
         user_rules: userRules.length ? userRules.join('\n') + '\n' : ''
       };
     },
+    // Куда попадают свои прокси (раздел «Свои прокси»): false - только в базовые
+    // группы (Авто по пингу, Fallback-Stable, Manual), true - ещё и во все
+    // сервисные группы (общий якорь select-default).
+    ownScope: function () { return ownScope; },
+    setOwnScope: function (v) { ownScope = !!v; },
     // Какие блоки конструктора изменены относительно initial (для пометок
     // «изменён»): services, domains, base, rules.
     changes: function (initial) {
       var cur = model.serialize();
       var before = lines(initial.services).filter(Boolean), after = lines(cur.services).filter(Boolean);
-      var res = { services: false, domains: false, base: false, rules: (initial.user_rules || '') !== cur.user_rules };
+      var res = { services: false, domains: false, base: false, proxies: false, rules: (initial.user_rules || '') !== cur.user_rules };
       function mark(l) {
         var f = l.split(TAB);
-        if (f[0] === 'bset' || f[0] === 'bfirst') { res.base = true; }
+        if (f[0] === 'ownscope') { res.proxies = true; }
+        else if (f[0] === 'bset' || f[0] === 'bfirst') { res.base = true; }
         else if (f[0] === 'dom') { res.domains = true; }
         else if (f[0] === 'unrule' && /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD),/.test(ruleBody(f.slice(2).join(TAB)))) { res.domains = true; }
         else { res.services = true; }
@@ -444,6 +453,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
           return added ? (f[1] === '*' ? 'Сервисные группы: по умолчанию ' : 'Группа ' + f[1] + ': по умолчанию ') + f[2]
             : (f[1] === '*' ? 'Сервисные группы' : 'Группа ' + f[1]) + ': по умолчанию как в шаблоне';
         }
+        if (f[0] === 'ownscope') { return added ? 'Свои прокси: во всех сервисных группах' : 'Свои прокси: только в базовых группах'; }
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }

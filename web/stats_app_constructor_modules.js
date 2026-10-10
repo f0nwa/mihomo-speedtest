@@ -664,6 +664,24 @@ export function createModuleCards(ctx) {
     if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Своих нод нет - работают только подписки.')); }
     proxHost.appendChild(rows);
 
+    // Куда попадают свои ноды: по умолчанию только в базовые группы, по желанию
+    // ещё и во все сервисные (через общий якорь select-default в шаблоне).
+    var scope = el('div', 'xk-scope');
+    scope.setAttribute('role', 'radiogroup');
+    scope.setAttribute('aria-label', 'Куда попадают свои прокси');
+    scope.appendChild(el('p', 'hint', 'Где своих нод можно выбрать:'));
+    [[false, 'Только в базовые группы', 'Авто по пингу, Fallback-Stable и Manual (как сейчас)'],
+     [true, 'Ещё и во все сервисные группы', 'в списке выбора каждого сервиса: YouTube, Telegram и т. д.']].forEach(function (o) {
+      var lab = el('label', 'xk-scope-opt');
+      var inp = el('input'); inp.type = 'radio'; inp.name = 'cx-own-scope';
+      inp.checked = model.ownScope() === o[0];
+      inp.addEventListener('change', function () { ctx.edit(function () { model.setOwnScope(o[0]); }); });
+      lab.appendChild(inp);
+      lab.appendChild(document.createTextNode(' ' + o[1] + ' - ' + o[2]));
+      scope.appendChild(lab);
+    });
+    proxHost.appendChild(scope);
+
     var area = el('textarea', 'xk-text');
     area.rows = 3;
     area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess:// (по одной в строке) или YAML ноды';

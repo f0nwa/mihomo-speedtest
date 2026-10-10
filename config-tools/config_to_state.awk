@@ -210,7 +210,16 @@ BEGIN {
     if (line ~ /^  [^ #]/ || line ~ /^    /) prox_out = prox_out line "\n"
     next
   }
-  if (sect == "anchors") { note_group_line("c", "*", line); next }
+  if (sect == "anchors") {
+    note_group_line("c", "*", line)
+    # Список якоря сервисных групп - нужен, чтобы узнать, лежат ли в нём свои
+    # ноды (ownscope all); сверка с именами нод - в END.
+    if (line ~ /^  select-default: &select-default /) {
+      sd_n = ptoks(line)
+      for (i = 1; i <= sd_n; i++) sd_tok[i] = PT[i]
+    }
+    next
+  }
   if (sect == "proxy-groups") {
     if (cur_group != "" && !(line ~ /^  - name:/)) note_group_line("c", gr_name[cur_group], line)
     if (line ~ /^  - name:/) {
@@ -336,7 +345,10 @@ END {
     base_out = base_out "bfirst\t" g "\t" cfg_first[g] "\n"
     rep("IMPORTED", "bfirst|" g)
   }
-  printf "%s%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, prov_out, base_out > (out_dir "/services.tsv")
+  # Свои ноды в якоре сервисных групп: «свои прокси во всех сервисных группах».
+  own_out = ""
+  for (i = 1; i <= sd_n; i++) if (sd_tok[i] in prox_name) { own_out = "ownscope\tall\n"; rep("IMPORTED", "ownscope|-"); break }
+  printf "%s%s%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, prov_out, base_out, own_out > (out_dir "/services.tsv")
   close(out_dir "/services.tsv")
   if (user_out != "") { printf "%s", user_out > (out_dir "/user-rules.txt"); close(out_dir "/user-rules.txt") }
   if (cfg_geo != "" && cfg_geo != tmpl_geo) {
