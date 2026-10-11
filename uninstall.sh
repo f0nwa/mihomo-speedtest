@@ -380,9 +380,42 @@ purge_data() {
   ui_ok "Журналы, история замеров, веб-статика и учётные данные (PURGE_DATA=1)"
 }
 
+# Состояние перед удалением (без сети: под "curl | sh" она заведомо работает,
+# а сам снос ничего не качает): запущено ли ядро, чем закончится откат
+# config.yaml, что останется нетронутым. Только сообщения, ничего не меняет.
+uninstall_state() {
+  if curl -s -m 2 "http://$API_MAIN/version" >/dev/null 2>&1; then
+    ui_ok "Ядро mihomo запущено - его перезапустит xkeen после отката config.yaml"
+  else
+    ui_warn "Ядро mihomo сейчас не отвечает на $API_MAIN - проект будет удалён, но проверить откат config.yaml на живом ядре не получится"
+  fi
+  if [ "$SKIP_CONFIG_REVERT" = 1 ]; then
+    ui_ok "config.yaml останется как есть (SKIP_CONFIG_REVERT=1)"
+  elif [ ! -f "$CONFIG" ]; then
+    ui_warn "config.yaml не найден ($CONFIG) - откатывать нечего"
+  else
+    ds_backup=""
+    if [ "$REVERT_BEFORE_FAST" = 1 ]; then
+      ds_backup=$(find_backup_before_fast)
+    else
+      for ds_b in "$CONFIG".*.bak; do
+        [ -f "$ds_b" ] && ds_backup=$ds_b
+      done
+    fi
+    if [ -n "$ds_backup" ]; then
+      ui_ok "Бэкап для отката найден: $ds_backup"
+      command -v xkeen >/dev/null 2>&1 || ui_warn "команда xkeen не найдена - после отката перезапустите ядро вручную"
+    else
+      ui_warn "Бэкапов setup.sh (*.bak) рядом с config.yaml нет - config.yaml останется как есть, надстройку проекта в нём (proxy-providers, группы, правила) придётся убрать вручную или заменить своим конфигом"
+    fi
+  fi
+  ui_ok "mihomo, XKeen и ваши подписки не удаляются - только файлы проекта"
+}
+
 main() {
   ui_init
   ui_banner "MIHOMO-SPEEDTEST" "Удаление"
+  uninstall_state
   confirm || return 1
   stop_service
   remove_cron
