@@ -221,10 +221,15 @@ var FIELD_DEFS = {
 };
 
 var CARDS = [
-  { title: 'Быстрый пул: какие ноды в него попадают', fields: ['min_ratio', 'min_floor_mb', 'topn', 'min_winners', 'stable_min_uptime', 'stable_lookback'] },
-  { title: 'Сколько нод проверять за прогон', fields: ['max_tested', 'enough'] },
-  { title: 'История и графики', fields: ['keep_runs', 'keep_days', 'node_cap'] },
-  { title: 'Дополнительно', advanced: true, note: 'Редко нужные параметры. Значения по умолчанию подходят большинству.', fields: ['extype', 'size_mb', 'dl_timeout', 'min_speed_mb', 'stability_window', 'stability_drop_after', 'stable_min_runs'] }
+  // На виду - только то, что понятно без подсказок: насколько строго отбирать
+  // ноды (пресет) и сколько их держать в пуле. Остальное - в свёрнутом блоке.
+  { title: 'Быстрый пул', preset: true, fields: ['topn'] },
+  { title: 'Дополнительно', advanced: true, note: 'Редко нужные параметры. Значения по умолчанию подходят большинству.', groups: [
+    { title: 'Отбор в быстрый пул', fields: ['min_ratio', 'min_floor_mb', 'min_winners', 'stable_min_uptime', 'stable_lookback'] },
+    { title: 'Сколько нод проверять за прогон', fields: ['max_tested', 'enough'] },
+    { title: 'История и графики', fields: ['keep_runs', 'keep_days', 'node_cap'] },
+    { title: 'Прочее', fields: ['extype', 'size_mb', 'dl_timeout', 'min_speed_mb', 'stability_window', 'stability_drop_after', 'stable_min_runs'] }
+  ] }
 ];
 
 // Короткая схема прогона над формой - чтобы подсказки полей было к чему
@@ -317,6 +322,74 @@ function attachHelp(wrap, head, name, def) {
 
 // Экспорт: карточка «Настройки обновлений» на вкладке «Обновления»
 // (stats_app_updates.js) строит свои поля тем же кодом.
+// PRESETS-LOGIC-BEGIN
+// «Насколько строго отбирать»: пресет задаёт два поля - долю от канала
+// (min_ratio) и минимальный Uptime (stable_min_uptime). Остальное (нижняя
+// граница порога, минимум нод, окно Uptime) пресеты не трогают. Значения не
+// совпали ни с одним пресетом - «Свои значения» (ничего не затирается).
+var STRICTNESS_PRESETS = [
+  { id: 'soft', label: 'Мягко - в пул попадает больше нод', min_ratio: 0.15, stable_min_uptime: 60 },
+  { id: 'normal', label: 'Обычно (рекомендуется)', min_ratio: 0.25, stable_min_uptime: 80 },
+  { id: 'strict', label: 'Строго - только самые быстрые и стабильные', min_ratio: 0.4, stable_min_uptime: 90 }
+];
+function numberOf(v, dflt) {
+  var n = parseFloat(String(v === undefined || v === null ? '' : v).replace(',', '.'));
+  return isFinite(n) ? n : dflt;
+}
+function presetOf(values) {
+  var r = numberOf(values.min_ratio, 0.25), u = numberOf(values.stable_min_uptime, 80);
+  for (var i = 0; i < STRICTNESS_PRESETS.length; i++) {
+    if (STRICTNESS_PRESETS[i].min_ratio === r && STRICTNESS_PRESETS[i].stable_min_uptime === u) { return STRICTNESS_PRESETS[i].id; }
+  }
+  return 'custom';
+}
+function presetValues(id) {
+  for (var i = 0; i < STRICTNESS_PRESETS.length; i++) {
+    if (STRICTNESS_PRESETS[i].id === id) {
+      return { min_ratio: STRICTNESS_PRESETS[i].min_ratio, stable_min_uptime: STRICTNESS_PRESETS[i].stable_min_uptime };
+    }
+  }
+  return null;
+}
+// PRESETS-LOGIC-END
+
+// Выбор строгости отбора. Сам не уходит в POST (нет name): отправляются поля
+// min_ratio и stable_min_uptime из блока «Дополнительно», пресет их заполняет.
+function buildPresetField(values, form) {
+  var wrap = el('div', 'field');
+  var head = el('div', 'field-head');
+  var label = el('label', null, 'Насколько строго отбирать ноды в быстрый пул');
+  label.setAttribute('for', 'strictness');
+  head.appendChild(label);
+  wrap.appendChild(head);
+  var sel = el('select');
+  sel.id = 'strictness';
+  STRICTNESS_PRESETS.forEach(function (p) {
+    var o = el('option', null, p.label); o.value = p.id; sel.appendChild(o);
+  });
+  var custom = el('option', null, 'Свои значения (заданы в «Дополнительно»)');
+  custom.value = 'custom';
+  sel.appendChild(custom);
+  sel.value = presetOf(values);
+  wrap.appendChild(sel);
+  wrap.appendChild(el('p', 'hint', '«Обычно» подходит большинству. Точный порог скорости, минимум нод и Uptime - в блоке «Дополнительно» ниже.'));
+  function field(name) { return form.querySelector('[name="' + name + '"]'); }
+  sel.addEventListener('change', function () {
+    var v = presetValues(sel.value);
+    if (!v) { return; }
+    field('min_ratio').value = v.min_ratio;
+    field('stable_min_uptime').value = v.stable_min_uptime;
+  });
+  // Правка точных полей вручную возвращает выбор в «Обычно / Мягко / Строго»
+  // или «Свои значения».
+  form.addEventListener('input', function (e) {
+    if (e.target && (e.target.name === 'min_ratio' || e.target.name === 'stable_min_uptime')) {
+      sel.value = presetOf({ min_ratio: field('min_ratio').value, stable_min_uptime: field('stable_min_uptime').value });
+    }
+  });
+  return wrap;
+}
+
 export function buildField(name, value) {
   var def = FIELD_DEFS[name];
   var wrap = el('div', 'field');
@@ -373,8 +446,12 @@ function buildSettingsForm(values) {
       c = card(cardDef.title);
     }
     if (cardDef.note) { c.appendChild(el('p', 'hint', cardDef.note)); }
-    cardDef.fields.forEach(function (name) {
-      c.appendChild(buildField(name, values[name]));
+    if (cardDef.preset) { c.appendChild(buildPresetField(values, form)); }
+    (cardDef.groups || [{ fields: cardDef.fields }]).forEach(function (grp) {
+      if (grp.title) { c.appendChild(el('h3', 'settings-group', grp.title)); }
+      grp.fields.forEach(function (name) {
+        c.appendChild(buildField(name, values[name]));
+      });
     });
     form.appendChild(c);
   });

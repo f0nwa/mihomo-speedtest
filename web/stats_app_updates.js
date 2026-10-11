@@ -302,6 +302,11 @@ export function renderUpdates() {
       summary.appendChild(el('p', 'hint', versionMsg));
     } else if (lc) {
       summary.appendChild(el('p', 'msg-err', 'Последняя проверка не удалась: ' + (lc.error || '')));
+      if (lc.diag) {
+        var diagBox = el('pre', 'hint', String(lc.diag));
+        diagBox.style.whiteSpace = 'pre-wrap';
+        summary.appendChild(diagBox);
+      }
     } else {
       summary.appendChild(el('p', 'hint', 'Проверок ещё не было.'));
     }

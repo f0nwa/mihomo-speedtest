@@ -26,6 +26,36 @@ TMPROOT=${TMPROOT:-/tmp}
 say() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Прокси для загрузки (если GitHub напрямую недоступен): UPDATE_PROXY или
+# INSTALL_PROXY, например http://127.0.0.1:7890 (mixed-port mihomo).
+UPDATE_PROXY=${UPDATE_PROXY:-${INSTALL_PROXY:-}}
+# Лёгкая диагностика сети (netcheck.sh лежит рядом; на старой установке его
+# может не быть - тогда прежнее сообщение без диагностики).
+if [ -f "$DIR/netcheck.sh" ]; then . "$DIR/netcheck.sh"; fi
+# Причина сбоя загрузки словами по коду curl (пусто - код ничего не объясняет).
+update_reason() {
+  case $1 in
+    22) echo 'сервер ответил ошибкой HTTP (файла нет или доступ закрыт)' ;;
+    *)
+      command -v nc_classify >/dev/null 2>&1 || return 0
+      ur_c=$(nc_classify "$1" 000)
+      case $ur_c in fail:*) return 0 ;; *) nc_reason "$ur_c" ;; esac ;;
+  esac
+}
+# Диагностика при сбое загрузки (stderr): что доступно напрямую и через mihomo
+# и что настроить. UPDATE_NETCHECK=0 отключает; при подменённом транспорте
+# (тесты) не нужна.
+update_net_diag() {
+  command -v nc_diagnose >/dev/null 2>&1 || return 0
+  [ "${UPDATE_NETCHECK:-1}" != 0 ] || return 0
+  [ -z "${UPDATE_HTTP_CMD:-}" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  printf '\nДиагностика сети:\n' >&2
+  [ -z "$UPDATE_PROXY" ] || NC_PROXY=$UPDATE_PROXY
+  TMPDIR=$TMPROOT nc_diagnose || :
+  printf '\n' >&2
+}
+
 ensure_mihomo_speedtest_symlink() {
   # Копия install.sh:ensure_mihomo_speedtest_symlink() - символическая
   # ссылка не публикуется через манифест/транзакцию (см.
@@ -147,9 +177,12 @@ mode_of() {
 http_get() {
   if [ -n "${UPDATE_HTTP_CMD:-}" ]; then $UPDATE_HTTP_CMD "$1"
   elif command -v curl >/dev/null 2>&1; then
-    case $1 in
-      https://*) curl -fsSL --proto '=https' --proto-redir '=https' --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" ;;
-      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2" "$1" ;;
+    hg_url=$1
+    set -- --max-time "$UPDATE_HTTP_TIMEOUT" --max-filesize "$2"
+    [ -z "$UPDATE_PROXY" ] || set -- "$@" -x "$UPDATE_PROXY"
+    case $hg_url in
+      https://*) curl -fsSL --proto '=https' --proto-redir '=https' "$@" "$hg_url" ;;
+      http://*) curl -fsSL --proto '=http' --proto-redir '=http' --max-redirs 0 "$@" "$hg_url" ;;
       *) return 1 ;;
     esac
   else die 'Штатная загрузка требует curl с поддержкой HTTPS'; fi
@@ -166,9 +199,12 @@ download_to() {
   else
     download_status=$?
     [ -z "${DOWNLOAD_SOFT:-}" ] || return 1
-    die "Не удалось скачать файл обновления (код загрузчика: $download_status).
-Адрес: $1
-Повторите обновление через несколько минут. Если ошибка повторится, пришлите этот вывод для диагностики."
+    dl_why=$(update_reason "$download_status")
+    [ -z "$dl_why" ] || dl_why=": $dl_why"
+    printf 'ERROR: Не удалось скачать файл обновления%s (код загрузчика: %s).\nАдрес: %s\n' "$dl_why" "$download_status" "$1" >&2
+    update_net_diag
+    printf 'Повторите обновление через несколько минут. Если ошибка повторится, пришлите этот вывод для диагностики.\n' >&2
+    exit 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
   [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || die 'Пустой файл или превышен лимит загрузки'

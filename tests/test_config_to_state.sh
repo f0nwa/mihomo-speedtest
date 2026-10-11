@@ -207,6 +207,34 @@ import "$WORK/c10.yaml" || fail "импорт плохого имени"
 assert_eq "$(cat "$WORK/st/services.tsv")" "" "плохое имя не импортируется"
 grep -q 'REVIEW|custom-group-name' "$WORK/report" || fail "плохое имя - в отчёт"
 
+# test_import_own_scope: свои ноды в списке якоря select-default (общий для
+# сервисных групп) -> ownscope all; ноды только в базовых группах - ничего
+cat > "$WORK/os1.yaml" <<'Y'
+anchors:
+  p: &p { type: http, exclude-filter: &geofilter '(?i)RU|old' }
+  select-default: &select-default { type: select, use: *sub-names, proxies: [DIRECT, 'Own 1', Own2] }
+proxies:
+  - name: 'Own 1'
+    type: ss
+  - name: Own2
+    type: ss
+proxy-groups:
+  - name: 'Заблок. сервисы'
+    type: select
+rules:
+  - MATCH,DIRECT
+Y
+import "$WORK/os1.yaml" || fail "импорт ownscope с ошибкой"
+grep -qx "ownscope	all" "$WORK/st/services.tsv" || fail "ownscope all не определён по якорю: $(cat "$WORK/st/services.tsv")"
+grep -q 'IMPORTED|ownscope' "$WORK/report" || fail "ownscope: нет строки в отчёте"
+sed "s/proxies: \[DIRECT, 'Own 1', Own2\]/proxies: [DIRECT, 'Заблок. сервисы']/" "$WORK/os1.yaml" > "$WORK/os2.yaml"
+import "$WORK/os2.yaml" || fail "импорт без ownscope с ошибкой"
+grep -q ownscope "$WORK/st/services.tsv" && fail "ноды не в якоре - ownscope быть не должно"
+# ссылка на ноду, которой нет среди своих (например, WireGuard-группа), - не ownscope
+sed "s/proxies: \[DIRECT, 'Own 1', Own2\]/proxies: [DIRECT, 'Чужая нода']/" "$WORK/os1.yaml" > "$WORK/os3.yaml"
+import "$WORK/os3.yaml" || fail "импорт с чужим именем в якоре с ошибкой"
+grep -q ownscope "$WORK/st/services.tsv" && fail "имя не из своих нод - ownscope быть не должно"
+
 # test_import_base_groups: отличия базовых групп - bset/bfirst, круг через render_services
 BT="$WORK/bt.yaml"
 cat > "$BT" <<'Y'

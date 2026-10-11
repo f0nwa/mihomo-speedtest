@@ -69,6 +69,7 @@ FILE|installer|uninstall.sh|/opt/etc/mihomo-speedtest/uninstall.sh|0755|sh
 FILE|installer|install.sh|/opt/etc/mihomo-speedtest/install.sh|0755|sh
 FILE|installer|installer/version_check.sh|/opt/etc/mihomo-speedtest/version_check.sh|0755|sh
 FILE|installer|installer/ui.sh|/opt/etc/mihomo-speedtest/ui.sh|0755|sh
+FILE|installer|installer/netcheck.sh|/opt/etc/mihomo-speedtest/netcheck.sh|0755|sh
 FILE|installer|mihomo-speedtest.sh|/opt/etc/mihomo-speedtest/mihomo-speedtest.sh|0755|sh
 FILE|installer|installer/update_interactive.sh|/opt/etc/mihomo-speedtest/update_interactive.sh|0755|sh
 
