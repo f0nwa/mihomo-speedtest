@@ -89,6 +89,18 @@ capture_stderr_line() {
   fi
 }
 
+# Блок «Диагностика сети:» из stderr update.sh (до строки «Повторите…») -
+# JSON-строкой с переносами \n или null, если блока нет. Нужен, чтобы
+# веб-интерфейс показал причину и совет, а не одну строку ERROR.
+capture_diag_json() {
+  cdj_text=$(awk '/^Диагностика сети:/ { f = 1; next } /^Повторите/ { f = 0 } f' "$1" 2>/dev/null | sed -e '/^$/d' | cut -c1-300 | head -20)
+  if [ -z "$cdj_text" ]; then
+    printf 'null'
+    return 0
+  fi
+  printf '"%s"' "$(printf '%s\n' "$cdj_text" | tr '\t\r' '  ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{ printf "%s%s", (NR > 1 ? "\\n" : ""), $0 }')"
+}
+
 urldecode() {
   printf '%s' "$1" | awk '
     BEGIN { for (i = 0; i <= 255; i++) { h = sprintf("%02x", i); H = sprintf("%02X", i); byte[h] = sprintf("%c", i); byte[H] = sprintf("%c", i) } }
@@ -222,10 +234,12 @@ cmd_check() {
   err=$STATS_UPDATE_RUNTIME_DIR/.check-err.$$
   mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
   out=$STATS_UPDATE_RUNTIME_DIR/.check-out.$$
+  diagval=null
   if sh "$UPDATE_SCRIPT" --plan --format=json > "$out" 2>"$err"; then
     ok=true; errline=null
   else
     ok=false
+    diagval=$(capture_diag_json "$err")
     errline=$(json_escape_line "$(capture_stderr_line "$err")")
     errline="\"$errline\""
     printf '{}' > "$out"
@@ -250,8 +264,8 @@ cmd_check() {
   fi
   tmp=$STATS_UPDATE_RUNTIME_DIR/.last-check.$$
   {
-    printf '{"schema_version":1,"checked_at":"%s","source":"%s","ok":%s,"error":%s,"plan":%s,"notes":%s}\n' \
-      "$(date '+%Y-%m-%d %H:%M:%S')" "$source" "$ok" "$errline" "$planval" "$notesval"
+    printf '{"schema_version":1,"checked_at":"%s","source":"%s","ok":%s,"error":%s,"diag":%s,"plan":%s,"notes":%s}\n' \
+      "$(date '+%Y-%m-%d %H:%M:%S')" "$source" "$ok" "$errline" "$diagval" "$planval" "$notesval"
   } > "$tmp"
   write_json_atomic "$tmp" "$LAST_CHECK_FILE"
   rm -f "$out" "$err" "$tmp"
