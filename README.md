@@ -271,6 +271,7 @@ flowchart TD
 | `mihomo-speedtest stop-web` / `start-web` | выключить / включить веб-панель |
 | `mihomo-speedtest setup` | мастер настройки `config.yaml` |
 | `mihomo-speedtest version` | установленная версия |
+| `mihomo-speedtest doctor` | диагностика: ядро, конфиг, веб-служба, доступность GitHub напрямую и через mihomo, советы по настройке |
 | `mihomo-speedtest recalibrate` | пересчитать порог скорости |
 | `mihomo-speedtest install` / `uninstall` | переустановить / удалить проект |
 
