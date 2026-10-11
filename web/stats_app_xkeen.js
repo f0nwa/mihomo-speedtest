@@ -176,7 +176,6 @@ export function renderXkeen() {
     txt.appendChild(el('b', null, s[1]));
     var sub = el('span', 'xk-sec-sub', s[2]);
     txt.appendChild(sub);
-    b.appendChild(el('span', 'xk-sec-num', String(i + 1)));
     b.appendChild(txt);
     b.addEventListener('click', function () { showSection(s[0]); });
     side.appendChild(b);

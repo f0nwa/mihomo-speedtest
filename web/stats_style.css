@@ -303,8 +303,6 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-sec{display:flex;align-items:center;gap:11px;width:100%;padding:10px 13px;background:var(--card);border:1px solid var(--card-border);border-radius:0;color:var(--text);font:inherit;text-align:left;cursor:pointer}
 .xk-sec:hover{border-color:var(--accent)}
 .xk-sec.on{border-color:var(--accent);background:#1e2a2c}
-.xk-sec-num{width:22px;height:22px;flex:0 0 22px;display:flex;align-items:center;justify-content:center;border:1px solid var(--card-border);color:var(--muted);font-size:12px}
-.xk-sec.on .xk-sec-num{border-color:var(--accent);color:var(--accent)}
 .xk-sec b{display:block;font-size:14px}
 .xk-sec-sub{display:block;color:var(--muted);font-size:12px}
 .xk-pane{min-width:0}
