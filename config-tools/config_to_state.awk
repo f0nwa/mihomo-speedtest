@@ -134,6 +134,7 @@ function read_defaults(  rc, line, n, f) {
     else if (f[1] == "prov") { p = f[3]; sub(/:.*/, "", p); default_prov[p] = f[2] }
     else if (f[1] == "rule") { ndr++; dr_owner[ndr] = f[2]; dr_text[ndr] = f[3]; dr_index[body(f[3])] = ndr }
     else if (f[1] == "fresh") fresh_rule[f[2] SUBSEP f[3]] = 1
+    else if (f[1] == "gone") gone_rule[body(f[3])] = 1
   }
   if (rc < 0) err("не удалось прочитать " defaults)
   close(defaults)
@@ -294,6 +295,8 @@ END {
     b = cfg_rule[i]
     if (b in tmpl_rule) continue
     if (b in dr_index) { seen_rule[dr_index[b]] = 1; continue }
+    # Бывшее встроенное правило (в шаблоне заменено) - не своё правило.
+    if (b in gone_rule) continue
     tg = target(b)
     id = ""
     if (tg in custom_id) id = custom_id[tg]

@@ -83,7 +83,7 @@ class ConfigPreparation(unittest.TestCase):
   self.state.mkdir();(self.state/'config-schema-version').write_text('3\n');self.cli('--prepare','--components=a,active-config',ok=False)
  # --- Служебный вход mst-speedtest (замер WG через основное ядро): порт 7896 ---
  def without_listener(self):
-  a=self.config.read_text();start=a.index('# --- Входы ---');end=a.index('# --- НАСТРОЙКИ GEO-ДАННЫХ ---');self.config.write_text(a[:start]+a[end:])
+  a=self.config.read_text();start=a.index('# --- Входы ---');end=a.index('# --- Провайдеры правил ---');self.config.write_text(a[:start]+a[end:])
  def netstat(self,line):
   b=self.root/'nsbin';b.mkdir(exist_ok=True);(b/'netstat').write_text('#!/bin/sh\nprintf "%s\\n" "Proto Recv-Q Send-Q Local Address Foreign Address State" "'+line+'"\n');(b/'netstat').chmod(0o755)
   self.env['PATH']=str(b)+os.pathsep+os.environ['PATH']

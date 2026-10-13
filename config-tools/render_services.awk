@@ -27,6 +27,10 @@
 #                                        прошлого релиза (при сборке не нужна,
 #                                        config_to_state.awk не считает его
 #                                        убранным пользователем)
+#   gone<TAB>id|-<TAB>текст правила      бывшее встроенное правило (заменено
+#                                        или убрано): при сборке не нужно,
+#                                        config_to_state.awk не переносит его
+#                                        из старого конфига в свои правила
 # id в icon/gkey/prov/rule должен быть объявлен строкой svc выше; "-" -
 # provider или правило без сервиса.
 #
@@ -201,10 +205,10 @@ function read_defaults(  rc, n, f, kind, id) {
       need(n, 3, kind); known(id, kind)
       nrule++; rule_owner[nrule] = id; rule_text[nrule] = f[3]
       default_rule[id SUBSEP f[3]] = 1
-    } else if (kind == "fresh") {
+    } else if (kind == "fresh" || kind == "gone") {
       need(n, 3, kind); known(id, kind)
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov, rule или fresh)")
+      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov, rule, fresh или gone)")
     }
   }
   if (rc < 0) err("не удалось прочитать " services_file)

@@ -305,11 +305,6 @@ listeners:
     port: 7896
     proxy: MST-SPEEDTEST
 
-# --- НАСТРОЙКИ GEO-ДАННЫХ ---
-geox-url:
-  geosite: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
-  geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
-
 # --- Провайдеры правил ---
 rule-providers:
   # --- SERVICE_PROVIDERS:BEGIN --- (собирается из services.default.tsv)
@@ -320,6 +315,8 @@ rule-providers:
   amazon@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs" }
   apple@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs" }
   category-ai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
+  category-ip-geo-detect@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ip-geo-detect.mrs" }
+  category-porn@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.mrs" }
   cdn77@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs" }
   category-ru@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs" }
   cloudflare@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs" }
@@ -336,6 +333,7 @@ rule-providers:
   hetzner@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs" }
   hetzner@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs" }
   intel@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs" }
+  kinopub@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/kinopub.mrs" }
   meta@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs" }
   meta@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs" }
   microsoft@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs" }
@@ -345,6 +343,7 @@ rule-providers:
   playstation@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs" }
   reddit@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs" }
   refilter@domain: { <<: *domain, url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs" }
+  rutracker@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/rutracker.mrs" }
   scaleway@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs" }
   spotify@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs" }
   steam@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs" }
@@ -357,6 +356,7 @@ rule-providers:
   vodafone@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs" }
   vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
   youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
+  zoom@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zoom.mrs" }
   quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
   # --- SERVICE_PROVIDERS:END ---
   user@classical:
@@ -371,20 +371,14 @@ rules:
   # --- SERVICE_RULES:BEGIN --- (собирается из services.default.tsv)
 
   # --- KinoPub ---
-  - GEOSITE,kinopub,KinoPub
+  - RULE-SET,kinopub@domain,KinoPub
   - DOMAIN-SUFFIX,firebase-settings.crashlytics.com,KinoPub
   - DOMAIN-SUFFIX,firebaseinstallations.googleapis.com,KinoPub
   - DOMAIN-SUFFIX,firebaseremoteconfigrealtime.googleapis.com,KinoPub
   - DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,KinoPub
   - DOMAIN-SUFFIX,pkr.ovh,KinoPub
-  - DOMAIN-SUFFIX,ahc.ovh,KinoPub
-  - DOMAIN-SUFFIX,api.alador.space,KinoPub
   - DOMAIN-SUFFIX,api.ios-kp.store,KinoPub
   - DOMAIN-SUFFIX,api.srvkp.com,KinoPub
-  - DOMAIN-SUFFIX,api2.support-kp.com,KinoPub
-  - DOMAIN-SUFFIX,cdn-service.space,KinoPub
-  - DOMAIN-SUFFIX,cdn2cdn.com,KinoPub
-  - DOMAIN-SUFFIX,cdn2site.com,KinoPub
   - DOMAIN-SUFFIX,cdn32.lol,KinoPub
   - DOMAIN-SUFFIX,cdn3t.store,KinoPub
   - DOMAIN-SUFFIX,cdn4t.xyz,KinoPub
@@ -392,52 +386,36 @@ rules:
   - DOMAIN-SUFFIX,cdntogo.net,KinoPub
   - DOMAIN-SUFFIX,digital-cdn.net,KinoPub
   - DOMAIN-SUFFIX,flexcdn.cloud,KinoPub
-  - DOMAIN-SUFFIX,gfw.ovh,KinoPub
   - DOMAIN-SUFFIX,i0.wp.com,KinoPub
   - DOMAIN-SUFFIX,iptv.online,KinoPub
-  - DOMAIN-SUFFIX,kino.pub,KinoPub
-  - DOMAIN-SUFFIX,kino.watch,KinoPub
-  - DOMAIN-SUFFIX,kinopub.online,KinoPub
   - DOMAIN-SUFFIX,kp-msx.onrender.com,KinoPub
   - DOMAIN-SUFFIX,kpap.link,KinoPub
   - DOMAIN-SUFFIX,kpapp.link,KinoPub
-  - DOMAIN-SUFFIX,kpdl.link,KinoPub
-  - DOMAIN-SUFFIX,m.pushbr.com,KinoPub
   - DOMAIN-SUFFIX,m.staticdn.site,KinoPub
   - DOMAIN-SUFFIX,media.service-kp.com,KinoPub
-  - DOMAIN-SUFFIX,mos-gorsud.co,KinoPub
   - DOMAIN-SUFFIX,mycdn.video,KinoPub
   - DOMAIN-SUFFIX,proxykp.xyz,KinoPub
-  - DOMAIN-SUFFIX,pushbr.com,KinoPub
   - DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
-  - DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
-  - DOMAIN-SUFFIX,teleos.club,KinoPub
 
   # --- 18+ ---
-  - GEOSITE,category-porn,18+
+  - RULE-SET,category-porn@domain,18+
 
   # --- Apple ---
   - IP-ASN,714,Apple
   - RULE-SET,apple@domain,Apple
 
   # --- Zoom ---
-  - GEOSITE,zoom,Zoom
-  - DOMAIN-SUFFIX,zoom.us,Zoom
-  - DOMAIN-SUFFIX,zoom.com,Zoom
+  - RULE-SET,zoom@domain,Zoom
   - DOMAIN-SUFFIX,zoomgov.com,Zoom
   - DOMAIN-SUFFIX,zoomcdn.com,Zoom
 
   # --- IP Detect ---
-  - GEOSITE,category-ip-geo-detect,IP Detect
-  - DOMAIN-SUFFIX,browserleaks.com,IP Detect
-  - DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
+  - RULE-SET,category-ip-geo-detect@domain,IP Detect
   - DOMAIN-SUFFIX,ip138.com,IP Detect
   - DOMAIN-SUFFIX,whatismyip.host,IP Detect
-  - DOMAIN-SUFFIX,ipwho.is,IP Detect
   - DOMAIN-SUFFIX,ipx.ac,IP Detect
   - DOMAIN-SUFFIX,trackip.net,IP Detect
   - DOMAIN-SUFFIX,wimi5.com,IP Detect
-  - DOMAIN-SUFFIX,test-ipv6.com,IP Detect
 
   # --- Microsoft ---
   - RULE-SET,microsoft@domain,Microsoft
@@ -450,7 +428,7 @@ rules:
   - DOMAIN-SUFFIX,provider-c.info,other
 
   # --- Torrents ---
-  - GEOSITE,rutracker,Torrents
+  - RULE-SET,rutracker@domain,Torrents
   - DOMAIN-SUFFIX,rutor.info,Torrents
   - DOMAIN-SUFFIX,lostfilm.tv,Torrents
   - DOMAIN-SUFFIX,nnmclub.to,Torrents

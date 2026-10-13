@@ -30,9 +30,18 @@ sed "s/'Заблок[.] сервисы', '🚀 Авто по пингу'/'Заб
 # CDN теперь наследует список якоря без собственного proxies: с PASS.
 grep -v -F "    proxies: [DIRECT, 'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]" \
   "$WORK/before-with-fallback.txt" > "$WORK/before-current.txt"
-# правила с пометкой fresh добавлены после фикстуры - в сравнении их нет
+# правила с пометкой fresh добавлены после фикстуры - в сравнении их нет,
+# как и providers наборов, на которые ссылаются только они
 awk -F'\t' '$1 == "fresh" { print "  - " $3 }' "$TOOLS/services.default.tsv" > "$WORK/fresh.txt"
+awk -F'\t' '$1 == "fresh" && match($3, /RULE-SET,[^,]+/) { print substr($3, RSTART + 9, RLENGTH - 9) }' "$TOOLS/services.default.tsv" |
+  while read -r n; do grep "^  $n: " "$TEMPLATE" || true; done >> "$WORK/fresh.txt"
 strip "$TEMPLATE" | grep -v -x -F -f "$WORK/fresh.txt" > "$WORK/after.txt" || true
+# правила gone убраны из шаблона после фикстуры; geox-url убран вместе с
+# последними правилами GEOSITE
+awk -F'\t' '$1 == "gone" { print "  - " $3 }' "$TOOLS/services.default.tsv" > "$WORK/gone.txt"
+grep -v -x -F -f "$WORK/gone.txt" "$WORK/before-current.txt" |
+  grep -v -e '^geox-url:$' -e '^  geosite: "' -e '^  geoip: "' > "$WORK/before-gone.txt" || true
+mv "$WORK/before-gone.txt" "$WORK/before-current.txt"
 if ! cmp -s "$WORK/before-current.txt" "$WORK/after.txt"; then
   fail "содержимое шаблона изменилось относительно фикстуры:"
   diff "$WORK/before-current.txt" "$WORK/after.txt" | head -20 >&2 || true

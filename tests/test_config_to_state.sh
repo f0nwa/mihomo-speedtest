@@ -55,7 +55,9 @@ printf '%s\n' \
   'rule	-	OR,((DOMAIN-SUFFIX,gql.twitch.tv)),⚙️Manual # twitch' \
   'rule	youtube	RULE-SET,youtube@domain,YouTube' \
   'rule	spotify	RULE-SET,spotify@domain,Spotify' \
-  'rule	ipdetect	DOMAIN-SUFFIX,2ip.io,IP Detect' > "$D"
+  'rule	ipdetect	DOMAIN-SUFFIX,2ip.io,IP Detect' \
+  'gone	kinopub	DOMAIN-SUFFIX,kino.old,KinoPub' \
+  'gone	ipdetect	GEOSITE,old-detect,IP Detect' > "$D"
 
 build() {
   # $1 - отличия (файл или пусто), $2 - фильтр, $3 - свои правила, вывод - config
@@ -90,6 +92,15 @@ grep -q 'IMPORTED|del|spotify' "$WORK/report" || fail "в отчёте нет de
 grep -v 'ahc.ovh' "$WORK/c0.yaml" > "$WORK/c1f.yaml"
 import "$WORK/c1f.yaml" || fail "импорт без свежего правила с ошибкой"
 assert_eq "$(cat "$WORK/st/services.tsv")" "" "свежее правило не уходит в unrule"
+
+# test_import_gone_rule_dropped: бывшие встроенные правила из старого
+# конфига не становятся своими доменами или правилами
+sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,kino.old,KinoPub\
+  - GEOSITE,old-detect,IP Detect\
+  - MATCH,DIRECT/' "$WORK/c0.yaml" > "$WORK/c1g.yaml"
+import "$WORK/c1g.yaml" || fail "импорт с бывшими правилами с ошибкой"
+assert_eq "$(cat "$WORK/st/services.tsv")" "" "бывшие правила не уходят в dom"
+[ ! -s "$WORK/st/user-rules.txt" ] || fail "бывшие правила попали в свои: $(cat "$WORK/st/user-rules.txt")"
 
 # test_import_dom_on_default + user rules + prov
 sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,kino.pub,KinoPub\

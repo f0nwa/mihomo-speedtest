@@ -39,6 +39,8 @@ if os.environ['FAIL_ACTION']==kind+'-timeout' and not marker.exists():marker.tou
   self.assertEqual([r['action'] for r in self.actions()],['restart','health']);self.assertTrue(all(r['hash']==expected and r['schema']=='2\n' for r in self.actions()))
   self.assertFalse((self.state/'transaction.txt').exists());self.assertTrue((self.state/'rollback').is_dir())
  def test_apply_requires_confirmation_without_writes(self):
+  # Ключ, который миграция не переносит (REVIEW), - нужно подтверждение.
+  self.config.write_text(self.config.read_text()+'tun: {enable: true}\n');(self.state/'config-sha256').write_text(hashlib.sha256(self.config.read_bytes()).hexdigest()+'\n')
   d,p=self.prepare();before=self.snapshot();self.cli('--apply',d['plan_id'],ok=False);self.assertEqual(self.snapshot(),before);self.assertEqual(self.actions(),[])
  def test_manual_rollback_restores_mode_metadata_and_restarts_once(self):
   self.applied();self.env['UPDATE_HTTP_CMD']='/no-network';self.cli('--rollback-last');self.restored();self.assertEqual([r['action'] for r in self.actions()],['restart','health','restart','health']);self.assertEqual(self.actions()[-1]['hash'],hashlib.sha256(self.original).hexdigest())

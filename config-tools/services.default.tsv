@@ -68,6 +68,8 @@ prov	cdn	amazon@domain: { <<: *domain, url: "https://raw.githubusercontent.com/M
 prov	cdn	amazon@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs" }
 prov	apple	apple@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs" }
 prov	ai	category-ai@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs" }
+prov	ipdetect	category-ip-geo-detect@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ip-geo-detect.mrs" }
+prov	adult	category-porn@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.mrs" }
 prov	cdn	cdn77@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs" }
 prov	-	category-ru@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs" }
 prov	cdn	cloudflare@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs" }
@@ -84,6 +86,7 @@ prov	google	google@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeeni
 prov	cdn	hetzner@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs" }
 prov	cdn	hetzner@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs" }
 prov	intel	intel@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs" }
+prov	kinopub	kinopub@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/kinopub.mrs" }
 prov	meta	meta@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs" }
 prov	meta	meta@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs" }
 prov	microsoft	microsoft@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs" }
@@ -93,6 +96,7 @@ prov	cdn	ovh@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rule
 prov	playstation	playstation@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs" }
 prov	reddit	reddit@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs" }
 prov	-	refilter@domain: { <<: *domain, url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs" }
+prov	torrents	rutracker@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/rutracker.mrs" }
 prov	cdn	scaleway@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs" }
 prov	spotify	spotify@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs" }
 prov	steam	steam@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs" }
@@ -105,21 +109,16 @@ prov	twitter	twitter@domain: { <<: *domain, url: "https://raw.githubusercontent.
 prov	cdn	vodafone@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs" }
 prov	cdn	vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
 prov	youtube	youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
+prov	zoom	zoom@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zoom.mrs" }
 prov	-	quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
-rule	kinopub	GEOSITE,kinopub,KinoPub
+rule	kinopub	RULE-SET,kinopub@domain,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebase-settings.crashlytics.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebaseinstallations.googleapis.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebaseremoteconfigrealtime.googleapis.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebaseremoteconfig.googleapis.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,pkr.ovh,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,ahc.ovh,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,api.alador.space,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,api.ios-kp.store,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,api.srvkp.com,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,api2.support-kp.com,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,cdn-service.space,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,cdn2cdn.com,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,cdn2site.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,cdn32.lol,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,cdn3t.store,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,cdn4t.xyz,KinoPub
@@ -127,34 +126,18 @@ rule	kinopub	DOMAIN-SUFFIX,cdnservices.link,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,cdntogo.net,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,digital-cdn.net,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,flexcdn.cloud,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,gfw.ovh,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,i0.wp.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,iptv.online,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,kino.pub,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,kino.watch,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,kinopub.online,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,kp-msx.onrender.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,kpap.link,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,kpapp.link,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,kpdl.link,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,m.pushbr.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,m.staticdn.site,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,media.service-kp.com,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,mos-gorsud.co,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,mycdn.video,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,proxykp.xyz,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,pushbr.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
-rule	kinopub	DOMAIN-SUFFIX,teleos.club,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,ahc.ovh,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,api.alador.space,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,api.ios-kp.store,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,api.srvkp.com,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,api2.support-kp.com,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,cdn-service.space,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,cdn2cdn.com,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,cdn2site.com,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,cdn32.lol,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,cdn3t.store,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,cdn4t.xyz,KinoPub
@@ -162,51 +145,35 @@ fresh	kinopub	DOMAIN-SUFFIX,cdnservices.link,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,cdntogo.net,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,digital-cdn.net,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,flexcdn.cloud,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,gfw.ovh,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,i0.wp.com,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,iptv.online,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,kino.pub,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,kino.watch,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,kinopub.online,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,kp-msx.onrender.com,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,kpap.link,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,kpapp.link,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,kpdl.link,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,m.pushbr.com,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,m.staticdn.site,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,media.service-kp.com,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,mos-gorsud.co,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,mycdn.video,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,proxykp.xyz,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,pushbr.com,KinoPub
 fresh	kinopub	DOMAIN-SUFFIX,smarttv.zeasn.tv,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
-fresh	kinopub	DOMAIN-SUFFIX,teleos.club,KinoPub
-rule	adult	GEOSITE,category-porn,18+
+rule	adult	RULE-SET,category-porn@domain,18+
 rule	apple	IP-ASN,714,Apple
 rule	apple	RULE-SET,apple@domain,Apple
-rule	zoom	GEOSITE,zoom,Zoom
-rule	zoom	DOMAIN-SUFFIX,zoom.us,Zoom
-rule	zoom	DOMAIN-SUFFIX,zoom.com,Zoom
+rule	zoom	RULE-SET,zoom@domain,Zoom
 rule	zoom	DOMAIN-SUFFIX,zoomgov.com,Zoom
 rule	zoom	DOMAIN-SUFFIX,zoomcdn.com,Zoom
-rule	ipdetect	GEOSITE,category-ip-geo-detect,IP Detect
-rule	ipdetect	DOMAIN-SUFFIX,browserleaks.com,IP Detect
-rule	ipdetect	DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
+rule	ipdetect	RULE-SET,category-ip-geo-detect@domain,IP Detect
 rule	ipdetect	DOMAIN-SUFFIX,ip138.com,IP Detect
 rule	ipdetect	DOMAIN-SUFFIX,whatismyip.host,IP Detect
-rule	ipdetect	DOMAIN-SUFFIX,ipwho.is,IP Detect
 rule	ipdetect	DOMAIN-SUFFIX,ipx.ac,IP Detect
 rule	ipdetect	DOMAIN-SUFFIX,trackip.net,IP Detect
 rule	ipdetect	DOMAIN-SUFFIX,wimi5.com,IP Detect
-rule	ipdetect	DOMAIN-SUFFIX,test-ipv6.com,IP Detect
 rule	microsoft	RULE-SET,microsoft@domain,Microsoft
 rule	other	DOMAIN-SUFFIX,onlyfans.com,other
 rule	other	DOMAIN-SUFFIX,fansly.com,other
 rule	other	DOMAIN-SUFFIX,patreon.com,other
 rule	other	DOMAIN-SUFFIX,provider-c.pro,other
 rule	other	DOMAIN-SUFFIX,provider-c.info,other
-rule	torrents	GEOSITE,rutracker,Torrents
+rule	torrents	RULE-SET,rutracker@domain,Torrents
 rule	torrents	DOMAIN-SUFFIX,rutor.info,Torrents
 rule	torrents	DOMAIN-SUFFIX,lostfilm.tv,Torrents
 rule	torrents	DOMAIN-SUFFIX,nnmclub.to,Torrents
@@ -251,3 +218,37 @@ rule	cdn	RULE-SET,vultr@ipcidr,CDN
 rule	cdn	RULE-SET,vodafone@ipcidr,CDN
 rule	cdn	RULE-SET,gcore@ipcidr,CDN
 rule	cdn	RULE-SET,cdn77@ipcidr,CDN
+fresh	kinopub	RULE-SET,kinopub@domain,KinoPub
+fresh	adult	RULE-SET,category-porn@domain,18+
+fresh	zoom	RULE-SET,zoom@domain,Zoom
+fresh	ipdetect	RULE-SET,category-ip-geo-detect@domain,IP Detect
+fresh	torrents	RULE-SET,rutracker@domain,Torrents
+# Бывшие встроенные правила (GEOSITE заменены наборами .mrs, домены уже
+# входят в наборы MetaCubeX): в старом конфиге не считаются своими правилами.
+gone	kinopub	GEOSITE,kinopub,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,ahc.ovh,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,api.alador.space,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,api2.support-kp.com,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,cdn-service.space,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,cdn2cdn.com,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,cdn2site.com,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,gfw.ovh,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,kino.pub,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,kino.watch,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,kinopub.online,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,kpdl.link,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,m.pushbr.com,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,mos-gorsud.co,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,pushbr.com,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,smarttvcdn.online,KinoPub
+gone	kinopub	DOMAIN-SUFFIX,teleos.club,KinoPub
+gone	adult	GEOSITE,category-porn,18+
+gone	zoom	GEOSITE,zoom,Zoom
+gone	zoom	DOMAIN-SUFFIX,zoom.us,Zoom
+gone	zoom	DOMAIN-SUFFIX,zoom.com,Zoom
+gone	ipdetect	GEOSITE,category-ip-geo-detect,IP Detect
+gone	ipdetect	DOMAIN-SUFFIX,browserleaks.com,IP Detect
+gone	ipdetect	DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
+gone	ipdetect	DOMAIN-SUFFIX,ipwho.is,IP Detect
+gone	ipdetect	DOMAIN-SUFFIX,test-ipv6.com,IP Detect
+gone	torrents	GEOSITE,rutracker,Torrents

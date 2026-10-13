@@ -100,7 +100,7 @@ class Migration(unittest.TestCase):
  # --- Служебный вход mst-speedtest и свои listeners (замер WG через основное ядро) ---
  def schema2(self,extra=''):
   # Конфиг до появления входа: без раздела listeners (группы - управляемые, заменяются шаблоном).
-  a=self.old.read_text();start=a.index('# --- Входы ---');end=a.index('# --- НАСТРОЙКИ GEO-ДАННЫХ ---')
+  a=self.old.read_text();start=a.index('# --- Входы ---');end=a.index('# --- Провайдеры правил ---')
   self.old.write_text(a[:start]+extra+a[end:])
  def service(self,t):
   self.assertEqual(t.count('\n  - name: mst-speedtest\n'),1);self.assertIn('    port: 7896\n    proxy: MST-SPEEDTEST\n',t);self.assertEqual(t.count('\n  - name: MST-SPEEDTEST\n'),1);self.assertEqual(t.count('\nlisteners:\n'),1)
