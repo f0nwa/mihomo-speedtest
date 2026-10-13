@@ -14,8 +14,9 @@
 #                     отличается от шаблона;
 #   user-rules.txt  - правила, которые не укладываются в сервисы, в
 #                     исходном порядке (если есть);
-#   (в services.tsv также bset/bfirst - отличия базовых групп от шаблона:
-#   interval, tolerance и первое значение proxies, см. render_services.awk);
+#   (в services.tsv также bset/bmembers/bfirst - отличия базовых групп от
+#   шаблона: type, url, interval, tolerance, lazy, состав групп и первое
+#   значение proxies, см. render_services.awk);
 #   subscriptions.tsv - подписки (если есть): url<TAB>User-Agent<TAB>имя,
 #                     как providers_file в render_config.awk (type: file и
 #                     fast не берутся);
@@ -111,18 +112,25 @@ function ptoks(l,  st, j, ch, q, tok, n, t) {
 }
 # Ключи базовой группы g (interval, tolerance, proxies) из строки в массивы
 # префикса: pfx "t" - шаблон, "c" - config.
-function note_group_line(pfx, g, l,  k, n, i) {
+function note_group_line(pfx, g, l,  k, n, i, s) {
   if (match(l, /^    (interval|tolerance):[ ]*[0-9]+[ ]*$/)) {
     k = l; sub(/^    /, "", k); v = k; sub(/:.*/, "", k); sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+$/, "", v)
     if (pfx == "t") tmpl_set[g SUBSEP k] = v + 0
     else { if (!((g SUBSEP k) in cfg_set)) cfg_order[++ncfg_order] = g SUBSEP k; cfg_set[g SUBSEP k] = v + 0 }
   } else if (l ~ /^    proxies: \[/ || l ~ /^  select-default: &select-default /) {
     n = ptoks(l)
+    s = ""; for (i = 1; i <= n; i++) s = s SUBSEP PT[i]
+    if (pfx == "t") tmpl_toks[g] = s; else cfg_toks[g] = s
     if (!n) return
     if (pfx == "t") { tmpl_first[g] = PT[1]; for (i = 1; i <= n; i++) tmpl_has[g SUBSEP PT[i]] = 1 }
     else { if (!(g in cfg_first)) cfg_first_order[++ncfg_first] = g; cfg_first[g] = PT[1] }
-  }
+  } else if (match(l, /^    (type|url|lazy):/)) {
+    k = substr(l, 5, RLENGTH - 5); s = l; sub(/^    [a-z]+:/, "", s); s = unq(trim(s))
+    if (pfx == "t") tmpl_kv[g SUBSEP k] = s; else cfg_kv[g SUBSEP k] = s
+  } else if (pfx == "t" && l ~ /^    use:[ ]*\[fast\]/) tmpl_fast[g] = 1
 }
+# Групповой токен состава базовой группы (см. bmembers в render_services.awk).
+function isgrp(t) { return t == "DIRECT" || t == "REJECT" || (t in tb_is) }
 function rep(kind, name) { printf "%s|%s\n", kind, name > report }
 function out_line(s) { svc_out = svc_out s "\n" }
 function read_defaults(  rc, line, n, f) {
@@ -143,13 +151,14 @@ function read_template(  rc, line, sect, inside, v, nm) {
   sect = ""; inside = 0; tg = ""
   while ((rc = (getline line < template)) > 0) {
     sub(/\r$/, "", line)
+    if (index(line, "# --- SERVICE_GROUPS:BEGIN ---")) tb_done = 1
     if (index(line, "# --- SERVICE_") && index(line, ":BEGIN ---")) { inside = 1; continue }
     if (index(line, "# --- SERVICE_") && index(line, ":END ---")) { inside = 0; continue }
     if (inside) continue
     v = geo_value(line); if (v != "") tmpl_geo = v
     if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); tg = ""; continue }
     if (sect == "anchors") note_group_line("t", "*", line)
-    if (sect == "proxy-groups" && line ~ /^  - name:/) { nm = line; sub(/^  - name:/, "", nm); tg = unq(nm); base_group[tg] = 1 }
+    if (sect == "proxy-groups" && line ~ /^  - name:/) { nm = line; sub(/^  - name:/, "", nm); tg = unq(nm); base_group[tg] = 1; if (!tb_done) { tb_order[++ntb] = tg; tb_is[tg] = 1 } }
     else if (sect == "proxy-groups" && tg != "") note_group_line("t", tg, line)
     else if (sect == "rule-providers" && line ~ /^  [^ #-][^:]*:/) { nm = line; sub(/^  /, "", nm); sub(/:.*/, "", nm); tmpl_prov[nm] = 1 }
     else if (sect == "rules" && line ~ /^  - /) { nm = line; sub(/^  - /, "", nm); tmpl_rule[body(nm)] = 1 }
@@ -332,21 +341,81 @@ END {
     out_line("unrule\t" dr_owner[i] "\t" dr_text[i])
     rep("IMPORTED", "unrule|" dr_owner[i])
   }
-  # Базовые группы: отличия interval/tolerance и первого значения proxies.
+  # Базовые группы: отличия type/url/interval/tolerance/lazy, состав
+  # (bmembers) и первое значение proxies (bfirst: якорь и узел первым).
   base_out = ""
-  for (i = 1; i <= ncfg_order; i++) {
-    split(cfg_order[i], f, SUBSEP)
-    if (!(cfg_order[i] in tmpl_set) || cfg_set[cfg_order[i]] == tmpl_set[cfg_order[i]]) continue
-    if ((f[2] == "interval" && (cfg_set[cfg_order[i]] < 10 || cfg_set[cfg_order[i]] > 86400)) || (f[2] == "tolerance" && cfg_set[cfg_order[i]] > 10000)) { rep("REVIEW", "base-" f[2] "|" f[1]); continue }
-    base_out = base_out "bset\t" f[1] "\t" f[2] "\t" cfg_set[cfg_order[i]] "\n"
-    rep("IMPORTED", "bset|" f[1])
+  split("url interval tolerance lazy", BK, " ")
+  dflt["url"] = "https://www.gstatic.com/generate_204"; dflt["interval"] = 600; dflt["tolerance"] = 50; dflt["lazy"] = "true"
+  for (gi = 1; gi <= ntb; gi++) {
+    g = tb_order[gi]
+    if (!(g in cfg_group)) continue
+    tty = tmpl_kv[g SUBSEP "type"]; ety = tty
+    if (((g SUBSEP "type") in cfg_kv) && cfg_kv[g SUBSEP "type"] != tty) {
+      if ((g in tmpl_fast) || cfg_kv[g SUBSEP "type"] !~ /^(select|url-test|fallback)$/) rep("REVIEW", "base-type|" g)
+      else { ety = cfg_kv[g SUBSEP "type"]; base_out = base_out "bset\t" g "\ttype\t" ety "\n"; rep("IMPORTED", "bset|" g) }
+    }
+    chg = (ety != tty)
+    for (ki = 1; ki <= 4; ki++) {
+      k = BK[ki]
+      if (chg && (ety == "select" || (ety == "fallback" && k == "tolerance"))) continue
+      if (k == "interval" || k == "tolerance") {
+        if (!((g SUBSEP k) in cfg_set)) continue
+        cv = cfg_set[g SUBSEP k]; ht = (g SUBSEP k) in tmpl_set; tv = tmpl_set[g SUBSEP k]
+      } else {
+        if (!((g SUBSEP k) in cfg_kv)) continue
+        cv = cfg_kv[g SUBSEP k]; ht = (g SUBSEP k) in tmpl_kv; tv = tmpl_kv[g SUBSEP k]
+      }
+      if (!ht) { if (!chg || (ety != "url-test" && k == "tolerance")) continue; tv = dflt[k] }
+      if (cv "" == tv "") continue
+      if ((k == "interval" && (cv < 10 || cv > 86400)) || (k == "tolerance" && cv > 10000) || \
+          (k == "url" && (cv !~ /^https?:\/\/[^ "'#]+$/ || (g in tmpl_fast))) || (k == "lazy" && cv !~ /^(true|false)$/)) { rep("REVIEW", "base-" k "|" g); continue }
+      base_out = base_out "bset\t" g "\t" k "\t" cv "\n"
+      rep("IMPORTED", "bset|" g)
+    }
+    # состав: групповые токены конфига против шаблона
+    if ((g in tmpl_fast) || !(g in cfg_toks)) continue
+    nt = split(substr(tmpl_toks[g], 2), TT, SUBSEP); tgs = ""
+    delete tnode
+    for (i = 1; i <= nt; i++) { if (isgrp(TT[i])) tgs = tgs "|" TT[i]; else tnode[TT[i]] = 1 }
+    nc = split(substr(cfg_toks[g], 2), CT, SUBSEP); cgs = ""; bad = 0
+    delete dup
+    for (i = 1; i <= nc; i++) {
+      t = CT[i]
+      if (isgrp(t)) { if (t == g || (t in dup)) bad = 1; dup[t] = 1; cgs = cgs "|" t }
+      else if (!((t in tnode) || (t in prox_name) || t == "__OWN_NODES__")) bad = 1
+    }
+    eff[g] = tgs
+    if (bad) rep("REVIEW", "base-members|" g)
+    else if (cgs != tgs || (nc && nt && isgrp(CT[1]) && !isgrp(TT[1]))) { cand[g] = cgs; eff[g] = cgs }
+    # узел первым (не групповой токен) - как раньше, bfirst
+    if (!bad && nc && !isgrp(CT[1]) && nt && CT[1] != TT[1]) {
+      if ((g SUBSEP CT[1]) in tmpl_has) { base_out = base_out "bfirst\t" g "\t" CT[1] "\n"; rep("IMPORTED", "bfirst|" g) }
+      else rep("REVIEW", "base-proxies|" g)
+    }
   }
-  for (i = 1; i <= ncfg_first; i++) {
-    g = cfg_first_order[i]
-    if (!(g in tmpl_first) || cfg_first[g] == tmpl_first[g]) continue
-    if (!((g SUBSEP cfg_first[g]) in tmpl_has)) { rep("REVIEW", "base-proxies|" g); continue }
-    base_out = base_out "bfirst\t" g "\t" cfg_first[g] "\n"
-    rep("IMPORTED", "bfirst|" g)
+  # циклы по итоговым составам: группы в цикле с правкой - в отчёт
+  for (gi = 1; gi <= ntb; gi++) live[tb_order[gi]] = (tb_order[gi] in cfg_group)
+  changed = 1
+  while (changed) {
+    changed = 0
+    for (gi = 1; gi <= ntb; gi++) {
+      g = tb_order[gi]
+      if (!live[g]) continue
+      c = split(substr(eff[g], 2), TT, "|"); cnt = 0
+      for (i = 1; i <= c; i++) if ((TT[i] in tb_is) && live[TT[i]]) cnt++
+      if (!cnt) { live[g] = 0; changed = 1 }
+    }
+  }
+  for (gi = 1; gi <= ntb; gi++) {
+    g = tb_order[gi]
+    if (!(g in cand)) continue
+    if (live[g]) { rep("REVIEW", "base-members|" g); continue }
+    base_out = base_out "bmembers\t" g "\t" substr(cand[g], 2) "\n"
+    rep("IMPORTED", "bmembers|" g)
+  }
+  if (("*" in tmpl_first) && ("*" in cfg_first) && cfg_first["*"] != tmpl_first["*"]) {
+    if (!(("*" SUBSEP cfg_first["*"]) in tmpl_has)) rep("REVIEW", "base-proxies|*")
+    else { base_out = base_out "bfirst\t*\t" cfg_first["*"] "\n"; rep("IMPORTED", "bfirst|*") }
   }
   # Свои ноды в якоре сервисных групп: «свои прокси во всех сервисных группах».
   own_out = ""

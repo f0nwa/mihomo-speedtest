@@ -275,7 +275,9 @@ printf 'bset\t🚀 Авто\tinterval\t300\nbfirst\tЗаблок. сервисы
 awk -v services_file="$WORK/empty.tsv" -v overlay_file="$BO" -f "$TOOLS/render_services.awk" "$BT" > "$WORK/bcfg.yaml" 2>/dev/null || fail "base: сборка"
 mkdir "$WORK/bst"
 awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$WORK/bcfg.yaml" || fail "base: импорт"
-assert_eq "$(sort "$WORK/bst/services.tsv")" "$(sort "$BO")" "base: круг bset/bfirst"
+# bfirst базовой группы на групповой токен импортируется как состав (bmembers)
+printf 'bset\t🚀 Авто\tinterval\t300\nbmembers\tЗаблок. сервисы\tDIRECT\nbfirst\t*\t⚙️Manual\n' > "$WORK/bo2.tsv"
+assert_eq "$(sort "$WORK/bst/services.tsv")" "$(sort "$WORK/bo2.tsv")" "base: круг bset/bfirst"
 awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$BT"
 assert_eq "$(cat "$WORK/bst/services.tsv")" "" "base: шаблон даёт пустые отличия"
 # значение вне допустимого и список с чужим первым - в отчёт, не в состояние
@@ -283,7 +285,93 @@ sed "s/interval: 600/interval: 3/; s/proxies: \['⚡ Самые быстрые',
 awk -v defaults="$WORK/empty.tsv" -v template="$BT" -v out_dir="$WORK/bst" -v report="$WORK/brep" -f "$TOOLS/config_to_state.awk" "$WORK/bad.yaml"
 assert_eq "$(cat "$WORK/bst/services.tsv")" "" "base: недопустимое не переносится"
 grep -q 'REVIEW|base-interval|' "$WORK/brep" || fail "base: нет REVIEW по interval"
-grep -q 'REVIEW|base-proxies|' "$WORK/brep" || fail "base: нет REVIEW по proxies"
+grep -q 'REVIEW|base-members|Заблок. сервисы' "$WORK/brep" || fail "base: нет REVIEW по чужому в составе"
+
+# test_import_base_groups_edit: тип, url, lazy и состав базовых групп (bmembers)
+BE="$WORK/be.yaml"
+cat > "$BE" <<'Y'
+anchors:
+  select-default: &select-default { type: select, use: *sub-names, proxies: ['⚡ Самые быстрые + Fallback', DIRECT, 'Заблок. сервисы', '⚙️Manual'] }
+proxy-groups:
+  # --- Базовые ---
+  - name: '⚡ Быстрый пул'
+    type: url-test
+    use: [fast]
+    # --- FAST_WG_REF:BEGIN ---
+    # --- FAST_WG_REF:END ---
+    url: "https://www.gstatic.com/generate_204"
+    interval: 60
+    tolerance: 50
+    lazy: true
+
+  - name: '⚡ Самые быстрые + Fallback'
+    type: fallback
+    proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']
+    url: "https://www.gstatic.com/generate_204"
+    interval: 600
+    lazy: true
+
+  - name: '🚀 Авто по пингу'
+    type: url-test
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 600
+    tolerance: 50
+    lazy: true
+
+  - name: '🛡️Fallback-Stable'
+    type: fallback
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 600
+    lazy: true
+
+  - name: '⚙️Manual'
+    type: select
+    use: *sub-names
+    proxies: [DIRECT, '🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+
+  - name: 'Заблок. сервисы'
+    type: select
+    proxies: ['⚡ Самые быстрые + Fallback', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
+
+  # --- SERVICE_GROUPS:BEGIN ---
+  # --- SERVICE_GROUPS:END ---
+  - name: MST-SPEEDTEST
+    type: select
+    include-all: true
+rule-providers:
+  # --- SERVICE_PROVIDERS:BEGIN ---
+  # --- SERVICE_PROVIDERS:END ---
+rules:
+  # --- SERVICE_RULES:BEGIN ---
+  # --- SERVICE_RULES:END ---
+  - MATCH,DIRECT
+Y
+EO="$WORK/eo.tsv"
+printf 'bset\t⚙️Manual\ttype\tfallback\nbset\t🚀 Авто по пингу\tlazy\tfalse\nbmembers\tЗаблок. сервисы\t🚀 Авто по пингу|DIRECT\n' > "$EO"
+awk -v services_file="$WORK/empty.tsv" -v overlay_file="$EO" -f "$TOOLS/render_services.awk" "$BE" > "$WORK/ecfg.yaml" 2>"$WORK/eerr" || fail "edit: сборка: $(cat "$WORK/eerr")"
+rm -rf "$WORK/est"; mkdir "$WORK/est"
+awk -v defaults="$WORK/empty.tsv" -v template="$BE" -v out_dir="$WORK/est" -v report="$WORK/erep" -f "$TOOLS/config_to_state.awk" "$WORK/ecfg.yaml" || fail "edit: импорт"
+assert_eq "$(sort "$WORK/est/services.tsv")" "$(sort "$EO")" "edit: круг bset type/lazy и bmembers"
+grep -q 'IMPORTED|bmembers|Заблок. сервисы' "$WORK/erep" || fail "edit: нет IMPORTED bmembers"
+awk -v defaults="$WORK/empty.tsv" -v template="$BE" -v out_dir="$WORK/est" -v report="$WORK/erep" -f "$TOOLS/config_to_state.awk" "$BE"
+assert_eq "$(cat "$WORK/est/services.tsv")" "" "edit: шаблон даёт пустые отличия"
+# ссылка на чужую группу, цикл, тип быстрого пула - в отчёт, не в отличия
+sed -e "s/proxies: \['⚡ Самые быстрые + Fallback', DIRECT, '🚀/proxies: ['⚡ Самые быстрые + Fallback', 'Моя', DIRECT, '🚀/" \
+    -e "s/proxies: \[DIRECT, '🇩🇪 Hysteria2'/proxies: ['Заблок. сервисы', DIRECT, '🇩🇪 Hysteria2'/" \
+    -e '/name: .⚡ Быстрый пул./,/lazy/s/type: url-test/type: select/' "$BE" > "$WORK/ebad.yaml"
+grep -q "'Моя'" "$WORK/ebad.yaml" && grep -q "\['Заблок. сервисы', DIRECT" "$WORK/ebad.yaml" || fail "edit: фикстура ebad не собралась"
+awk -v defaults="$WORK/empty.tsv" -v template="$BE" -v out_dir="$WORK/est" -v report="$WORK/erep" -f "$TOOLS/config_to_state.awk" "$WORK/ebad.yaml" || fail "edit: импорт ebad"
+grep -q 'REVIEW|base-members|Заблок. сервисы' "$WORK/erep" || fail "edit: нет REVIEW по чужой группе: $(cat "$WORK/erep")"
+grep -q 'REVIEW|base-members|⚙️Manual' "$WORK/erep" || fail "edit: нет REVIEW по циклу: $(cat "$WORK/erep")"
+grep -q 'REVIEW|base-type|⚡ Быстрый пул' "$WORK/erep" || fail "edit: нет REVIEW по типу быстрого пула: $(cat "$WORK/erep")"
+grep -q '^bmembers' "$WORK/est/services.tsv" && fail "edit: bmembers не должен попасть в отличия: $(cat "$WORK/est/services.tsv")"
+grep -q 'type' "$WORK/est/services.tsv" && fail "edit: type быстрого пула не должен попасть в отличия"
 
 [ "$FAILED" = 0 ] && echo "OK test_config_to_state"
 exit "$FAILED"
