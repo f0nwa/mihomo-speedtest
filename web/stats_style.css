@@ -346,6 +346,15 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .cx-paste{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:0 0 6px}
 .cx-paste .xk-text{flex:1 1 260px;width:auto;min-width:0;margin:0}
 .cx-paste .submit{margin-top:0;flex:0 0 auto}
+.cx-bgroup{border:1px solid var(--border);padding:8px 10px;margin:10px 0}
+.cx-bhead{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cx-bhead .xk-val{flex:1 1 auto;font-weight:600}
+.cx-bparams{margin:8px 0 0;background:transparent;border:0;padding:0;gap:12px}
+.cx-url{flex:1 1 220px}
+.cx-url input{flex:1 1 auto;min-width:0;width:auto}
+.cx-num input[type=checkbox]{width:auto;accent-color:var(--accent)}
+.cx-members .xk-rows{margin:4px 0 6px}
+.cx-members .xk-add select{flex:1 1 180px}
 .xk-savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .xk-savebar .submit{margin-top:0}
 

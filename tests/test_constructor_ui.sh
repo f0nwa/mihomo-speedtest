@@ -111,6 +111,11 @@ grep -q "templateAction: templateActionFromConstructor" "$CFG" || fail "пане
 
 # переключатель «куда попадают прокси» (ownscope) в разделе «Прокси»
 M="$ROOT/web/stats_app_constructor_modules.js"
+# базовые группы: тип, параметры и состав (вложенность)
+for t in 'model.setMembers' 'model.resetBase' "'url-test'" "'fallback'" "'lazy'" 'Входят в группу' 'Вернуть как в шаблоне' 'Плюс закреплено'; do
+  grep -q "$t" "$M" || fail "«Базовые группы»: нет $t"
+done
+grep -q 'setRoute(rt.name' "$M" || fail "«Базовые группы»: пропал выбор по умолчанию для сервисных групп"
 grep -q 'model.setOwnScope' "$M" || fail "«Прокси»: нет переключателя ownscope"
 grep -q 'model.ownScope()' "$M" || fail "«Прокси»: переключатель не читает состояние"
 grep -q 'Только в базовые группы' "$M" || fail "«Прокси»: нет варианта «только в базовые группы»"

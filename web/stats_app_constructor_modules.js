@@ -774,16 +774,20 @@ export function createModuleCards(ctx) {
 
   // ----- базовые группы -----
   var baseBlk = ctx.layout.add(6, 'Базовые группы'), baseCard = baseBlk.body;
-  baseCard.appendChild(el('p', 'hint', 'Автовыбор нод и общий режим для сервисов. interval - как часто проверять ноды (секунды), ' +
-    'tolerance - на сколько мс текущая нода может отставать от лучшей, прежде чем группа переключится. ' +
-    'Для групп со всеми нодами подписок interval ниже 300 не ставьте (при 100+ нодах - 600).'));
+  baseCard.appendChild(el('p', 'hint', 'Автовыбор нод и общий режим для сервисов. Тип: select - выбор вручную, url-test - самая быстрая по пингу, ' +
+    'fallback - первая рабочая по порядку. interval - как часто проверять ноды (секунды), tolerance - на сколько мс текущая нода может ' +
+    'отставать от лучшей, прежде чем url-test переключится, lazy - не проверять, пока группа не выбрана. ' +
+    'Для групп со всеми нодами подписок interval ниже 300 не ставьте (при 100+ нодах - 600). ' +
+    'В состав группы можно включать другие базовые группы; первая в составе выбирается по умолчанию.'));
   var baseHost = el('div');
   baseCard.appendChild(baseHost);
 
-  function numField(group, key, info) {
-    var wrap = el('label', 'cx-num');
+  // Текстовое поле параметра (interval, tolerance, url): пусто - как в шаблоне.
+  function baseField(group, key, info, numeric) {
+    var wrap = el('label', 'cx-num' + (numeric ? '' : ' cx-url'));
     wrap.appendChild(el('span', null, key));
-    var inp = el('input'); inp.type = 'text'; inp.inputMode = 'numeric'; inp.value = String(info.value);
+    var inp = el('input'); inp.type = 'text'; inp.value = String(info.value); inp.spellcheck = false;
+    if (numeric) { inp.inputMode = 'numeric'; }
     inp.setAttribute('aria-label', key + ' группы ' + group);
     inp.title = 'в шаблоне: ' + info.def;
     inp.addEventListener('change', function () {
@@ -795,18 +799,86 @@ export function createModuleCards(ctx) {
     return wrap;
   }
 
+  function changedGroup(g) {
+    if (g.type.value !== g.type.def || g.members.value.join('\n') !== g.members.def.join('\n')) { return true; }
+    return ['url', 'interval', 'tolerance', 'lazy'].some(function (k) { return g[k] && g[k].value !== g[k].def; });
+  }
+
+  function membersEditor(g) {
+    var box = el('div', 'cx-members');
+    box.appendChild(el('div', 'geo-group-title', 'Входят в группу'));
+    var rows = el('div', 'xk-rows');
+    var mem = g.members.value;
+    function setM(list) { ctx.edit(function () { model.setMembers(g.name, list); }); }
+    mem.forEach(function (t, i) {
+      var r = el('div', 'xk-row cx-row');
+      r.appendChild(el('span', 'xk-val', (i === 0 ? '★ ' : '') + t));
+      var up = button('↑', 'small muted'); up.disabled = i === 0;
+      up.setAttribute('aria-label', 'Выше: ' + t);
+      up.addEventListener('click', function () { var l = mem.slice(); l.splice(i - 1, 0, l.splice(i, 1)[0]); setM(l); });
+      var dn = button('↓', 'small muted'); dn.disabled = i === mem.length - 1;
+      dn.setAttribute('aria-label', 'Ниже: ' + t);
+      dn.addEventListener('click', function () { var l = mem.slice(); l.splice(i + 1, 0, l.splice(i, 1)[0]); setM(l); });
+      var rm = button('Убрать', 'small muted'); rm.setAttribute('aria-label', 'Убрать ' + t + ' из ' + g.name);
+      rm.addEventListener('click', function () { setM(mem.filter(function (x) { return x !== t; })); });
+      r.appendChild(up); r.appendChild(dn); r.appendChild(rm);
+      rows.appendChild(r);
+    });
+    if (!mem.length) { rows.appendChild(el('div', 'xk-empty', 'Других групп в составе нет.')); }
+    box.appendChild(rows);
+    if (g.candidates.length) {
+      var add = el('div', 'xk-add');
+      var sel = el('select'); sel.setAttribute('aria-label', 'Добавить в ' + g.name);
+      g.candidates.forEach(function (t) { var o = el('option', null, t); o.value = t; sel.appendChild(o); });
+      var ab = button('Добавить', 'small');
+      ab.addEventListener('click', function () { setM(mem.concat([sel.value])); });
+      add.appendChild(sel); add.appendChild(ab);
+      box.appendChild(add);
+    }
+    if (g.fixed) { box.appendChild(el('p', 'hint', 'Плюс закреплено: ' + g.fixed + ' - это не правится здесь.')); }
+    return box;
+  }
+
   function renderBase() {
     clear(baseHost);
     var groups = model.baseGroups();
-    var rows = el('div', 'xk-rows');
     groups.forEach(function (g) {
-      var r = el('div', 'xk-row cx-row');
-      r.appendChild(el('span', 'xk-val', g.name));
-      if (g.interval) { r.appendChild(numField(g.name, 'interval', g.interval)); }
-      if (g.tolerance) { r.appendChild(numField(g.name, 'tolerance', g.tolerance)); }
-      rows.appendChild(r);
+      var box = el('div', 'cx-bgroup');
+      var head = el('div', 'cx-bhead');
+      head.appendChild(el('span', 'xk-val', g.name));
+      if (g.locked) { head.appendChild(el('span', 'geo-code', 'закреплена')); }
+      if (changedGroup(g)) {
+        var rs = button('Вернуть как в шаблоне', 'small muted');
+        rs.addEventListener('click', function () { ctx.edit(function () { model.resetBase(g.name); }); });
+        head.appendChild(rs);
+      }
+      box.appendChild(head);
+      var params = el('div', 'xk-row cx-row cx-bparams');
+      var tw = el('label', 'cx-num');
+      tw.appendChild(el('span', null, 'тип'));
+      var ts = el('select'); ts.setAttribute('aria-label', 'Тип группы ' + g.name); ts.disabled = g.locked;
+      ['select', 'url-test', 'fallback'].forEach(function (t) { var o = el('option', null, t); o.value = t; ts.appendChild(o); });
+      ts.value = g.type.value;
+      ts.addEventListener('change', function () { ctx.edit(function () { model.setBase(g.name, 'type', ts.value); }); });
+      tw.appendChild(ts);
+      if (g.type.value !== g.type.def) { tw.appendChild(el('span', 'hint', 'шаблон: ' + g.type.def)); }
+      params.appendChild(tw);
+      if (g.url && !g.locked) { params.appendChild(baseField(g.name, 'url', g.url, false)); }
+      if (g.interval) { params.appendChild(baseField(g.name, 'interval', g.interval, true)); }
+      if (g.tolerance) { params.appendChild(baseField(g.name, 'tolerance', g.tolerance, true)); }
+      if (g.lazy) {
+        var lw = el('label', 'cx-num');
+        var cb = el('input'); cb.type = 'checkbox'; cb.checked = g.lazy.value === 'true';
+        cb.setAttribute('aria-label', 'lazy группы ' + g.name);
+        cb.addEventListener('change', function () { ctx.edit(function () { model.setBase(g.name, 'lazy', cb.checked ? 'true' : 'false'); }); });
+        lw.appendChild(cb); lw.appendChild(el('span', null, 'lazy'));
+        params.appendChild(lw);
+      }
+      box.appendChild(params);
+      if (g.locked) { box.appendChild(el('p', 'hint', 'Плюс закреплено: ' + g.fixed + ' - их отбирает спидтест, состав не правится.')); }
+      else { box.appendChild(membersEditor(g)); }
+      baseHost.appendChild(box);
     });
-    if (groups.length) { baseHost.appendChild(rows); }
     var routes = model.routes();
     if (routes.length) {
       baseHost.appendChild(el('div', 'geo-group-title', 'Что выбрано по умолчанию'));
@@ -822,7 +894,7 @@ export function createModuleCards(ctx) {
         baseHost.appendChild(r);
       });
       baseHost.appendChild(el('p', 'hint', 'Это значение до первого ручного выбора: в панели Mihomo группу по-прежнему можно переключить, ' +
-        'выбор запоминается (store-selected).'));
+        'выбор запоминается (store-selected). У базовых групп по умолчанию выбирается первая в составе.'));
     }
     if (!groups.length && !routes.length) { baseHost.appendChild(el('div', 'xk-empty', 'Шаблон не отдал базовые группы.')); }
   }

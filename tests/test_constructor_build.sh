@@ -151,6 +151,27 @@ sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out
 grep -q '__OWN_NODES__' "$WORK/out-os2.yaml" && fail "без нод служебный токен остался в конфиге"
 [ "$(anchor_line "$WORK/out-os2.yaml")" = "$(anchor_line "$WORK/out-os0.yaml")" ] || fail "без нод якорь должен быть как без ownscope"
 
+# test_build_base_groups_edit: тип и состав базовых групп - прокси остаются в
+# группах, круг сборка -> импорт даёт те же отличия
+mkdir "$WORK/bg"
+cp "$WORK/os/subscriptions.tsv" "$WORK/bg/"
+printf '  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK/bg/proxies.yaml"
+printf 'bset\t🚀 Авто по пингу\ttype\tselect\nbmembers\t⚙️Manual\t🛡️Fallback-Stable|DIRECT\nbmembers\tЗаблок. сервисы\t🚀 Авто по пингу|DIRECT\n' > "$WORK/bg/services.tsv"
+gblk() { sed -n "/^  - name: '$2'$/,/^$/p" "$1"; }
+if sh "$SCRIPT" --state "$WORK/bg" --source "$WORK/source.yaml" --output "$WORK/out-bg.yaml" --report "$WORK/rep-bg" > "$WORK/log-bg" 2>&1; then
+  gblk "$WORK/out-bg.yaml" '⚙️Manual' | grep -q "proxies: \['🛡️Fallback-Stable', DIRECT, Own1\]" || fail "состав Manual: $(gblk "$WORK/out-bg.yaml" '⚙️Manual')"
+  gblk "$WORK/out-bg.yaml" 'Заблок. сервисы' | grep -q "proxies: \['🚀 Авто по пингу', DIRECT\]" || fail "состав Заблок.: $(gblk "$WORK/out-bg.yaml" 'Заблок. сервисы')"
+  gblk "$WORK/out-bg.yaml" '🚀 Авто по пингу' | grep -q 'type: select' || fail "тип Авто не select"
+  gblk "$WORK/out-bg.yaml" '🚀 Авто по пингу' | grep -q 'interval:' && fail "у select остался interval"
+  gblk "$WORK/out-bg.yaml" '🚀 Авто по пингу' | grep -q 'Own1' || fail "прокси пропали из Авто"
+  mkdir "$WORK/bg-rt"
+  awk -v defaults="$ROOT/config-tools/services.default.tsv" -v template="$ROOT/config-tools/config.example.yaml" \
+      -v out_dir="$WORK/bg-rt" -v report="$WORK/bg-rt.report" -f "$ROOT/config-tools/config_to_state.awk" "$WORK/out-bg.yaml" || fail "импорт собранного конфига (bg)"
+  [ "$(sort "$WORK/bg-rt/services.tsv")" = "$(sort "$WORK/bg/services.tsv")" ] || fail "круг bg: $(cat "$WORK/bg-rt/services.tsv")"
+else
+  fail "сборка с правкой базовых групп: $(cat "$WORK/log-bg")"
+fi
+
 # test_build_own_scope_custom_proxies: своя группа со своим proxies: - свои ноды
 # добавляются и туда, а круг сборка -> импорт -> сборка не даёт дублей
 mkdir "$WORK/oc"
