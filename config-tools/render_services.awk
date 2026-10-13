@@ -47,8 +47,26 @@
 #                                        classical) и RULE-SET на группу
 #   dom<TAB>id<TAB>тип<TAB>домен         свой домен (тип suffix|full|keyword)
 #   prov<TAB>-<TAB>строка provider       provider для своих правил
-#   bset<TAB>группа<TAB>ключ<TAB>число   базовая группа шаблона: interval
-#                                        (10..86400 с) или tolerance (0..10000 мс)
+#   bset<TAB>группа<TAB>ключ<TAB>знач.   базовая группа шаблона: interval
+#                                        (10..86400 с), tolerance (0..10000 мс),
+#                                        type (select|url-test|fallback),
+#                                        url (http(s)://...), lazy (true|false).
+#                                        Смена type: у select убираются url,
+#                                        interval, tolerance, lazy; у url-test/
+#                                        fallback недостающие добавляются после
+#                                        type: (url generate_204, interval 600,
+#                                        tolerance 50 - только url-test, lazy
+#                                        true), у fallback tolerance убирается.
+#                                        У группы с use: [fast] (быстрый пул)
+#                                        можно менять только interval,
+#                                        tolerance и lazy
+#   bmembers<TAB>группа<TAB>т1|т2|...    состав базовой группы: другие базовые
+#                                        группы, DIRECT, REJECT по порядку
+#                                        (пусто - групповых нет). Остальные
+#                                        токены proxies: [...] (примерные
+#                                        ноды, __OWN_NODES__) сохраняются
+#                                        после них. Цикл групп и пустая группа
+#                                        (нет use:, нет токенов) - ошибка
 #   ownscope<TAB>all                     свои ноды (блок proxies:) попадают не
 #                                        только в базовые группы, но и во все
 #                                        сервисные: в список якоря select-default
@@ -64,7 +82,8 @@
 #                                        * - у всех сервисных групп
 #                                        (якорь select-default)
 # del/unrule того, чего во встроенных нет, icon/gkey/src/dom на сервис,
-# которого больше нет (убрали в новом шаблоне), и bset/bfirst на группу,
+# которого больше нет (убрали в новом шаблоне), и bset/bfirst/bmembers
+# (и токены bmembers) на группу,
 # ключ или значение, которых в шаблоне нет, молча пропускаются - иначе
 # обновление шаблона ломало бы сборку.
 #
@@ -286,12 +305,29 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       nuprov++; uprov_text[nuprov] = f[3]
     } else if (kind == "bset") {
       need(n, 4, kind)
-      if (f[3] != "interval" && f[3] != "tolerance") err(at() "у базовой группы можно менять interval или tolerance, не " f[3])
-      if (f[4] !~ /^[0-9]+$/) err(at() f[3] " - целое число")
-      if (f[3] == "interval" && (f[4] + 0 < 10 || f[4] + 0 > 86400)) err(at() "interval - от 10 до 86400 секунд")
-      if (f[3] == "tolerance" && f[4] + 0 > 10000) err(at() "tolerance - от 0 до 10000 мс")
+      if (f[3] !~ /^(interval|tolerance|type|url|lazy)$/) err(at() "у базовой группы можно менять interval, tolerance, type, url или lazy, не " f[3])
+      if (f[3] == "interval" || f[3] == "tolerance") {
+        if (f[4] !~ /^[0-9]+$/) err(at() f[3] " - целое число")
+        if (f[3] == "interval" && (f[4] + 0 < 10 || f[4] + 0 > 86400)) err(at() "interval - от 10 до 86400 секунд")
+        if (f[3] == "tolerance" && f[4] + 0 > 10000) err(at() "tolerance - от 0 до 10000 мс")
+        f[4] = f[4] + 0
+      } else if (f[3] == "type") {
+        if (f[4] !~ /^(select|url-test|fallback)$/) err(at() "type - select, url-test или fallback")
+      } else if (f[3] == "url") check_url(f[4], "url")
+      else if (f[4] !~ /^(true|false)$/) err(at() "lazy - true или false")
       if ((id SUBSEP f[3]) in bset) err(at() f[3] " группы " id " задан повторно")
-      bset[id SUBSEP f[3]] = f[4] + 0
+      bset[id SUBSEP f[3]] = f[4]
+    } else if (kind == "bmembers") {
+      need(n, 3, kind)
+      if (id in bmem) err(at() "bmembers для " id " задан повторно")
+      bm_n = (f[3] == "") ? 0 : split(f[3], BMT, "|")
+      for (bm_i = 1; bm_i <= bm_n; bm_i++) {
+        if (BMT[bm_i] == "" || BMT[bm_i] ~ /^ | $/) err(at() "bmembers " id ": пустое имя в составе")
+        if (BMT[bm_i] == id) err(at() "группа " id " не может входить сама в себя")
+        if ((id SUBSEP BMT[bm_i]) in bmem_has) err(at() "в составе группы " id " повторяется " BMT[bm_i])
+        bmem_has[id SUBSEP BMT[bm_i]] = 1
+      }
+      bmem[id] = f[3]
     } else if (kind == "ownscope") {
       need(n, 2, kind)
       if (f[2] != "all") err(at() "ownscope: единственное значение - all")
@@ -303,7 +339,7 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       if (id in bfirst) err(at() "bfirst для " id " задан повторно")
       bfirst[id] = f[3]
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset, bfirst или ownscope)")
+      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset, bmembers, bfirst или ownscope)")
     }
   }
   if (rc < 0) err("не удалось прочитать " overlay_file)
@@ -420,6 +456,118 @@ function add_own(l,  st, e, inner) {
   inner = substr(l, st + 10, e - (st + 10))
   return substr(l, 1, e - 1) (inner ~ /[^ ]/ ? ", " : "") "__OWN_NODES__" substr(l, e)
 }
+# Токены "proxies: [...]" строки l -> PTR[1..n] как в тексте (с кавычками);
+# возвращает n (-1 - в строке нет списка).
+function ptoks(l,  st, j, ch, q, tok, n, t) {
+  delete PTR
+  st = index(l, "proxies: [")
+  if (!st) return -1
+  n = 0; tok = ""; q = ""
+  for (j = st + 10; j <= length(l); j++) {
+    ch = substr(l, j, 1)
+    if (q != "") {
+      tok = tok ch
+      if (ch == q) { if (q == "'" && substr(l, j + 1, 1) == "'") { tok = tok "'"; j++ } else q = "" }
+    } else if (ch == "'" || ch == "\"") { q = ch; tok = tok ch }
+    else if (ch == "," || ch == "]") {
+      t = tok; sub(/^[ ]+/, "", t); sub(/[ ]+$/, "", t)
+      if (t != "") PTR[++n] = t
+      tok = ""
+      if (ch == "]") break
+    } else tok = tok ch
+  }
+  return n
+}
+# Групповой токен состава: другая базовая группа, DIRECT или REJECT.
+function grp_tok(t) { return t == "DIRECT" || t == "REJECT" || (t in BGI) }
+function bval(nm, k, def) {
+  if ((nm SUBSEP k) in bset) return bset[nm SUBSEP k]
+  return def
+}
+function bline(k, v) { if (k == "url") v = "\"" v "\""; return "    " k ": " v }
+# Базовые группы (proxy-groups до SERVICE_GROUPS:BEGIN) копятся в BL[] и
+# обрабатываются здесь целиком: состав ссылается и на группы ниже по тексту.
+function flush_base(  g, i, a, e, nm, ty, nty, chg, fast, haskey, k, n, lst, c, gt, pl, ins, live, changed, cnt, path, seen, x, y) {
+  if (!nbl) return
+  for (g = 1; g <= ngb; g++) BGI[GBN[g]] = g
+  for (g = 1; g <= ngb; g++) GBE[g] = (g < ngb ? GBS[g + 1] - 1 : nbl)
+  if (GBS[1] > 1) for (i = 1; i < GBS[1]; i++) out = out BL[i] "\n"
+  for (g = 1; g <= ngb; g++) {
+    nm = GBN[g]; ty = ""; fast = 0; pl = 0; has_use = 0
+    delete haskey
+    for (i = GBS[g] + 1; i <= GBE[g]; i++) {
+      if (BL[i] ~ /^    type:/) { ty = BL[i]; sub(/^    type:[ ]*/, "", ty); sub(/[ ]+$/, "", ty) }
+      else if (BL[i] ~ /^    use:[ ]*\[fast\]/) { fast = 1; has_use = 1 }
+      else if (BL[i] ~ /^    (use|include-all):/) has_use = 1
+      else if (BL[i] ~ /^    proxies: \[/) pl = i
+      if (match(BL[i], /^    (url|interval|tolerance|lazy):/)) haskey[substr(BL[i], 5, RLENGTH - 5)] = 1
+    }
+    if (fast && (((nm SUBSEP "type") in bset) || ((nm SUBSEP "url") in bset) || (nm in bmem))) err("у группы " nm " можно менять только interval, tolerance и lazy")
+    chg = ((nm SUBSEP "type") in bset)
+    nty = chg ? bset[nm SUBSEP "type"] : ty
+    # итоговый список proxies
+    lst = ""; cnt = 0; delete gt
+    if (pl) n = ptoks(BL[pl]); else n = 0
+    if (nm in bmem) {
+      c = (bmem[nm] == "") ? 0 : split(bmem[nm], a, "|")
+      for (i = 1; i <= c; i++) if (grp_tok(a[i]) && a[i] != nm) { x = cnt++ ? ", " : ""; lst = lst x yname(a[i]) }
+      for (i = 1; i <= n; i++) if (!grp_tok(unq(PTR[i]))) { x = cnt++ ? ", " : ""; lst = lst x PTR[i] }
+      newpl = "    proxies: [" lst "]"
+    } else newpl = pl ? BL[pl] : ""
+    if ((nm in bfirst) && newpl != "") { e = reorder(newpl, bfirst[nm]); if (e != "") newpl = e }
+    # рёбра для проверки циклов и пустоты
+    c = (newpl != "") ? ptoks(newpl) : 0
+    GBC[g] = ""
+    for (i = 1; i <= c; i++) { x = unq(PTR[i]); if (x in BGI) GBC[g] = GBC[g] SUBSEP BGI[x] }
+    if ((nm in bmem) && c <= 0 && !has_use) err("группа " nm " пустая: добавьте в неё группу или DIRECT")
+    out = out BL[GBS[g]] "\n"
+    for (i = GBS[g] + 1; i <= GBE[g]; i++) {
+      if (BL[i] ~ /^    type:/) {
+        x = chg ? "    type: " nty : BL[i]
+        out = out x "\n"
+        if (chg && nty != "select") {
+          if (!("url" in haskey)) out = out bline("url", bval(nm, "url", "https://www.gstatic.com/generate_204")) "\n"
+          if (!("interval" in haskey)) out = out bline("interval", bval(nm, "interval", 600)) "\n"
+          if (nty == "url-test" && !("tolerance" in haskey)) out = out bline("tolerance", bval(nm, "tolerance", 50)) "\n"
+          if (!("lazy" in haskey)) out = out bline("lazy", bval(nm, "lazy", "true")) "\n"
+        }
+        if (!pl && newpl != "") out = out newpl "\n"
+        continue
+      }
+      if (match(BL[i], /^    (url|interval|tolerance|lazy):/)) {
+        k = substr(BL[i], 5, RLENGTH - 5)
+        if (chg && (nty == "select" || (nty == "fallback" && k == "tolerance"))) continue
+        if ((nm SUBSEP k) in bset) { out = out bline(k, bset[nm SUBSEP k]) "\n"; continue }
+      }
+      if (i == pl) { out = out newpl "\n"; continue }
+      out = out BL[i] "\n"
+    }
+  }
+  # Циклы: снимаем группы без исходящих рёбер к живым; оставшиеся - в цикле.
+  for (g = 1; g <= ngb; g++) live[g] = 1
+  changed = 1
+  while (changed) {
+    changed = 0
+    for (g = 1; g <= ngb; g++) {
+      if (!live[g]) continue
+      c = split(substr(GBC[g], 2), a, SUBSEP); cnt = 0
+      for (i = 1; i <= c; i++) if (live[a[i]]) cnt++
+      if (!cnt) { live[g] = 0; changed = 1 }
+    }
+  }
+  for (g = 1; g <= ngb; g++) if (live[g]) {
+    path = GBN[g]; seen[g] = 1; x = g
+    while (1) {
+      c = split(substr(GBC[x], 2), a, SUBSEP); y = 0
+      for (i = 1; i <= c; i++) if (live[a[i]]) { y = a[i]; break }
+      path = path " -> " GBN[y]
+      if (y in seen) break
+      seen[y] = 1; x = y
+    }
+    err("цикл групп: " path)
+  }
+  nbl = 0; ngb = 0
+}
 BEGIN {
   failed = 0; nsec = 0; nsvc = 0; nprov = 0; nrule = 0; nuprov = 0; nsrc = 0; ndom = 0; nuser = 0; geoval = ""
   if (services_file == "") err("не задан -v services_file")
@@ -432,6 +580,8 @@ BEGIN {
   inside = 0; out = ""; geohits = 0; sect = ""; curg = ""
 }
 {
+  if (nbl && (index($0, "# --- SERVICE_GROUPS:BEGIN ---") || $0 ~ /^[A-Za-z0-9_-]+:/)) { buffering = 0; flush_base() }
+  if (index($0, "# --- SERVICE_GROUPS:BEGIN ---")) base_done = 1
   for (i = 1; i <= 3; i++) {
     if (index($0, "# --- " mk[i] ":BEGIN ---")) {
       nbeg[i]++
@@ -453,6 +603,11 @@ BEGIN {
   line = $0
   if (line ~ /^[A-Za-z0-9_-]+:/) { sect = line; sub(/:.*/, "", sect); curg = "" }
   else if (sect == "proxy-groups" && line ~ /^  - name:/) { curg = line; sub(/^  - name:/, "", curg); curg = unq(curg) }
+  if (sect == "proxy-groups" && !base_done) {
+    BL[++nbl] = line
+    if (line ~ /^  - name:/) { GBS[++ngb] = nbl; GBN[ngb] = curg }
+    next
+  }
   if (sect == "proxy-groups" && curg != "") {
     if (match(line, /^    (interval|tolerance):/)) {
       bkey = substr(line, 5, RLENGTH - 5)
@@ -470,6 +625,8 @@ BEGIN {
   out = out line "\n"
 }
 END {
+  if (failed) exit 2
+  if (nbl) flush_base()
   if (failed) exit 2
   for (i = 1; i <= 3; i++) {
     if (nbeg[i] != 1 || nend[i] != 1) err("в шаблоне должно быть ровно по одному маркеру " mk[i] ":BEGIN и " mk[i] ":END")

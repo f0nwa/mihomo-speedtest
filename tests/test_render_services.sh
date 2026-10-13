@@ -337,5 +337,147 @@ for bad in 'bset	🚀 Авто	interval	5' 'bset	🚀 Авто	interval	abc' 'bs
   [ "$rc" = 2 ] || fail "base '$bad' должен давать ошибку (код $rc)"
 done
 
+# test_base_groups_edit: bset type/url/lazy и bmembers (состав групп)
+BE="$WORK/be.yaml"
+cat > "$BE" <<'Y'
+anchors:
+  select-default: &select-default { type: select, use: *sub-names, proxies: ['⚡ Самые быстрые + Fallback', DIRECT, 'Заблок. сервисы', '⚙️Manual'] }
+proxy-groups:
+  # --- Базовые ---
+  - name: '⚡ Быстрый пул'
+    type: url-test
+    use: [fast]
+    # --- FAST_WG_REF:BEGIN ---
+    # --- FAST_WG_REF:END ---
+    url: "https://www.gstatic.com/generate_204"
+    interval: 60
+    tolerance: 50
+    lazy: true
+
+  - name: '⚡ Самые быстрые + Fallback'
+    type: fallback
+    proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']
+    url: "https://www.gstatic.com/generate_204"
+    interval: 600
+    lazy: true
+
+  - name: '🚀 Авто по пингу'
+    type: url-test
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 600
+    tolerance: 50
+    lazy: true
+
+  - name: '🛡️Fallback-Stable'
+    type: fallback
+    use: *sub-names
+    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+    url: "http://www.gstatic.com/generate_204"
+    exclude-filter: *geofilter
+    interval: 600
+    lazy: true
+
+  - name: '⚙️Manual'
+    type: select
+    use: *sub-names
+    proxies: [DIRECT, '🇩🇪 Hysteria2', '🇳🇱 Hysteria2']
+
+  - name: 'Заблок. сервисы'
+    type: select
+    proxies: ['⚡ Самые быстрые + Fallback', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']
+
+  # --- SERVICE_GROUPS:BEGIN ---
+  # --- SERVICE_GROUPS:END ---
+  - name: MST-SPEEDTEST
+    type: select
+    include-all: true
+rule-providers:
+  # --- SERVICE_PROVIDERS:BEGIN ---
+  # --- SERVICE_PROVIDERS:END ---
+rules:
+  # --- SERVICE_RULES:BEGIN ---
+  # --- SERVICE_RULES:END ---
+  - MATCH,DIRECT
+Y
+rendere() { awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$BE"; }
+# блок группы $1 из вывода $2 (от "  - name: $1" до следующей группы/секции)
+gblock() { printf '%s\n' "$2" | awk -v g="  - name: $1" '$0 == g { on = 1; print; next } on && (/^  - name:/ || /^  # --- SERVICE_GROUPS/ || /^[A-Za-z]/) { exit } on; END { print "." }'; }
+printf '' > "$WORK/o.tsv"
+OE0=$(rendere) || fail "edit: ошибка сборки без отличий"
+printf '%s\n' "$OE0" | sed -n '/^proxy-groups:/,/SERVICE_GROUPS:BEGIN/p' > "$WORK/e0"
+sed -n '/^proxy-groups:/,/SERVICE_GROUPS:BEGIN/p' "$BE" | cmp -s - "$WORK/e0" || fail "edit: без отличий базовые группы должны остаться как в шаблоне"
+printf 'bset\t🛡️Fallback-Stable\ttype\turl-test\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: type url-test"
+G=$(gblock "'🛡️Fallback-Stable'" "$OE")
+assert_contains "    type: url-test${NL}" "$G" "type url-test: тип"
+assert_contains "    tolerance: 50${NL}" "$G" "type url-test: добавлен tolerance"
+assert_contains "    exclude-filter: *geofilter${NL}" "$G" "type url-test: остальное на месте"
+assert_contains "    interval: 600${NL}" "$G" "type url-test: interval шаблона"
+printf 'bset\t⚙️Manual\ttype\tfallback\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: type fallback"
+G=$(gblock "'⚙️Manual'" "$OE")
+assert_contains "    type: fallback${NL}" "$G" "Manual fallback: тип"
+assert_contains '    url: "https://www.gstatic.com/generate_204"' "$G" "Manual fallback: url по умолчанию"
+assert_contains "    interval: 600${NL}" "$G" "Manual fallback: interval по умолчанию"
+assert_contains "    lazy: true" "$G" "Manual fallback: lazy по умолчанию"
+assert_not_contains "tolerance" "$G" "Manual fallback: без tolerance"
+printf '%s\n' "$OE" > "$WORK/e2.yaml"
+OE2=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/e2.yaml")
+[ "$OE2" = "$OE" ] || fail "edit: повторная сборка меняет результат (type)"
+printf 'bset\t🚀 Авто по пингу\ttype\tselect\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: type select"
+G=$(gblock "'🚀 Авто по пингу'" "$OE")
+assert_contains "    type: select${NL}    use: *sub-names${NL}    proxies: ['🇩🇪 Hysteria2', '🇳🇱 Hysteria2']${NL}    exclude-filter: *geofilter" "$G" "select: остались use/proxies/exclude-filter"
+for k in url: interval: tolerance: lazy:; do assert_not_contains "    $k" "$G" "select: убран $k"; done
+printf 'bset\t🚀 Авто по пингу\tlazy\tfalse\nbset\t🚀 Авто по пингу\turl\thttps://cp.cloudflare.com/\n' > "$WORK/o.tsv"
+G=$(gblock "'🚀 Авто по пингу'" "$(rendere)")
+assert_contains "    lazy: false" "$G" "bset lazy"
+assert_contains '    url: "https://cp.cloudflare.com/"' "$G" "bset url"
+printf 'bmembers\tЗаблок. сервисы\t🚀 Авто по пингу|DIRECT\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: bmembers"
+assert_contains "    proxies: ['🚀 Авто по пингу', DIRECT]${NL}" "$(gblock "'Заблок. сервисы'" "$OE")" "bmembers: состав и порядок"
+printf 'bmembers\t⚙️Manual\t🛡️Fallback-Stable\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: bmembers с нодами"
+assert_contains "    proxies: ['🛡️Fallback-Stable', '🇩🇪 Hysteria2', '🇳🇱 Hysteria2']${NL}" "$(gblock "'⚙️Manual'" "$OE")" "bmembers: узловые токены после групповых"
+printf '%s\n' "$OE" > "$WORK/e3.yaml"
+OE3=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/e3.yaml")
+[ "$OE3" = "$OE" ] || fail "edit: повторная сборка меняет результат (bmembers)"
+printf 'bmembers\t⚙️Manual\tНетТакой|DIRECT\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: неизвестный токен роняет сборку"
+assert_contains "    proxies: [DIRECT, '🇩🇪 Hysteria2', '🇳🇱 Hysteria2']${NL}" "$(gblock "'⚙️Manual'" "$OE")" "bmembers: неизвестный токен пропущен"
+printf 'ownscope\tall\nbmembers\tЗаблок. сервисы\tDIRECT\n' > "$WORK/o.tsv"
+OE=$(rendere) || fail "edit: ownscope+bmembers"
+assert_contains "    proxies: [DIRECT]${NL}" "$(gblock "'Заблок. сервисы'" "$OE")" "ownscope+bmembers: группа"
+[ "$(printf '%s\n' "$OE" | grep -c __OWN_NODES__)" = 1 ] || fail "ownscope+bmembers: __OWN_NODES__ ровно один раз"
+printf 'bfirst\tЗаблок. сервисы\tDIRECT\nbmembers\tЗаблок. сервисы\t⚙️Manual|DIRECT\n' > "$WORK/o.tsv"
+assert_contains "    proxies: [DIRECT, '⚙️Manual']${NL}" "$(gblock "'Заблок. сервисы'" "$(rendere)")" "старый bfirst после bmembers"
+for bad in 'bmembers	⚙️Manual	Заблок. сервисы§bmembers	Заблок. сервисы	⚙️Manual' \
+  'bmembers	⚡ Самые быстрые + Fallback	' 'bset	⚡ Быстрый пул	type	select' 'bmembers	⚡ Быстрый пул	DIRECT' \
+  'bset	⚡ Быстрый пул	url	https://x.example/' 'bmembers	⚙️Manual	⚙️Manual' 'bmembers	⚙️Manual	DIRECT|DIRECT' \
+  'bset	⚙️Manual	lazy	maybe' 'bset	⚙️Manual	url	ftp://x' 'bset	⚙️Manual	type	load-balance' \
+  'bmembers	⚙️Manual	DIRECT§bmembers	⚙️Manual	REJECT' 'bmembers	⚙️Manual' 'bmembers	⚙️Manual	DIRECT||REJECT'; do
+  printf '%s\n' "$bad" | awk '{ gsub(/§/, "\n") } 1' > "$WORK/o.tsv"
+  rc=0; rendere > /dev/null 2> "$WORK/eerr" || rc=$?
+  [ "$rc" = 2 ] || fail "edit '$bad' должен давать ошибку (код $rc)"
+done
+printf 'bmembers\t⚙️Manual\tЗаблок. сервисы\nbmembers\tЗаблок. сервисы\t⚙️Manual\n' > "$WORK/o.tsv"
+rendere > /dev/null 2> "$WORK/eerr" || true
+grep -q 'цикл групп' "$WORK/eerr" || fail "цикл: нет текста «цикл групп»: $(cat "$WORK/eerr")"
+printf 'bmembers\t⚡ Самые быстрые + Fallback\t\n' > "$WORK/o.tsv"
+rendere > /dev/null 2> "$WORK/eerr" || true
+grep -q 'группа ⚡ Самые быстрые + Fallback пустая' "$WORK/eerr" || fail "пустая группа: текст: $(cat "$WORK/eerr")"
+# сквозной: состав ⚙️Manual/🚀 Авто изменён - импорт WireGuard находит группы
+DEFS="$ROOT/config-tools/services.default.tsv"
+printf 'bmembers\t⚙️Manual\t🛡️Fallback-Stable\nbset\t🚀 Авто по пингу\ttype\tselect\n' > "$WORK/o.tsv"
+awk -v services_file="$DEFS" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$ROOT/config-tools/config.example.yaml" > "$WORK/real.yaml" || fail "edit: реальный шаблон не собирается"
+printf '%s\n' '[Interface]' 'PrivateKey = AAA=' 'Address = 10.8.0.2/32' '[Peer]' 'PublicKey = BBB=' 'Endpoint = 1.2.3.4:443' > "$WORK/wg1.conf"
+printf '%s\twg1\n' "$WORK/wg1.conf" > "$WORK/wglist"; : > "$WORK/wgrep"
+awk -v LIST="$WORK/wglist" -v REPORT="$WORK/wgrep" -f "$ROOT/config-tools/wg_import.awk" "$WORK/real.yaml" > /dev/null || fail "edit: wg_import упал"
+grep -q GROUP_MISSING "$WORK/wgrep" && fail "edit: wg_import не нашёл группы: $(cat "$WORK/wgrep")"
+[ "$(grep -c '^GROUP|' "$WORK/wgrep")" = 3 ] || fail "edit: wg_import дописал не в 3 группы: $(cat "$WORK/wgrep")"
+
 [ "$FAILED" = 0 ] && echo "OK test_render_services"
 exit "$FAILED"
