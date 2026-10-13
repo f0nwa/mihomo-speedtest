@@ -734,7 +734,7 @@ run8() {
     API_MAIN=127.0.0.1:9090 SKIP_CONFIRM=1 "$@" sh "$WORK8/setup.sh"
 }
 run8 env >"$WORK8/run.log" 2>&1 || { echo "FAIL: setup (ui) run should succeed" >&2; cat "$WORK8/run.log" >&2; FAILED=1; }
-grep -q '^== MIHOMO-SPEEDTEST — Настройка нового роутера ==$' "$WORK8/run.log" || { echo "FAIL: standalone setup must show full banner with subtitle" >&2; FAILED=1; }
+grep -q '^== MIHOMO-SPEEDTEST - Настройка нового роутера ==$' "$WORK8/run.log" || { echo "FAIL: standalone setup must show full banner with subtitle" >&2; FAILED=1; }
 # Ввод идёт из pipe без эха, поэтому строка шага может склеиться с
 # предыдущим приглашением - якоря ^ нет.
 steps=$(grep -oE ' 0[1-4]/04  ?[^ ]+' "$WORK8/run.log" | sed 's/^ *//; s/  */ /' | tr '\n' ' ')

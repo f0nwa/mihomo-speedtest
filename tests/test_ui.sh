@@ -26,7 +26,7 @@ test_plain_no_escape() {
     ui_warn W; printf 'l1\nl2\n' | ui_note warn; ui_done D; ui_abort
   ) 2>"$T/err" || fail "plain: ненулевой код"
   ! grep -q "$ESC" "$T/err" || fail "plain: найден ESC"
-  grep -q '^== A — B ==$' "$T/err" || fail "plain: баннер"
+  grep -q '^== A - B ==$' "$T/err" || fail "plain: баннер"
   grep -q '^  Режим:' "$T/err" || fail "plain: ui_kv"
   grep -q '^ 01/06  X' "$T/err" || fail "plain: ui_step"
   grep -q '\[OK\] Y 3 с' "$T/err" || fail "plain: ui_ok"

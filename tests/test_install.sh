@@ -397,9 +397,8 @@ printf '#!/bin/sh\nexit 1\n' > "$WORK_UI/initd"
 grep -q '\[!!\] .*restart не удался' "$WORK_UI/e3" || fail "start_web_main при сбое: нет [!!] ($(cat "$WORK_UI/e3"))"
 rm -rf "$WORK_UI"
 
-# main() должен звать проверку процесса mihomo/версий раньше любой другой
-# логики: если pidof не находит mihomo, main обязан прерваться с
-# диагностикой version_check.sh, не доходя до проверки CONFIG и т.д.
+# При переустановке конфигурации с нодами процесс mihomo обязателен:
+# если pidof его не находит, main прерывается до работы с конфигом.
 MISSING_PIDOF=$(mktemp -d)
 cat > "$MISSING_PIDOF/pidof" <<'EOF'
 #!/bin/sh
@@ -410,6 +409,7 @@ WORK=$(mktemp -d)
 # Процесс ядра обязателен, когда в конфиге есть ноды (без нод и без конфига -
 # нет, см. install_env_check ниже).
 printf 'proxy-providers:\n  demo:\n    type: http\n    url: "https://example.com/sub"\n' > "$WORK/config.yaml"
+: > "$WORK/speedtest2.env"
 # Review Focus 4: stdin не терминал, stderr - файл, переменной UI нет вовсе
 # (как у обновлятора) - режим plain выбирается сам, ни одного байта ESC.
 if (unset UI; PATH="$MISSING_PIDOF:$PATH" DIR="$WORK" CONFIG="$WORK/config.yaml" \
@@ -422,11 +422,13 @@ grep -q '^ 01/05  Проверка окружения' "$WORK/err.log" || fail "
 grep -q 'Установка остановлена на шаге 01/05' "$WORK/err.log" || fail "фатальная ошибка main должна завершаться ui_abort: $(cat "$WORK/err.log")"
 rm -rf "$MISSING_PIDOF" "$WORK"
 
-# install_env_check: ядро не обязано работать, пока нет конфига или нод
+# install_env_check: при первой установке ядро может ещё не работать даже
+# с готовым конфигом и подпиской; при переустановке проверка остаётся.
 (
   W_ENV=$(mktemp -d)
   check_versions() { return 0; }
   check_mihomo_process() { return 1; }
+  DIR=$W_ENV
   CONFIG=$W_ENV/нет-такого.yaml
   install_env_check || { echo "FAIL: без config.yaml процесс mihomo требовать нельзя" >&2; exit 1; }
   printf 'proxy-providers:\n  fast:\n    type: file\n' > "$W_ENV/c.yaml"
@@ -434,6 +436,8 @@ rm -rf "$MISSING_PIDOF" "$WORK"
   install_env_check || { echo "FAIL: без нод процесс mihomo требовать нельзя" >&2; exit 1; }
   printf 'proxy-providers:\n  demo:\n    type: http\n' > "$W_ENV/d.yaml"
   CONFIG=$W_ENV/d.yaml
+  install_env_check || { echo "FAIL: первая установка с подпиской не должна требовать процесс mihomo" >&2; exit 1; }
+  : > "$W_ENV/speedtest2.env"
   if install_env_check; then echo "FAIL: с подпиской процесс mihomo обязателен" >&2; exit 1; fi
   rm -rf "$W_ENV"
 ) || fail "install_env_check"
@@ -758,6 +762,25 @@ grep -q 'установка завершена в мягком режиме' "$T
 grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main5.err" || fail "замена при установке: нет итоговой строки: $(cat "$TEST_ROOT/main5.err")"
 set -- "$FIXDIR4"/config.yaml.*.bak
 [ -f "$1" ] && cmp -s "$1" "$FIXDIR4/config.before" || fail "замена при установке: нет бэкапа прежнего конфига"
+stop_soft_web
+
+# Первый запуск с уже готовым конфигом, но без процесса и кэша подписки:
+# файлы и веб-интерфейс должны установиться, а замер нод подождёт запуска ядра.
+rm -rf "$FIXDIR4/runtime" "$FIXDIR4/speedtest2.env" "$FIXDIR4/crontab.txt"
+cp "$FIXDIR/config.yaml" "$FIXDIR4/config.yaml"
+rm -f "$FIXDIR4/proxy-providers/demo.yaml"
+cat > "$FIXDIR4/bin/pidof" <<'BINEOF'
+#!/bin/sh
+exit 1
+BINEOF
+chmod +x "$FIXDIR4/bin/pidof"
+fresh_rc=0
+CONFIG_MODE=own run_main_soft /dev/null "$TEST_ROOT/main-fresh-no-core.err" || fresh_rc=$?
+[ "$fresh_rc" = 0 ] || fail "первая установка без процесса mihomo: код $fresh_rc: $(cat "$TEST_ROOT/main-fresh-no-core.err")"
+[ -f "$FIXDIR4/speedtest2.env" ] || fail "первая установка без ядра не записала speedtest2.env"
+grep -q 'Кэш подписки demo пока недоступен: mihomo не запущен' "$TEST_ROOT/main-fresh-no-core.err" || fail "нет предупреждения о кэше без ядра"
+grep -q 'Пробный прогон пропущен: mihomo не запущен' "$TEST_ROOT/main-fresh-no-core.err" || fail "нет предупреждения о пропуске пробного прогона без ядра"
+grep -q '\[OK\] mihomo-speedtest .*установлен' "$TEST_ROOT/main-fresh-no-core.err" || fail "первая установка без ядра не завершилась"
 stop_soft_web
 
 if (

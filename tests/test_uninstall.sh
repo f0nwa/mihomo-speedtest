@@ -522,7 +522,7 @@ if ! printf 'y\n' | env PATH="$FAKEBIN:$CRONBIN9:$PATH" DIR="$W9" BIN=mihomo MIH
     sh "$UNINSTALL" >"$W9.out" 2>"$W9.err"; then
   fail "сценарий 9: завершился с ошибкой ($(cat "$W9.err"))"
 fi
-grep -qF '== MIHOMO-SPEEDTEST — Удаление ==' "$W9.err" || fail "сценарий 9: нет баннера"
+grep -qF '== MIHOMO-SPEEDTEST - Удаление ==' "$W9.err" || fail "сценарий 9: нет баннера"
 grep -q '^  | ' "$W9.err" || fail "сценарий 9: нет блока перечня с '| '"
 grep -q 'журналы' "$W9.err" || fail "сценарий 9: при PURGE_DATA=1 в перечне нет журналов"
 grep -qF '[??] Продолжить? [y/N]' "$W9.err" || fail "сценарий 9: нет вопроса [??]"

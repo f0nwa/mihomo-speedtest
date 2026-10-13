@@ -104,7 +104,7 @@ ui_banner() {
     return 0
   fi
   if [ "$UI_MODE" != live ]; then
-    printf '== %s — %s ==\n' "$1" "$2" >&2
+    printf '== %s - %s ==\n' "$1" "$2" >&2
     return 0
   fi
   _t=$(ui__len "$1"); _s=$(ui__len "$2")

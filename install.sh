@@ -147,7 +147,7 @@ ui_banner() {
     return 0
   fi
   if [ "$UI_MODE" != live ]; then
-    printf '== %s — %s ==\n' "$1" "$2" >&2
+    printf '== %s - %s ==\n' "$1" "$2" >&2
     return 0
   fi
   _t=$(ui__len "$1"); _s=$(ui__len "$2")
@@ -1156,16 +1156,18 @@ config_geofilter_block() {
   sed -n "s/.*exclude-filter: &geofilter '\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1 | sed 's/^(?i)//'
 }
 
-# Проверка окружения: пока нет конфига или в нём нет нод, ядро не обязано
-# работать (так и задумано - его не запускают без нод), нужны только версии.
+# Проверка окружения: при первой установке ядро ещё может не работать,
+# даже если на роутере уже есть конфиг с нодами. Версии обязательны всегда.
 install_env_check() {
-  if [ ! -f "$CONFIG" ] || config_no_nodes "$CONFIG"; then
+  MST_PROCESS_CHECKED=0
+  if [ ! -f "$DIR/speedtest2.env" ] || [ ! -f "$CONFIG" ] || config_no_nodes "$CONFIG"; then
     check_versions
   elif [ -x "$BIN" ] && ! "$BIN" -t -d "$MIHOMO_DIR" -f "$CONFIG" >/dev/null 2>&1; then
     # Конфиг не проходит mihomo -t: ядро могло не запуститься как раз из-за
     # него. Процесс не требуем - дальше main() переходит в мягкий режим.
     check_versions
   else
+    MST_PROCESS_CHECKED=1
     check_mihomo_process && check_versions
   fi
 }
@@ -2279,7 +2281,11 @@ main() {
     return 1
   fi
   [ "$env_err" = /dev/null ] || rm -f "$env_err" 2>/dev/null || :
-  ui_ok "Процесс mihomo, версии"
+  if [ "$MST_PROCESS_CHECKED" = 1 ]; then
+    ui_ok "Процесс mihomo, версии"
+  else
+    ui_ok "Версии XKeen, Mihomo и KeeneticOS"
+  fi
 
   if [ ! -f "$CONFIG" ] || install_config_is_stub "$CONFIG"; then
     # Новый роутер: config.yaml ещё нет. Вместо отказа передаём управление
@@ -2344,6 +2350,10 @@ main() {
   for src in $SOURCES; do
     [ -f "$src" ] && continue
     name=$(basename "$src" .yaml)
+    if ! check_mihomo_process >/dev/null 2>&1; then
+      ui_warn "Кэш подписки $name пока недоступен: mihomo не запущен. Запустите ядро и выполните замер после появления кэша"
+      continue
+    fi
     ui_run "Подписка $name" refresh_provider_cache "$name" "$src" || {
       ui_fail "Кэш $src не появился, сначала чините подписку $name"
       return 1
@@ -2425,6 +2435,8 @@ main() {
     ui_warn "Пробный прогон пропущен: в конфиге нет нод"
   elif [ "$MST_SOFT_CONFIG" = 1 ]; then
     ui_warn "Пробный прогон пропущен: конфиг не проходит mihomo -t"
+  elif ! check_mihomo_process >/dev/null 2>&1; then
+    ui_warn "Пробный прогон пропущен: mihomo не запущен"
   elif [ "${SKIP_TRIAL:-0}" != 1 ]; then
     run_trial_with_heartbeat
     print_trial_log_tail
