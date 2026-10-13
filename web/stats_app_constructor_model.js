@@ -100,6 +100,12 @@ export function proxyTokens(line) {
   return out;
 }
 
+// Базовые группы: типы, числовые поля и умолчания при смене типа - как в
+// render_services.awk (bset).
+var BTYPES = ['select', 'url-test', 'fallback'];
+var BNUM = { interval: true, tolerance: true };
+var BDEF = { url: 'https://www.gstatic.com/generate_204', interval: 600, tolerance: 50, lazy: 'true' };
+
 export function parseTemplateBase(text) {
   var res = { groups: {}, order: [], selectDefault: [], geofilter: '' };
   var sect = '', cur = null;
@@ -111,15 +117,19 @@ export function parseTemplateBase(text) {
     if (sect !== 'proxy-groups') { return; }
     var nm = /^  - name:\s*(.*)$/.exec(l);
     if (nm) {
-      cur = { interval: null, tolerance: null, tokens: [] };
+      cur = { interval: null, tolerance: null, tokens: [], type: '', url: null, lazy: null, use: false, fast: false, hasProxies: false };
       var name = unquote(nm[1]);
       res.groups[name] = cur; res.order.push(name);
       return;
     }
     if (!cur) { return; }
     var kv = /^    (interval|tolerance):\s*([0-9]+)\s*$/.exec(l);
+    var sv = /^    (type|url|lazy):\s*(.*?)\s*$/.exec(l);
     if (kv) { cur[kv[1]] = Number(kv[2]); }
-    else if (/^    proxies: \[/.test(l)) { cur.tokens = proxyTokens(l); }
+    else if (sv) { cur[sv[1]] = unquote(sv[2]); }
+    else if (/^    use:\s*\[fast\]/.test(l)) { cur.use = true; cur.fast = true; }
+    else if (/^    (use|include-all):/.test(l)) { cur.use = true; }
+    else if (/^    proxies: \[/.test(l)) { cur.tokens = proxyTokens(l); cur.hasProxies = true; }
   });
   return res;
 }
@@ -136,6 +146,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var userRules = [];
   var bsets = [];            // [{group,key,value}] отличия базовых групп
   var bfirsts = [];          // [{group,value}] первое значение proxies
+  var bmembers = {};         // группа -> [групповые токены] (состав)
   var ownScope = false;      // прокси и во всех сервисных группах (ownscope all)
 
   lines(servicesText).forEach(function (line) {
@@ -149,12 +160,66 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       if (u) { u.extra.push(line); } else { srcLines.push(line); }
     } else if (f[0] === 'src') { srcLines.push(line); }
     else if (f[0] === 'dom') { doms.push({ owner: f[1], type: f[2], value: f[3] }); }
-    else if (f[0] === 'bset') { bsets.push({ group: f[1], key: f[2], value: Number(f[3]) }); }
+    else if (f[0] === 'bset') { bsets.push({ group: f[1], key: f[2], value: BNUM[f[2]] ? Number(f[3]) : f[3] }); }
+    else if (f[0] === 'bmembers') { bmembers[f[1]] = f[2] ? f[2].split('|') : []; }
     else if (f[0] === 'bfirst') { bfirsts.push({ group: f[1], value: f.slice(2).join(TAB) }); }
     else if (f[0] === 'ownscope') { ownScope = true; }
     else { provLines.push(line); }
   });
   lines(userRulesText).forEach(function (l) { l = l.trim(); if (l) { userRules.push(l); } });
+  // Старый bfirst базовой группы на групповой токен - это порядок состава.
+  bfirsts = bfirsts.filter(function (b) {
+    if (b.group === '*' || !tb.groups[b.group] || !isGrpTok(b.value)) { return true; }
+    if (!bmembers[b.group]) {
+      var m = tmplMembers(b.group);
+      if (m.indexOf(b.value) >= 0) { bmembers[b.group] = [b.value].concat(m.filter(function (t) { return t !== b.value; })); }
+    }
+    return false;
+  });
+
+  // ----- базовые группы -----
+  function isGrpTok(t) { return t === 'DIRECT' || t === 'REJECT' || !!tb.groups[t]; }
+  function tmplMembers(name) { return tb.groups[name].tokens.filter(isGrpTok); }
+  function nodeTokens(name) { return tb.groups[name].tokens.filter(function (t) { return !isGrpTok(t); }); }
+  function membersOf(name) { return bmembers[name] ? bmembers[name].slice() : tmplMembers(name); }
+  function bget(name, key) { return bsets.filter(function (x) { return x.group === name && x.key === key; })[0]; }
+  function bdrop(name, key) { bsets = bsets.filter(function (x) { return !(x.group === name && x.key === key); }); }
+  function typeOf(name) { var o = bget(name, 'type'); return o ? o.value : tb.groups[name].type; }
+  // Поле группы с учётом типа: null - у группы его нет (как в сборке,
+  // render_services.awk: при смене типа недостающие поля берут умолчания).
+  function fieldOf(name, key) {
+    var g = tb.groups[name], ty = typeOf(name), chg = ty !== g.type, def;
+    if (chg && (ty === 'select' || (ty === 'fallback' && key === 'tolerance'))) { return null; }
+    if (g[key] != null) { def = g[key]; }
+    else if (chg && (key !== 'tolerance' || ty === 'url-test')) { def = BDEF[key]; }
+    else { return null; }
+    var o = bget(name, key);
+    return { def: def, value: o ? o.value : def };
+  }
+  function needBase(name) {
+    if (!tb.groups[name]) { throw new Error('Нет группы ' + name); }
+    return tb.groups[name];
+  }
+  // Цикл в составах групп (с пробным составом name -> tokens): текст или ''.
+  function findCycle(name, tokens) {
+    var state = {}, stack = [];
+    function edges(g) { return (g === name ? tokens : membersOf(g)).filter(function (t) { return !!tb.groups[t]; }); }
+    function visit(g) {
+      state[g] = 1; stack.push(g);
+      var es = edges(g);
+      for (var i = 0; i < es.length; i++) {
+        var t = es[i];
+        if (state[t] === 1) { return stack.slice(stack.indexOf(t)).concat(t).join(' -> '); }
+        if (!state[t]) { var r = visit(t); if (r) { return r; } }
+      }
+      stack.pop(); state[g] = 2;
+      return '';
+    }
+    for (var i = 0; i < tb.order.length; i++) {
+      if (!state[tb.order[i]]) { var r = visit(tb.order[i]); if (r) { return r; } }
+    }
+    return '';
+  }
 
   function findUser(id) {
     for (var i = 0; i < users.length; i++) { if (users[i].id === id) { return users[i]; } }
@@ -326,46 +391,87 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
     restoreRule: function (id, text) {
       unruled = unruled.filter(function (u) { return !(u.owner === id && u.text === text); });
     },
-    // Базовые группы шаблона: interval и tolerance (если есть у группы),
-    // def - значение шаблона, value - с учётом отличий.
+    // Базовые группы шаблона: тип, url, interval, tolerance, lazy (null -
+    // у группы с этим типом поля нет), состав (групповые токены proxies),
+    // fixed - что в группу входит помимо состава и не правится, candidates -
+    // что можно добавить в состав. locked - быстрый пул (use: [fast]).
     baseGroups: function () {
-      var out = [];
-      tb.order.forEach(function (name) {
-        var g = tb.groups[name];
-        if (g.interval == null && g.tolerance == null) { return; }
-        var row = { name: name, interval: null, tolerance: null };
-        ['interval', 'tolerance'].forEach(function (k) {
-          if (g[k] == null) { return; }
-          var o = bsets.filter(function (x) { return x.group === name && x.key === k; })[0];
-          row[k] = { def: g[k], value: o ? o.value : g[k] };
-        });
-        out.push(row);
+      return tb.order.map(function (name) {
+        var g = tb.groups[name], mem = membersOf(name), fixed = [];
+        if (g.fast) { fixed.push('ноды быстрого пула (fast)'); }
+        else if (g.use) { fixed.push('подписки'); }
+        if (nodeTokens(name).length) { fixed.push('прокси'); }
+        var cand = g.fast ? [] : tb.order.concat(['DIRECT', 'REJECT']).filter(function (t) { return t !== name && mem.indexOf(t) < 0; });
+        return {
+          name: name, locked: !!g.fast,
+          type: { def: g.type, value: typeOf(name) },
+          url: fieldOf(name, 'url'), interval: fieldOf(name, 'interval'), tolerance: fieldOf(name, 'tolerance'), lazy: fieldOf(name, 'lazy'),
+          members: { def: tmplMembers(name), value: mem }, fixed: fixed.join(', '), candidates: cand
+        };
       });
-      return out;
     },
     setBase: function (name, key, value) {
-      var g = tb.groups[name];
-      if (!g || g[key] == null) { throw new Error('У группы ' + name + ' нет параметра ' + key); }
-      var n = Number(value);
-      if (String(value).trim() === '' || !/^[0-9]+$/.test(String(value).trim())) { throw new Error(key + ' - целое число'); }
-      if (key === 'interval' && (n < 10 || n > 86400)) { throw new Error('interval - от 10 до 86400 секунд'); }
-      if (key === 'tolerance' && n > 10000) { throw new Error('tolerance - от 0 до 10000 мс'); }
-      bsets = bsets.filter(function (x) { return !(x.group === name && x.key === key); });
-      if (n !== g[key]) { bsets.push({ group: name, key: key, value: n }); }
+      var g = needBase(name);
+      var v = String(value == null ? '' : value).trim();
+      if (g.fast && (key === 'type' || key === 'url')) { throw new Error('У группы ' + name + ' можно менять только interval, tolerance и lazy'); }
+      if (key === 'type') {
+        if (BTYPES.indexOf(v) < 0) { throw new Error('Тип группы - select, url-test или fallback'); }
+        bdrop(name, 'type');
+        if (v !== g.type) { bsets.push({ group: name, key: 'type', value: v }); }
+        // поля, которых у нового типа нет, забываются: при возврате типа -
+        // значения шаблона или умолчания, а не прежние правки
+        ['url', 'interval', 'tolerance', 'lazy'].forEach(function (k) { if (!fieldOf(name, k)) { bdrop(name, k); } });
+        return;
+      }
+      var info = BNUM[key] || key === 'url' || key === 'lazy' ? fieldOf(name, key) : null;
+      if (!info) { throw new Error('У группы ' + name + ' нет параметра ' + key); }
+      var nv;
+      if (BNUM[key]) {
+        if (!/^[0-9]+$/.test(v)) { throw new Error(key + ' - целое число'); }
+        nv = Number(v);
+        if (key === 'interval' && (nv < 10 || nv > 86400)) { throw new Error('interval - от 10 до 86400 секунд'); }
+        if (key === 'tolerance' && nv > 10000) { throw new Error('tolerance - от 0 до 10000 мс'); }
+      } else if (key === 'url') {
+        if (!/^https?:\/\/[^ "'#]+$/.test(v)) { throw new Error('url должен начинаться с http(s):// и не содержать пробелов, кавычек и #'); }
+        nv = v;
+      } else {
+        if (v !== 'true' && v !== 'false') { throw new Error('lazy - true или false'); }
+        nv = v;
+      }
+      bdrop(name, key);
+      if (nv !== info.def) { bsets.push({ group: name, key: key, value: nv }); }
     },
-    // Куда по умолчанию смотрят группы: «*» - сервисные группы шаблона
-    // (якорь select-default), прочие - базовые группы с выбором. def -
-    // первое значение шаблона, tokens - из чего выбирать.
+    // Состав базовой группы: другие базовые группы, DIRECT, REJECT по порядку.
+    setMembers: function (name, tokens) {
+      var g = needBase(name);
+      if (g.fast) { throw new Error('Состав группы ' + name + ' закреплён (ноды быстрого пула)'); }
+      var seen = {};
+      tokens.forEach(function (t) {
+        if (t === name) { throw new Error('Группа ' + name + ' не может входить сама в себя'); }
+        if (!isGrpTok(t)) { throw new Error('Нет группы ' + t); }
+        if (seen[t]) { throw new Error('В составе группы ' + name + ' повторяется ' + t); }
+        seen[t] = true;
+      });
+      if (!tokens.length && !g.use && !nodeTokens(name).length) { throw new Error('Группа ' + name + ' пустая: добавьте в неё группу или DIRECT'); }
+      var cyc = findCycle(name, tokens);
+      if (cyc) { throw new Error('Цикл групп: ' + cyc); }
+      var def = tmplMembers(name);
+      if (tokens.join('\n') === def.join('\n')) { delete bmembers[name]; } else { bmembers[name] = tokens.slice(); }
+    },
+    resetBase: function (name) {
+      needBase(name);
+      bsets = bsets.filter(function (x) { return x.group !== name; });
+      bfirsts = bfirsts.filter(function (x) { return x.group !== name; });
+      delete bmembers[name];
+    },
+    // Что по умолчанию выбрано у сервисных групп (якорь select-default);
+    // у базовых групп это первый в составе.
     routes: function () {
       var out = [];
-      function row(name, label, tokens) {
-        var o = bfirsts.filter(function (x) { return x.group === name; })[0];
-        out.push({ name: name, label: label, tokens: tokens, def: tokens[0], value: o ? o.value : tokens[0] });
+      if (tb.selectDefault.length) {
+        var o = bfirsts.filter(function (x) { return x.group === '*'; })[0];
+        out.push({ name: '*', label: 'Все сервисные группы', tokens: tb.selectDefault, def: tb.selectDefault[0], value: o ? o.value : tb.selectDefault[0] });
       }
-      if (tb.selectDefault.length) { row('*', 'Все сервисные группы', tb.selectDefault); }
-      ['Заблок. сервисы'].forEach(function (n) {
-        if (tb.groups[n] && tb.groups[n].tokens.length) { row(n, n, tb.groups[n].tokens); }
-      });
       return out;
     },
     setRoute: function (name, token) {
@@ -401,6 +507,9 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
       provLines.forEach(function (l) { out.push(l); });
       bsets.forEach(function (x) { out.push(['bset', x.group, x.key, x.value].join(TAB)); });
+      tb.order.concat(Object.keys(bmembers).filter(function (k) { return !tb.groups[k]; })).forEach(function (k) {
+        if (bmembers[k]) { out.push(['bmembers', k, bmembers[k].join('|')].join(TAB)); }
+      });
       bfirsts.forEach(function (x) { out.push(['bfirst', x.group, x.value].join(TAB)); });
       if (ownScope) { out.push('ownscope' + TAB + 'all'); }
       return {
@@ -422,7 +531,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       function mark(l) {
         var f = l.split(TAB);
         if (f[0] === 'ownscope') { res.proxies = true; }
-        else if (f[0] === 'bset' || f[0] === 'bfirst') { res.base = true; }
+        else if (f[0] === 'bset' || f[0] === 'bfirst' || f[0] === 'bmembers') { res.base = true; }
         else if (f[0] === 'dom') { res.domains = true; }
         else if (f[0] === 'unrule' && /^(DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD),/.test(ruleBody(f.slice(2).join(TAB)))) { res.domains = true; }
         else { res.services = true; }
@@ -449,6 +558,9 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         if (f[0] === 'dom') { return added ? '+ домен ' + f[3] + ' → ' + nameOf(f[1]) : 'Убрать домен ' + f[3] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'src') { return added ? '+ набор ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать набор ' + f[2] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'bset') { return added ? 'Группа ' + f[1] + ': ' + f[2] + ' = ' + f[3] : 'Группа ' + f[1] + ': ' + f[2] + ' как в шаблоне'; }
+        if (f[0] === 'bmembers') {
+          return added ? 'Группа ' + f[1] + ': состав - ' + (f[2] ? f[2].split('|').join(', ') : 'без групп') : 'Группа ' + f[1] + ': состав как в шаблоне';
+        }
         if (f[0] === 'bfirst') {
           return added ? (f[1] === '*' ? 'Сервисные группы: по умолчанию ' : 'Группа ' + f[1] + ': по умолчанию ') + f[2]
             : (f[1] === '*' ? 'Сервисные группы' : 'Группа ' + f[1]) + ': по умолчанию как в шаблоне';
@@ -457,15 +569,15 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }
-      ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bfirst', ''].forEach(function (kind) {
+      ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bmembers', 'bfirst', ''].forEach(function (kind) {
         function mine(l) {
           var k = l.split(TAB)[0];
-          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bfirst'].indexOf(k) < 0;
+          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bmembers', 'bfirst'].indexOf(k) < 0;
         }
         // изменённое значение базовой группы - одна строка («стало»), без «было»
         function replaced(l) {
           var f = l.split(TAB);
-          if (f[0] !== 'bset' && f[0] !== 'bfirst') { return false; }
+          if (f[0] !== 'bset' && f[0] !== 'bfirst' && f[0] !== 'bmembers') { return false; }
           var n = f[0] === 'bset' ? 3 : 2;
           return after.some(function (a) { return a.split(TAB).slice(0, n).join(TAB) === f.slice(0, n).join(TAB); });
         }

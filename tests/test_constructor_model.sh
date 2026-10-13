@@ -188,8 +188,8 @@ eq(pt.geofilter, 'RU|Moscow', 'фильтр шаблона');
 eq(pt.selectDefault, ['DIRECT', 'Заблок. сервисы', '⚙️Manual'], 'select-default');
 eq(M.proxyTokens("    proxies: ['a, b', c, 'it''s']"), ['a, b', 'c', "it's"], 'токены с запятой и кавычкой');
 let mb = M.createModel(D, '', '', TB);
-eq(mb.baseGroups(), [{ name: '⚡ Быстрый пул', interval: { def: 60, value: 60 }, tolerance: { def: 50, value: 50 } }], 'базовые группы');
-eq(mb.routes().map(r => [r.name, r.def, r.value]), [['*', 'DIRECT', 'DIRECT'], ['Заблок. сервисы', '⚡ Самые быстрые', '⚡ Самые быстрые']], 'маршруты');
+eq(mb.baseGroups().map(g => [g.name, g.interval, g.tolerance]), [['⚡ Быстрый пул', { def: 60, value: 60 }, { def: 50, value: 50 }], ['⚙️Manual', null, null], ['Заблок. сервисы', null, null]], 'базовые группы');
+eq(mb.routes().map(r => [r.name, r.def, r.value]), [['*', 'DIRECT', 'DIRECT']], 'маршруты: только сервисные группы');
 mb.setBase('⚡ Быстрый пул', 'interval', '120');
 mb.setRoute('*', '⚙️Manual');
 eq(mb.serialize().services, ['bset', '⚡ Быстрый пул', 'interval', '120'].join(T) + '\n' + ['bfirst', '*', '⚙️Manual'].join(T) + '\n', 'bset/bfirst сериализуются');
@@ -231,6 +231,76 @@ eq(mo2.summary(onState), ['Прокси: только в базовых груп
 // ownscope не мешает остальным директивам и не попадает в «прочие строки»
 const mo3 = M.createModel(D, 'del' + T + 'spotify\nownscope' + T + 'all\n', '');
 eq(mo3.serialize().services, 'del' + T + 'spotify\nownscope' + T + 'all\n', 'ownscope вместе с del: порядок и состав');
+
+// ----- базовые группы: тип, параметры, состав (bmembers) -----
+const TE = [
+  'anchors:',
+  "  select-default: &select-default { type: select, use: *sub-names, proxies: ['⚡ Самые быстрые + Fallback', DIRECT, 'Заблок. сервисы', '⚙️Manual'] }",
+  'proxy-groups:',
+  "  - name: '⚡ Быстрый пул'", '    type: url-test', '    use: [fast]', '    url: "https://www.gstatic.com/generate_204"', '    interval: 60', '    tolerance: 50', '    lazy: true',
+  "  - name: '⚡ Самые быстрые + Fallback'", '    type: fallback', "    proxies: ['⚡ Быстрый пул', '🛡️Fallback-Stable']", '    url: "https://www.gstatic.com/generate_204"', '    interval: 600', '    lazy: true',
+  "  - name: '🚀 Авто по пингу'", '    type: url-test', '    use: *sub-names', "    proxies: ['🇩🇪 Hysteria2']", '    url: "http://www.gstatic.com/generate_204"', '    interval: 600', '    tolerance: 50', '    lazy: true',
+  "  - name: '🛡️Fallback-Stable'", '    type: fallback', '    use: *sub-names', "    proxies: ['🇩🇪 Hysteria2']", '    url: "http://www.gstatic.com/generate_204"', '    interval: 600', '    lazy: true',
+  "  - name: '⚙️Manual'", '    type: select', '    use: *sub-names', "    proxies: [DIRECT, '🇩🇪 Hysteria2']",
+  "  - name: 'Заблок. сервисы'", '    type: select', "    proxies: ['⚡ Самые быстрые + Fallback', DIRECT, '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']", ''].join('\n');
+const me = M.createModel(D, '', '', TE);
+const bg = me.baseGroups();
+eq(bg.map(g => g.name), ['⚡ Быстрый пул', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', 'Заблок. сервисы'], 'edit: все 6 групп');
+eq(bg[0].locked, true, 'edit: быстрый пул закреплён');
+eq(bg[4].locked, false, 'edit: Manual не закреплён');
+eq(bg[4].type, { def: 'select', value: 'select' }, 'edit: тип Manual');
+eq([bg[4].url, bg[4].interval, bg[4].lazy], [null, null, null], 'edit: у select нет url/interval/lazy');
+eq(bg[4].members, { def: ['DIRECT'], value: ['DIRECT'] }, 'edit: состав Manual');
+eq(bg[4].fixed, 'подписки, прокси', 'edit: закреплённое у Manual');
+eq(bg[0].fixed, 'ноды быстрого пула (fast)', 'edit: закреплённое у быстрого пула');
+eq(bg[4].candidates.indexOf('⚙️Manual'), -1, 'edit: себя нет в кандидатах');
+eq(bg[4].candidates.indexOf('DIRECT'), -1, 'edit: уже входящего нет в кандидатах');
+eq(bg[4].candidates.indexOf('REJECT') >= 0, true, 'edit: REJECT в кандидатах');
+me.setBase('⚙️Manual', 'type', 'fallback');
+let g4 = me.baseGroups()[4];
+eq([g4.type.value, g4.url && g4.url.value, g4.interval && g4.interval.value, g4.tolerance, g4.lazy && g4.lazy.value], ['fallback', 'https://www.gstatic.com/generate_204', 600, null, 'true'], 'edit: fallback - поля по умолчанию');
+eq(me.serialize().services, ['bset', '⚙️Manual', 'type', 'fallback'].join(T) + '\n', 'edit: bset type');
+me.setBase('⚙️Manual', 'interval', '300');
+me.setBase('⚙️Manual', 'type', 'select');
+me.setBase('⚙️Manual', 'type', 'fallback');
+eq(me.baseGroups()[4].interval.value, 600, 'edit: fallback -> select -> fallback - interval по умолчанию');
+me.setBase('⚙️Manual', 'type', 'select');
+eq(me.serialize().services, '', 'edit: тип шаблона - отличий нет');
+me.setBase('🚀 Авто по пингу', 'lazy', 'false');
+me.setBase('🚀 Авто по пингу', 'url', 'https://cp.cloudflare.com/');
+eq(me.serialize().services, ['bset', '🚀 Авто по пингу', 'lazy', 'false'].join(T) + '\n' + ['bset', '🚀 Авто по пингу', 'url', 'https://cp.cloudflare.com/'].join(T) + '\n', 'edit: lazy и url');
+throws(() => me.setBase('🚀 Авто по пингу', 'url', 'ftp://x'), 'edit: url не http');
+throws(() => me.setBase('🚀 Авто по пингу', 'lazy', 'maybe'), 'edit: lazy не bool');
+throws(() => me.setBase('⚙️Manual', 'type', 'load-balance'), 'edit: неизвестный тип');
+throws(() => me.setBase('⚡ Быстрый пул', 'type', 'select'), 'edit: тип быстрого пула');
+throws(() => me.setBase('⚙️Manual', 'interval', '300'), 'edit: у select нет interval');
+me.setBase('⚡ Быстрый пул', 'lazy', 'false');
+me.resetBase('⚡ Быстрый пул'); me.resetBase('🚀 Авто по пингу');
+eq(me.serialize().services, '', 'edit: resetBase убирает отличия');
+const beforeM = me.serialize();
+me.setMembers('Заблок. сервисы', ['🚀 Авто по пингу', 'DIRECT']);
+eq(me.serialize().services, ['bmembers', 'Заблок. сервисы', '🚀 Авто по пингу|DIRECT'].join(T) + '\n', 'edit: bmembers');
+eq(me.changes(beforeM).base, true, 'edit: bmembers - отметка у базовых групп');
+eq(me.summary(beforeM), ['Группа Заблок. сервисы: состав - 🚀 Авто по пингу, DIRECT'], 'edit: сводка состава');
+eq(me.routes().map(r => r.name), ['*'], 'edit: маршруты - только сервисные группы');
+throws(() => me.setMembers('🚀 Авто по пингу', ['Заблок. сервисы']), 'edit: цикл Авто <-> Заблок.');
+try { me.setMembers('🚀 Авто по пингу', ['Заблок. сервисы']); } catch (e) { eq(/^Цикл групп: 🚀 Авто по пингу -> Заблок. сервисы -> 🚀 Авто по пингу$/.test(e.message), true, 'edit: текст цикла'); }
+throws(() => me.setMembers('⚙️Manual', ['⚙️Manual']), 'edit: самоссылка');
+throws(() => me.setMembers('⚙️Manual', ['DIRECT', 'DIRECT']), 'edit: повтор');
+throws(() => me.setMembers('⚙️Manual', ['Нет']), 'edit: незнакомая группа');
+throws(() => me.setMembers('⚡ Быстрый пул', ['DIRECT']), 'edit: состав быстрого пула');
+throws(() => me.setMembers('⚡ Самые быстрые + Fallback', []), 'edit: пустая группа');
+me.setMembers('⚙️Manual', []);
+eq(me.baseGroups()[4].members.value, [], 'edit: Manual без групп - есть подписки, можно');
+me.setMembers('Заблок. сервисы', ['⚡ Самые быстрые + Fallback', 'DIRECT', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual']);
+eq(me.serialize().services, ['bmembers', '⚙️Manual', ''].join(T) + '\n', 'edit: состав как в шаблоне - строки нет');
+// старый bfirst группы превращается в состав
+const ml = M.createModel(D, ['bfirst', 'Заблок. сервисы', 'DIRECT'].join(T) + '\n', '', TE);
+eq(ml.baseGroups()[5].members.value, ['DIRECT', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'], 'edit: старый bfirst -> состав');
+eq(ml.serialize().services, ['bmembers', 'Заблок. сервисы', 'DIRECT|⚡ Самые быстрые + Fallback|🚀 Авто по пингу|🛡️Fallback-Stable|⚙️Manual'].join(T) + '\n', 'edit: старый bfirst сериализуется как bmembers');
+const mr = M.createModel(D, ['bset', '⚙️Manual', 'type', 'url-test'].join(T) + '\n' + ['bmembers', 'Заблок. сервисы', 'DIRECT'].join(T) + '\n', '', TE);
+eq(mr.baseGroups()[4].tolerance, { def: 50, value: 50 }, 'edit: состояние - url-test с tolerance');
+eq(mr.serialize().services, ['bset', '⚙️Manual', 'type', 'url-test'].join(T) + '\n' + ['bmembers', 'Заблок. сервисы', 'DIRECT'].join(T) + '\n', 'edit: состояние сериализуется как было');
 
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
