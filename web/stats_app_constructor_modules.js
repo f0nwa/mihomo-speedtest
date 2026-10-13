@@ -1,4 +1,4 @@
-// Блоки конструктора конфига: «Подписки», «Свои прокси», «Исключения нод» и
+// Блоки конструктора конфига: «Подписки», «Прокси», «Исключения нод» и
 // «Базовые группы». Логика - app-constructor-modules-model.js (подписки,
 // ноды, фильтр) и app-constructor-model.js (базовые группы в отличиях
 // сервисов); здесь только отрисовка. Применяется вместе с остальным
@@ -603,18 +603,12 @@ export function createModuleCards(ctx) {
     subsHost.appendChild(add);
   }
 
-  // ----- свои прокси -----
-  var proxBlk = ctx.layout.add(2, 'Свои прокси'), proxCard = proxBlk.body;
-  proxCard.appendChild(el('p', 'hint', 'Свои ноды (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
+  // ----- прокси (ноды, добавленные вручную, не из подписок) -----
+  var proxBlk = ctx.layout.add(2, 'Прокси'), proxCard = proxBlk.body;
+  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
     'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются.'));
   var proxHost = el('div');
   proxCard.appendChild(proxHost);
-
-  function renameProxy(p) {
-    var to = window.prompt('Новое имя ноды', p.name);
-    if (to === null) { return; }
-    ctx.edit(function () { mods.renameProxy(p.name, to); });
-  }
 
   // Вставленный текст: ссылки по одной в строке или YAML нод. Возвращает
   // {added, errs, rest, renamed}: сколько нод добавлено, ошибки по строкам,
@@ -652,24 +646,33 @@ export function createModuleCards(ctx) {
     var list = mods.proxies();
     list.forEach(function (p) {
       var r = el('div', 'xk-row cx-row');
-      r.appendChild(el('span', 'xk-val', p.name));
+      // Имя правится прямо в строке; «Сохранить имя» появляется, только когда
+      // имя изменено (Enter - сохранить, Esc - вернуть как было).
+      var nm = el('input', 'cx-name'); nm.type = 'text'; nm.value = p.name; nm.spellcheck = false;
+      nm.setAttribute('aria-label', 'Имя ноды ' + p.name);
+      var save = button('Сохранить имя', 'small'); save.hidden = true;
+      nm.addEventListener('input', function () { save.hidden = nm.value.trim() === p.name; });
+      nm.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !save.hidden) { e.preventDefault(); save.click(); }
+        if (e.key === 'Escape') { nm.value = p.name; save.hidden = true; }
+      });
+      save.addEventListener('click', function () { ctx.edit(function () { mods.renameProxy(p.name, nm.value); }); });
+      r.appendChild(nm); r.appendChild(save);
       r.appendChild(el('span', 'geo-code', (p.type || '?') + (p.server ? ' · ' + p.server + (p.port ? ':' + p.port : '') : '')));
-      var rn = button('Имя', 'small muted'); rn.setAttribute('aria-label', 'Переименовать ' + p.name);
-      rn.addEventListener('click', function () { renameProxy(p); });
-      var rm = button('Убрать', 'small muted');
+      var rm = button('Убрать', 'small muted'); rm.setAttribute('aria-label', 'Убрать ' + p.name);
       rm.addEventListener('click', function () { ctx.edit(function () { mods.removeProxy(p.name); }); });
-      r.appendChild(rn); r.appendChild(rm);
+      r.appendChild(rm);
       rows.appendChild(r);
     });
-    if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Своих нод нет - работают только подписки.')); }
+    if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Прокси не добавлены - работают только подписки.')); }
     proxHost.appendChild(rows);
 
-    // Куда попадают свои ноды: по умолчанию только в базовые группы, по желанию
+    // Куда попадают прокси: по умолчанию только в базовые группы, по желанию
     // ещё и во все сервисные (через общий якорь select-default в шаблоне).
     var scope = el('div', 'xk-scope');
     scope.setAttribute('role', 'radiogroup');
-    scope.setAttribute('aria-label', 'Куда попадают свои прокси');
-    scope.appendChild(el('p', 'hint', 'Где своих нод можно выбрать:'));
+    scope.setAttribute('aria-label', 'Куда попадают прокси');
+    scope.appendChild(el('p', 'hint', 'Где эти прокси можно выбрать:'));
     [[false, 'Только в базовые группы', 'Авто по пингу, Fallback-Stable и Manual (как сейчас)'],
      [true, 'Ещё и во все сервисные группы', 'в списке выбора каждого сервиса: YouTube, Telegram и т. д.']].forEach(function (o) {
       var lab = el('label', 'xk-scope-opt');
@@ -688,7 +691,6 @@ export function createModuleCards(ctx) {
     area.setAttribute('aria-label', 'Ссылки или YAML нод');
     area.value = proxDraft;
     area.addEventListener('input', function () { proxDraft = area.value; });
-    var row = el('div', 'btn-row');
     var add = button('Добавить', 'submit');
     add.addEventListener('click', function () {
       var res = null;
@@ -701,7 +703,7 @@ export function createModuleCards(ctx) {
     });
     var file = el('input'); file.type = 'file'; file.accept = '.conf'; file.multiple = true; file.hidden = true;
     file.setAttribute('aria-label', 'WireGuard .conf');
-    var wg = button('из .conf файла', 'submit secondary');
+    var wg = button('Выбрать .conf файл', 'submit secondary');
     wg.title = 'WireGuard или AmneziaWG (формат wg-quick); имя ноды - по имени файла';
     wg.addEventListener('click', function () { file.click(); });
     file.addEventListener('change', function () {
@@ -709,9 +711,17 @@ export function createModuleCards(ctx) {
       file.value = '';
       importConf(files);
     });
-    row.appendChild(add); row.appendChild(wg); row.appendChild(file);
-    proxHost.appendChild(area);
-    proxHost.appendChild(row);
+    // Два отдельных способа: вставка ссылок/YAML (кнопка справа от поля) и
+    // файл WireGuard/AmneziaWG - чтобы не гадать, какую кнопку нажимать.
+    proxHost.appendChild(el('div', 'geo-group-title', 'Добавить по ссылке или YAML'));
+    var paste = el('div', 'cx-paste');
+    paste.appendChild(area); paste.appendChild(add);
+    proxHost.appendChild(paste);
+    proxHost.appendChild(el('div', 'geo-group-title', 'Добавить из файла WireGuard / AmneziaWG'));
+    var conf = el('div', 'xk-add');
+    conf.appendChild(wg); conf.appendChild(file);
+    conf.appendChild(el('span', 'hint xk-grow', 'файл .conf в формате wg-quick, можно несколько сразу; имя ноды - по имени файла'));
+    proxHost.appendChild(conf);
   }
 
   // .conf файлы -> ноды (перевод на роутере: wg_import.awk), по одному запросу.

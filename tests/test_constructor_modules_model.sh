@@ -1,5 +1,5 @@
 #!/bin/sh
-# Модель блоков «Подписки», «Свои прокси», «Исключения нод»
+# Модель блоков «Подписки», «Прокси», «Исключения нод»
 # (web/stats_app_constructor_modules_model.js) - без DOM, проверяется node.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)

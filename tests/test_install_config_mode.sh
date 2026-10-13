@@ -185,7 +185,7 @@ has_fast_group "$CONFIG" || fail "после замены нет провайд�
 grep -q PRIVATE_TOKEN "$CONFIG" || fail "замена потеряла подписку"
 grep -q 'name: Mine' "$CONFIG" && fail "замена оставила чужую группу"
 grep -q PRIVATE_TOKEN "$T/err" && fail "сводка замены раскрыла ссылку подписки"
-grep -q "подписок 1, нод 0" "$T/err" || fail "нет сводки замены (сколько осталось): $(cat "$T/err")"
+grep -q "подписок 1, прокси 0" "$T/err" || fail "нет сводки замены (сколько осталось): $(cat "$T/err")"
 set -- "$CONFIG".*.bak
 [ -f "$1" ] && cmp -s "$1" "$T/own.yaml" || fail "замена: нет бэкапа прежнего конфига"
 grep -q -- -restart "$FAKE_XKEEN_LOG" || fail "замена: ядро не перезапущено"

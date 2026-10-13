@@ -136,7 +136,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var userRules = [];
   var bsets = [];            // [{group,key,value}] отличия базовых групп
   var bfirsts = [];          // [{group,value}] первое значение proxies
-  var ownScope = false;      // свои прокси и во всех сервисных группах (ownscope all)
+  var ownScope = false;      // прокси и во всех сервисных группах (ownscope all)
 
   lines(servicesText).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
@@ -408,7 +408,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         user_rules: userRules.length ? userRules.join('\n') + '\n' : ''
       };
     },
-    // Куда попадают свои прокси (раздел «Свои прокси»): false - только в базовые
+    // Куда попадают прокси (раздел «Прокси»): false - только в базовые
     // группы (Авто по пингу, Fallback-Stable, Manual), true - ещё и во все
     // сервисные группы (общий якорь select-default).
     ownScope: function () { return ownScope; },
@@ -453,7 +453,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
           return added ? (f[1] === '*' ? 'Сервисные группы: по умолчанию ' : 'Группа ' + f[1] + ': по умолчанию ') + f[2]
             : (f[1] === '*' ? 'Сервисные группы' : 'Группа ' + f[1]) + ': по умолчанию как в шаблоне';
         }
-        if (f[0] === 'ownscope') { return added ? 'Свои прокси: во всех сервисных группах' : 'Свои прокси: только в базовых группах'; }
+        if (f[0] === 'ownscope') { return added ? 'Прокси: во всех сервисных группах' : 'Прокси: только в базовых группах'; }
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }

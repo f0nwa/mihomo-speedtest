@@ -116,7 +116,7 @@ build_reset_candidate() {
       --state-out "$WORK/state" > "$WORK/reset.log" 2>&1; then
     reason=$(sed -n 's/^ERROR: //p' "$WORK/reset.log" | head -n 1)
     case $reason in
-      'нет ни подписок'*) fail_json 422 nothing_to_keep "В config.yaml нет ни подписок, ни своих нод - заменять нечем" ;;
+      'нет ни подписок'*) fail_json 422 nothing_to_keep "В config.yaml нет ни подписок, ни прокси - заменять нечем" ;;
     esac
     fail_json 422 reset_failed "$reason"
   fi

@@ -220,14 +220,14 @@ eq(mo.ownScope(), true, 'ownscope: включён');
 eq(mo.serialize().services, 'ownscope' + T + 'all\n', 'ownscope: строка в состоянии');
 eq(mo.changes(beforeOwn).proxies, true, 'ownscope: отметка «изменён» у свои прокси');
 eq(mo.changes(beforeOwn).services, false, 'ownscope: не считается правкой сервисов');
-eq(mo.summary(beforeOwn), ['Свои прокси: во всех сервисных группах'], 'ownscope: сводка (включено)');
+eq(mo.summary(beforeOwn), ['Прокси: во всех сервисных группах'], 'ownscope: сводка (включено)');
 const mo2 = M.createModel(D, 'ownscope' + T + 'all\n', '');
 eq(mo2.ownScope(), true, 'ownscope: читается из состояния');
 eq(mo2.serialize().services, 'ownscope' + T + 'all\n', 'ownscope: roundtrip');
 const onState = mo2.serialize();
 mo2.setOwnScope(false);
 eq(mo2.serialize().services, '', 'ownscope: выключение убирает строку');
-eq(mo2.summary(onState), ['Свои прокси: только в базовых группах'], 'ownscope: сводка (выключено)');
+eq(mo2.summary(onState), ['Прокси: только в базовых группах'], 'ownscope: сводка (выключено)');
 // ownscope не мешает остальным директивам и не попадает в «прочие строки»
 const mo3 = M.createModel(D, 'del' + T + 'spotify\nownscope' + T + 'all\n', '');
 eq(mo3.serialize().services, 'del' + T + 'spotify\nownscope' + T + 'all\n', 'ownscope вместе с del: порядок и состав');

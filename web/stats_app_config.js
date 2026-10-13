@@ -450,7 +450,7 @@ function renderYaml(bar) {
     var tplBtn = btn(row1, 'Миграция к шаблону', true);
     tplBtn.title = 'Только меняет текст в редакторе: служебные разделы из шаблона, подписки и локальные настройки сохраняются; после применения карточка обновления конфига исчезнет';
     var resetTplBtn = btn(row1, 'Заменить шаблоном…', true);
-    resetTplBtn.title = 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; применяется сразу, старый конфиг уходит в бэкап';
+    resetTplBtn.title = 'Оставляет только подписки и прокси, всё остальное берётся из шаблона; применяется сразу, старый конфиг уходит в бэкап';
     // «Ещё»: редкие действия (починка, откат, журнал) - меню справа в той же панели.
     var moreWrap = el('div', 'config-more');
     var moreBtn = btn(moreWrap, 'Ещё ▾', true);
@@ -943,7 +943,7 @@ function renderYaml(bar) {
     // Сначала предпросмотр (ничего не пишет), потом подтверждение и применение.
     function resetPreviewLines(r) {
       var k = r.kept || {};
-      var lines = ['Останется: ' + (k.subscriptions || 0) + ' подписок, ' + (k.nodes || 0) + ' своих нод.',
+      var lines = ['Останется: ' + (k.subscriptions || 0) + ' подписок, ' + (k.nodes || 0) + ' прокси.',
         'Будет из шаблона: dns, listeners, secret, порты, группы, правила, гео-фильтр.'];
       (r.report || []).forEach(function (l) {
         var p = String(l).split('|');
@@ -964,7 +964,7 @@ function renderYaml(bar) {
         .then(function (r) { preview = r; })
         ['catch'](function (e) {
           if (e.message === 'nothing_to_keep') {
-            msg('В config.yaml нет ни подписок, ни своих нод - заменять нечем. Сначала добавьте подписку в конструкторе или ноды в YAML.', 'err');
+            msg('В config.yaml нет ни подписок, ни прокси - заменять нечем. Сначала добавьте подписку или прокси в конструкторе.', 'err');
           } else {
             msg('Не удалось подготовить замену: ' + ((e.data && e.data.message) || e.message), 'err');
           }

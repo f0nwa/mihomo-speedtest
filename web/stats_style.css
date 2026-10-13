@@ -342,6 +342,10 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-mode button[aria-pressed=true]{background:var(--accent);color:#0f1214}
 .xk-text{margin:10px 0 6px;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
 .xk-add .xk-grow{align-self:center}
+.cx-row input.cx-name{flex:1 1 160px;min-width:0}
+.cx-paste{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:0 0 6px}
+.cx-paste .xk-text{flex:1 1 260px;width:auto;min-width:0;margin:0}
+.cx-paste .submit{margin-top:0;flex:0 0 auto}
 .xk-savebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .xk-savebar .submit{margin-top:0}
 

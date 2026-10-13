@@ -52,7 +52,7 @@ grep -q 'перехват' "$UI" || fail "нет предупреждения о
 grep -q 'findByName' "$UI" || fail "имя существующей группы - подключение к ней, а не ошибка"
 grep -q 'checkSource' "$UI" || fail "наборы проверяются до добавления"
 
-# Блоки порции 5: подписки, свои прокси, исключения нод, базовые группы
+# Блоки порции 5: подписки, прокси, исключения нод, базовые группы
 MOD="$ROOT/web/stats_app_constructor_modules.js"
 grep -q '"app-constructor-modules.js": "stats_app_constructor_modules.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor-modules.js"
 grep -q '"app-constructor-modules-model.js": "stats_app_constructor_modules_model.js"' "$ROOT/web/stats_httpd.py" || fail "STATIC_FILES: app-constructor-modules-model.js"
@@ -62,7 +62,7 @@ for f in stats_app_constructor_modules.js stats_app_constructor_modules_model.js
   grep -q "$f" "$ROOT/uninstall.sh" || fail "uninstall.sh: $f"
   case " $(sed -n 's/^ALL_PROJECT_FILES="\(.*\)"$/\1/p' "$ROOT/install.sh") " in *" $f "*) ;; *) fail "ALL_PROJECT_FILES: $f" ;; esac
 done
-for t in "layout.add(1, 'Подписки'" "layout.add(2, 'Свои прокси'" "layout.add(5, 'Исключения нод'" "layout.add(6, 'Базовые группы'"; do
+for t in "layout.add(1, 'Подписки'" "layout.add(2, 'Прокси'" "layout.add(5, 'Исключения нод'" "layout.add(6, 'Базовые группы'"; do
   grep -qF "$t" "$MOD" || fail "нет карточки $t"
 done
 grep -q "createModuleCards" "$UI" || fail "UI не подключает блоки"
@@ -109,13 +109,13 @@ grep -q "button('Заменить шаблоном…'" "$UI" || fail "конс�
 grep -q "templateAction: templateActionFromConstructor" "$CFG" || fail "панель конструктора не получает templateAction"
 [ "$(grep -c 'templateAction: opts.templateAction' "$UI")" = 3 ] || fail "перерисовка конструктора теряет templateAction"
 
-# переключатель «куда попадают свои прокси» (ownscope) в разделе «Свои прокси»
+# переключатель «куда попадают прокси» (ownscope) в разделе «Прокси»
 M="$ROOT/web/stats_app_constructor_modules.js"
-grep -q 'model.setOwnScope' "$M" || fail "«Свои прокси»: нет переключателя ownscope"
-grep -q 'model.ownScope()' "$M" || fail "«Свои прокси»: переключатель не читает состояние"
-grep -q 'Только в базовые группы' "$M" || fail "«Свои прокси»: нет варианта «только в базовые группы»"
-grep -q 'Ещё и во все сервисные группы' "$M" || fail "«Свои прокси»: нет варианта «во все сервисные группы»"
-grep -q 'ch.proxies' "$UI" || fail "пометка «изменён» у «Свои прокси» не учитывает ownscope"
+grep -q 'model.setOwnScope' "$M" || fail "«Прокси»: нет переключателя ownscope"
+grep -q 'model.ownScope()' "$M" || fail "«Прокси»: переключатель не читает состояние"
+grep -q 'Только в базовые группы' "$M" || fail "«Прокси»: нет варианта «только в базовые группы»"
+grep -q 'Ещё и во все сервисные группы' "$M" || fail "«Прокси»: нет варианта «во все сервисные группы»"
+grep -q 'ch.proxies' "$UI" || fail "пометка «изменён» у «Прокси» не учитывает ownscope"
 
 # Синтаксис ES-модулей (если есть node)
 if command -v node >/dev/null 2>&1; then

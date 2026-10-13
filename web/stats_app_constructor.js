@@ -102,7 +102,7 @@ export function renderConstructor(modeBar, opts) {
     var expanded = {};
 
     var head = card('Конструктор конфига');
-    head.appendChild(el('p', 'hint', 'Подписки, свои прокси, сервисы, домены, правила, исключения нод и базовые группы - ' +
+    head.appendChild(el('p', 'hint', 'Подписки, прокси, сервисы, домены, правила, исключения нод и базовые группы - ' +
       'без правки YAML. dns, listeners и прочие настройки config.yaml переносятся при применении как есть. ' +
       'Перед применением конфиг собирается на роутере и проверяется mihomo -t, текущая версия уходит в бэкап.'));
     var msgBox = el('div');
@@ -153,7 +153,7 @@ export function renderConstructor(modeBar, opts) {
       migrateBtn.title = 'Служебные разделы из шаблона, подписки и локальные настройки сохраняются; результат - в редакторе YAML';
       migrateBtn.addEventListener('click', function () { opts.templateAction('migrate'); });
       var replaceBtn = button('Заменить шаблоном…', 'submit secondary');
-      replaceBtn.title = 'Оставляет только подписки и свои ноды, всё остальное берётся из шаблона; старый конфиг уходит в бэкап';
+      replaceBtn.title = 'Оставляет только подписки и прокси, всё остальное берётся из шаблона; старый конфиг уходит в бэкап';
       replaceBtn.addEventListener('click', function () { opts.templateAction('reset'); });
       bar.appendChild(migrateBtn); bar.appendChild(replaceBtn);
     }
@@ -234,7 +234,7 @@ export function renderConstructor(modeBar, opts) {
       // пометки «изменён» и сводки свёрнутых блоков
       var ch = model.changes(initial);
       var modCh = mods.changes(initialMods);
-      if (ch.proxies) { modCh.proxies = true; }   // «куда попадают свои прокси» хранится в services.tsv
+      if (ch.proxies) { modCh.proxies = true; }   // «куда попадают прокси» хранится в services.tsv
       modCards.markChanged(modCh);
       modCards.blocks.base.changed(ch.base);
       svcBlk.changed(ch.services); domBlk.changed(ch.domains); rulesBlk.changed(ch.rules);
