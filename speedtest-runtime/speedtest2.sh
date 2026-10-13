@@ -64,7 +64,7 @@ MIN_FLOOR=524288       # абсолютный минимум порога, ба�
 TOPN=15               # сколько нод класть в fast.yaml
 ENOUGH=20             # набрали столько выше порога - дальше не меряем
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
-MIN_WINNERS=3         # минимум нод в fast.yaml, если есть из кого выбрать - см. select_winners()
+MIN_WINNERS=3         # минимум нод во всём быстром пуле, включая WG - см. select_winners()
 STABLE_MIN_UPTIME=80  # %, нода с накопленной статистикой и uptime ниже этого в fast.yaml не идёт (0 = не учитывать)
 STABLE_LOOKBACK=24    # за сколько последних прогонов считать uptime для отбора (24 ~ 3 дня при прогоне раз в 3 часа)
 STABLE_MIN_RUNS=8     # фильтр по uptime включается, когда в этих прогонах у ноды не меньше стольких проверок
@@ -286,12 +286,10 @@ select_candidates() {
 }
 
 select_winners() {
-  # $6 (min_winners) - если нод, прошедших порог $4 (minimum), набралось
-  # меньше, добираем из остальных РАБОЧИХ (speed > 0, т.е. реально
-  # ответивших - нерабочие с speed=0 в добор никогда не идут) по убыванию
-  # скорости, пока не наберём min_winners или top. Смысл: пустая/куцая
-  # "самая быстрая" группа хуже, чем нода медленнее порога, но живая -
-  # см. CHANGELOG.
+  # $6 (min_winners) - минимум для всего быстрого пула. Если прошедших
+  # порог меньше, добираем из остальных РАБОЧИХ (speed > 0) по скорости.
+  # $8/$9 - проверенные WG и файл их победителей. WG идут в группу
+  # прямыми ссылками, а $5 (top) ограничивает только обычные ноды.
   # $7 (stabfile, опционально) - node_stability.tsv. Нода, у которой за
   # последние STABLE_LOOKBACK прогонов не меньше STABLE_MIN_RUNS проверок
   # (A/D) и доля живых ниже STABLE_MIN_UPTIME %, считается нестабильной:
@@ -306,18 +304,37 @@ select_winners() {
   top=$5
   min_winners=$6
   stabfile=${7:-}
+  wgfile=${8:-}
+  wgoutput=${9:-}
   [ -n "$stabfile" ] && [ -f "$stabfile" ] || stabfile=""
 
   sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" -v min_winners="$min_winners" \
       -v stabfile="$stabfile" -v min_uptime="${STABLE_MIN_UPTIME:-0}" -v lookback="${STABLE_LOOKBACK:-24}" \
-      -v min_runs="${STABLE_MIN_RUNS:-8}" -v exclfile="$output.unstable" '
+      -v min_runs="${STABLE_MIN_RUNS:-8}" -v exclfile="$output.unstable" -v belowfile="$output.below" \
+      -v wgfile="$wgfile" -v wgout="$wgoutput" '
+    function emit(sp, idx, name,   wireguard) {
+      wireguard = (idx in wg)
+      if (wireguard) print name > wgout
+      else { print sp, idx; regular++ }
+      if (sp < minimum) below++
+      seen[name] = 1
+      count++
+    }
     BEGIN {
       bn = 0; un = 0
+      if (wgout != "") printf "" > wgout
       while ((getline line < mapfile) > 0) {
         tab = index(line, "\t")
         if (tab > 0) names[substr(line, 1, tab - 1)] = substr(line, tab + 1)
       }
       close(mapfile)
+      if (wgfile != "" && wgout != "") {
+        while ((getline line < wgfile) > 0) {
+          tab = index(line, "\t")
+          if (tab > 0) wg[substr(line, 1, tab - 1)] = 1
+        }
+        close(wgfile)
+      }
       min_uptime += 0; lookback += 0; min_runs += 0
       if (lookback < 1) lookback = 24
       if (min_runs < 1) min_runs = 1
@@ -336,17 +353,16 @@ select_winners() {
     {
       name = names[$2]
       if (name == "" || seen[name]) next
-      if (name in unstable) {
+      wireguard = ($2 in wg)
+      if (!wireguard && name in unstable) {
         if ($1 > 0 && !useen[name]) {
           useen[name] = 1
           u_sp[un] = $1; u_idx[un] = $2; u_name[un] = name; un++
         }
         next
       }
-      if ($1 >= minimum && count < top) {
-        print $1, $2
-        seen[name] = 1
-        count++
+      if ($1 >= minimum && (wireguard || regular < top)) {
+        emit($1, $2, name)
       } else if ($1 > 0) {
         # кандидат на добор ниже порога - вход уже отсортирован по
         # убыванию скорости (sort -rn), поэтому backlog тоже в порядке
@@ -355,27 +371,26 @@ select_winners() {
         backlog_sp[bn] = $1
         backlog_idx[bn] = $2
         backlog_name[bn] = name
+        backlog_wg[bn] = wireguard
         bn++
       }
     }
     END {
-      for (i = 0; i < bn && count < min_winners && count < top; i++) {
-        if (seen[backlog_name[i]]) continue
-        print backlog_sp[i], backlog_idx[i]
-        seen[backlog_name[i]] = 1
-        count++
+      for (i = 0; i < bn && count < min_winners; i++) {
+        if (seen[backlog_name[i]] || (!backlog_wg[i] && regular >= top)) continue
+        emit(backlog_sp[i], backlog_idx[i], backlog_name[i])
       }
       # нестабильные - самый последний резерв, тоже по убыванию скорости
       printf "" > exclfile
       for (i = 0; i < un; i++) {
-        if (count < min_winners && count < top) {
-          print u_sp[i], u_idx[i]
-          count++
+        if (count < min_winners && regular < top) {
+          emit(u_sp[i], u_idx[i], u_name[i])
         } else {
           print unstable[u_name[i]] "% " u_name[i] > exclfile
         }
       }
       close(exclfile)
+      print below + 0 > belowfile
     }
   ' > "$output"
 }
@@ -827,7 +842,7 @@ wg_delays() {
 # Незамеренные ноды сохраняют прежнее участие, как и до удаления FAST-WG.
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
-  if ! wg_publish_config "$1"; then
+  if ! wg_publish_config "$1" "${2:-}"; then
     say "WARN: Не удалось применить WG-победителей к быстрому пулу; см. причину выше"
   fi
   return 0
@@ -903,12 +918,15 @@ wg_publish_config() (
   cp -p "$wg_cfg" "$WORK/wg-config.new" || exit 1
   : > "$WORK/wg-winners" || exit 1
   : > "$WORK/wg-tested" || exit 1
-  awk -F '\t' -v results="$WORK/res.txt" -v min="$1" \
+  awk -F '\t' -v results="$WORK/res.txt" -v min="$1" -v selected="$2" \
       -v winners="$WORK/wg-winners" -v tested="$WORK/wg-tested" '
     BEGIN { while ((getline l < results) > 0) { split(l, a, " "); speed[a[2]] = a[1] + 0 } }
     $1 in speed { print $2 > tested }
-    ($1 in speed) && speed[$1] >= min { print $2 > winners }
+    selected == "" && ($1 in speed) && speed[$1] >= min { print $2 > winners }
   ' "$WORK/wg_ok.txt" || exit 1
+  if [ -n "$2" ]; then
+    cp "$2" "$WORK/wg-winners" || exit 1
+  fi
   awk -v WINNERS="$WORK/wg-winners" -v TESTED="$WORK/wg-tested" \
     -f "$FAST_WG_AWK" "$WORK/wg-config.old" > "$WORK/wg-config.new" || exit 1
   cmp -s "$WORK/wg-config.old" "$WORK/wg-config.new" && exit 0
@@ -1211,26 +1229,32 @@ update_node_stability
 # WG/AWG-ноды в fast.yaml не пишутся: полное определение подняло бы в
 # основном ядре второго клиента с тем же ключом, а псевдоним direct +
 # dialer-proxy на роутере шёл мимо туннеля (задержка 33 мс против 126 мс).
-# Прошедшие порог попадают в пул прямыми ссылками (wg_publish_fast).
-awk -v wgfile="$WORK/wg.txt" '
-  BEGIN { while ((getline l < wgfile) > 0) { split(l, f, "\t"); wg[f[1]] = 1 } }
-  !($2 in wg)' "$WORK/res.txt" > "$WORK/res_fast.txt"
+# Отбор идёт по общим результатам, а WG-победители публикуются отдельно.
 if [ -s "$WORK/wg_ok.txt" ]; then
   while read -r WSP WIDX; do
     WNM=$(awk -F '\t' -v k="$WIDX" '$1 == k { print $2 }' "$WORK/wg_ok.txt")
     [ -n "$WNM" ] && say "WG: $(format_mbit "$WSP") Мбит/с  $WNM"
   done < "$WORK/res.txt"
 fi
-wg_publish_fast "$EFFECTIVE_MIN"
-select_winners "$WORK/res_fast.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS" "$HISTORY_STABILITY"
+select_winners "$WORK/res.txt" "$WORK/map.txt" "$WORK/win.txt" "$EFFECTIVE_MIN" "$TOPN" "$MIN_WINNERS" \
+  "$HISTORY_STABILITY" "$WORK/wg_ok.txt" "$WORK/win-wg.txt"
+wg_publish_fast "$EFFECTIVE_MIN" "$WORK/win-wg.txt"
 if [ -s "$WORK/win.txt.unstable" ]; then
   say "Не взяты в fast.yaml как нестабильные (uptime за $STABLE_LOOKBACK прогонов ниже $STABLE_MIN_UPTIME%): $(wc -l < "$WORK/win.txt.unstable" | tr -d ' ')"
   while read -r UPCT UNM; do say "  $UPCT  $UNM"; done < "$WORK/win.txt.unstable"
 fi
 WIN=$(wc -l < "$WORK/win.txt")
-BELOW_MIN=$(awk -v m="$EFFECTIVE_MIN" '$1 < m { c++ } END { print c + 0 }' "$WORK/win.txt")
+WG_WIN=$(wc -l < "$WORK/win-wg.txt")
+POOL_WIN=$((WIN + WG_WIN))
+BELOW_MIN=$(cat "$WORK/win.txt.below")
+below_note=""
+[ "$BELOW_MIN" -eq 0 ] || below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - добор до минимума $MIN_WINNERS)"
 if [ "$WIN" -lt 1 ]; then
-  say "WARN: Порог $(format_mbit "$EFFECTIVE_MIN") Мбит/с не прошла ни одна нода для fast.yaml (WG/AWG - отдельно, см. выше), оставляю прежний fast.yaml"
+  if [ "$WG_WIN" -gt 0 ]; then
+    say "WG: Отобрано $WG_WIN нод для быстрого пула (обычных победителей нет, прежний fast.yaml сохранён)$below_note"
+  else
+    say "WARN: Рабочих победителей для быстрого пула нет, оставляю прежний fast.yaml"
+  fi
   best_line=$(sort -rn "$WORK/res.txt" | head -1)
   best_sp=${best_line%% *}
   best_idx=${best_line#* }
@@ -1267,8 +1291,6 @@ sort -rn -k1 "$WORK/full.txt" > "$WORK/last.new" 2>/dev/null
 if ! publish_file "$WORK/last.new" "$LAST"; then
   say "WARN: speedtest_last.txt не записан, прежний файл сохранён"
 fi
-below_note=""
-[ "$BELOW_MIN" -gt 0 ] && below_note=" (из них $BELOW_MIN ниже порога скорости - набрано до минимума $MIN_WINNERS)"
 if ! has_fast_group "$MAIN_CONFIG"; then
   # Режим "свой конфиг" (см. install.sh:resolve_config_mode): провайдера
   # fast нет, перечитывать нечего - это не ошибка, а выбор пользователя.

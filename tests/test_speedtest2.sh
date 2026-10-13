@@ -236,6 +236,30 @@ grep -q 'n0003' "$TEST_ROOT/win-mw1.txt" || fail "MIN_WINNERS: третья по
 grep -q 'n0004' "$TEST_ROOT/win-mw1.txt" && fail "MIN_WINNERS: добрано больше, чем требовал минимум"
 grep -q 'n0005' "$TEST_ROOT/win-mw1.txt" && fail "MIN_WINNERS: полностью нерабочая (SP=0) нода не должна попадать в добор"
 
+# Минимум относится ко всему быстрому пулу: WG входит прямой ссылкой,
+# обычные ноды остаются в fast.yaml. Среди результатов ниже порога
+# выбираются три самых быстрых независимо от транспорта.
+printf '%s\n' \
+  '968 n0001' \
+  '956 n0002' \
+  '954 n0003' \
+  '927 n0004' \
+  '738 n0005' > "$TEST_ROOT/results-mixed.txt"
+printf 'n0001\tWG fast\nn0002\tRegular 1\nn0003\tRegular 2\nn0004\tRegular 3\nn0005\tWG slow\n' > "$TEST_ROOT/map-mixed.txt"
+printf 'n0001\tWG fast\nn0005\tWG slow\n' > "$TEST_ROOT/wg-mixed.txt"
+select_winners "$TEST_ROOT/results-mixed.txt" "$TEST_ROOT/map-mixed.txt" \
+  "$TEST_ROOT/win-mixed.txt" 1053 15 3 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed.txt"
+assert_eq "$(cat "$TEST_ROOT/win-mixed.txt")" "$(printf '956 n0002\n954 n0003')"
+assert_eq "$(cat "$TEST_ROOT/win-wg-mixed.txt")" 'WG fast'
+
+# Уже прошедшие порог WG учитываются в минимуме; лишние медленные
+# обычные ноды не добираются.
+printf '1200 n0002\n1190 n0001\n960 n0005\n950 n0003\n' > "$TEST_ROOT/results-mixed-high.txt"
+select_winners "$TEST_ROOT/results-mixed-high.txt" "$TEST_ROOT/map-mixed.txt" \
+  "$TEST_ROOT/win-mixed-high.txt" 1000 15 3 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed-high.txt"
+assert_eq "$(cat "$TEST_ROOT/win-mixed-high.txt")" '1200 n0002'
+assert_eq "$(cat "$TEST_ROOT/win-wg-mixed-high.txt")" "$(printf 'WG fast\nWG slow')"
+
 # частично прошли порог (только n0001, т.к. 290 < 295) + добор с дедупом
 # имён между прошедшими порог и добором (n0002 - дубль имени A, должен
 # быть пропущен в пользу n0003/n0004)

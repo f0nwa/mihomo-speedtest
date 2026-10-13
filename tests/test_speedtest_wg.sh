@@ -162,10 +162,19 @@ grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "медленная WG �
 wg_publish_fast 1000000
 [ ! -s "$T/put" ] || fail "без результатов состав изменён"
 
+# Общий отбор может добрать только одну WG-ноду: публикация должна
+# использовать его результат, даже когда обе WG ответили быстрее порога.
+printf '2000000 n0002\n3000000 n0003\n' > "$WORK/res.txt"
+printf 'Other WG\n' > "$T/selected-wg.txt"
+wg_publish_fast 1000000 "$T/selected-wg.txt"
+grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "публикация проигнорировала общий отбор WG"
+! grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$MAIN_CONFIG" || fail "WG вне общего отбора попала в пул"
+
 # config.yaml - ссылка на профиль (XKeen UI): правится цель, ссылка остаётся
 mkdir -p "$T/profiles"
 cp "$MAIN_CONFIG" "$T/profiles/p1.yaml"
-sed -i "s/^proxies: \['Other WG'\]//" "$T/profiles/p1.yaml"
+sed "s/^proxies: \['Other WG'\]//" "$T/profiles/p1.yaml" > "$T/p1.new"
+mv "$T/p1.new" "$T/profiles/p1.yaml"
 REAL_CONFIG=$MAIN_CONFIG
 MAIN_CONFIG=$T/link.yaml
 ln -s profiles/p1.yaml "$MAIN_CONFIG"
@@ -177,7 +186,8 @@ grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$T/profiles/p1.yaml" || fail
 grep -qF "Активный профиль: p1" "$RUN_LOG" || fail "профиль не определён"
 # профиль переключили во время прогона - ничего не пишем
 cp "$T/profiles/p1.yaml" "$T/profiles/p2.yaml"
-sed -i "s/'Blanc_NL_AMS_1', //" "$T/profiles/p2.yaml"
+sed "s/'Blanc_NL_AMS_1', //" "$T/profiles/p2.yaml" > "$T/p2.new"
+mv "$T/p2.new" "$T/profiles/p2.yaml"
 cp "$T/profiles/p2.yaml" "$T/p2.before"
 rm "$MAIN_CONFIG"; ln -s profiles/p2.yaml "$MAIN_CONFIG"
 : > "$RUN_LOG"; wg_publish_fast 1000000
@@ -239,6 +249,7 @@ grep -q '9099' "$E/curl.log" && fail "второе ядро опрашивало
 [ "$(grep -c '127.0.0.1:7896' "$E/curl.log")" = 1 ] || fail "замер скорости WG не через вход 7896 основного ядра"
 grep -q -- '-X PUT.*MST' "$E/curl.log" 2>/dev/null || grep -q 'PUT' "$E/curl.log" || fail "служебная группа не переключалась"
 [ ! -e "$E/fast.yaml" ] || fail "WG-нода записана в fast.yaml"
+grep -qF "proxies: ['Blanc_NL_AMS_1']" "$E/config.yaml" || fail "WG ниже порога не добрана до общего минимума"
 grep -q 'WG: 8.0 Мбит/с  Blanc_NL_AMS_1' "$E/speedtest.log" || fail "нет строки о WG-результате в логе"
 grep -q '  8.0 Мбит/с  Blanc_NL_AMS_1' "$E/out.txt" || fail "живой вывод не в Мбит/с"
 grep -q 'Канал: 80.0 Мбит/с' "$E/speedtest.log" || fail "Канал не в Мбит/с"
