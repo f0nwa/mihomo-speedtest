@@ -1,7 +1,7 @@
 // Раздел «Статистика» (/stats): KPI, кнопка запуска, живой прогресс,
 // лента доступности по нодам и таблица доступности нод.
 
-import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, fmtSigned, setLoading, showError, showNotYetMoved, statusLabel, viewGuard } from './app-core.js';
+import { app, bytesToMbit, card, clearApp, el, fetchJson, fmtMbit, setLoading, showError, showNotYetMoved, statusLabel, viewGuard } from './app-core.js';
 import { refreshUpdatesBadge } from './app-updates.js';
 
 // ----- строка состояния прогона с кнопкой "Запустить сейчас" -----
@@ -531,9 +531,9 @@ var STABILITY_COLUMNS = [
   { title: 'Статус', key: 'status', dir: 1, get: function (r) { return r.status in STATUS_ORDER ? STATUS_ORDER[r.status] : 3; } },
   { title: 'Последний раз жива', key: 'last_seen', dir: -1, get: function (r) { return r.last_seen || null; } },
   { title: 'Uptime', key: 'uptime', dir: -1, get: function (r) { return r.uptime_pct; } },
+  { title: 'Пинг, мс', key: 'delay', dir: 1, get: function (r) { return r.avg_delay_ms; } },
   { title: 'Сейчас, Мбит/с', key: 'last', dir: -1, get: function (r) { return r.last_speed_bytes; } },
-  { title: 'Средняя, Мбит/с', key: 'avg', dir: -1, get: function (r) { return r.avg_speed_bytes; } },
-  { title: 'Δ, Мбит/с', key: 'delta', dir: -1, get: function (r) { return r.delta_bytes; } }
+  { title: 'Средняя, Мбит/с', key: 'avg', dir: -1, get: function (r) { return r.avg_speed_bytes; } }
 ];
 var stabilitySort = { key: null, dir: 1 };
 
@@ -595,9 +595,9 @@ function buildStabilityTable(rows) {
       tr.appendChild(el('td', st.cls, st.text));
       tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
       tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
+      tr.appendChild(el('td', null, r.avg_delay_ms == null ? '-' : String(r.avg_delay_ms)));
       tr.appendChild(el('td', null, fmtMbit(r.last_speed_bytes)));
       tr.appendChild(el('td', null, fmtMbit(r.avg_speed_bytes)));
-      tr.appendChild(el('td', null, fmtSigned(r.delta_bytes)));
       tbody.appendChild(tr);
     });
   }

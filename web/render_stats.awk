@@ -33,9 +33,10 @@
 #   (hsl), чтобы палитра не заканчивалась.
 # stability: путь к node_stability.tsv - доступность ВСЕХ нод пула (не
 #   только победителей): статус на последнем прогоне, uptime и история за
-#   окно (по групповому delay-check, весь пул каждый прогон), последняя и
-#   средняя скорость (по speed-тесту, проходят не все ноды каждый прогон -
-#   поэтому у части «живых» нод скорости может не быть). Строки
+#   окно (по групповому delay-check, весь пул каждый прогон), средняя
+#   задержка delay-check, последняя и средняя скорость (по speed-тесту,
+#   проходят не все ноды каждый прогон - у дальних «живых» нод скорости
+#   может не быть вовсе, тогда обе скорости null). Строки
 #   отсортированы по убыванию uptime за окно.
 
 # join_series_values(p_idx, p_speed, pn, run_n) - плотный JSON-массив
@@ -177,7 +178,7 @@ function json_node_history(path, run_n,
 # "window".
 function json_node_stability(path,
     line, f, nf, cnt, i, j, k, best, tmp, order,
-    name, win, wlen, ch, status, pctv, has_avg, avg_speed, delta,
+    name, win, wlen, ch, status, pctv, has_avg, avg_speed, has_delay, avg_delay,
     alive_n, total_n, out) {
   cnt = 0
   if (path != "") {
@@ -188,6 +189,8 @@ function json_node_stability(path,
       s_name[cnt] = f[1]
       s_first[cnt] = f[2]
       s_last_seen[cnt] = f[3]
+      s_delay_sum[cnt] = f[7] + 0
+      s_delay_samples[cnt] = f[8] + 0
       s_window[cnt] = f[10]
       s_last_speed[cnt] = f[11] + 0
       s_speed_sum[cnt] = f[12] + 0
@@ -232,7 +235,10 @@ function json_node_stability(path,
     has_avg = (s_speed_samples[k] > 0)
     if (has_avg) {
       avg_speed = s_speed_sum[k] / s_speed_samples[k]
-      delta = s_last_speed[k] - avg_speed
+    }
+    has_delay = (s_delay_samples[k] > 0)
+    if (has_delay) {
+      avg_delay = int(s_delay_sum[k] / s_delay_samples[k] + 0.5)
     }
 
     out = out (i > 1 ? "," : "") "{\"name\":" json_str(name) \
@@ -241,9 +247,9 @@ function json_node_stability(path,
       ",\"status\":\"" status "\"" \
       ",\"uptime_pct\":" (pctv >= 0 ? pctv : "null") \
       ",\"window\":" json_str(win) \
+      ",\"avg_delay_ms\":" json_num_or_null(avg_delay, has_delay) \
       ",\"avg_speed_bytes\":" json_num_or_null(avg_speed, has_avg) \
-      ",\"last_speed_bytes\":" (s_last_speed[k] + 0) \
-      ",\"delta_bytes\":" json_num_or_null(delta, has_avg) "}"
+      ",\"last_speed_bytes\":" json_num_or_null(s_last_speed[k], has_avg) "}"
   }
   out = out "]"
   return out

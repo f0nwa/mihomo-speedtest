@@ -86,7 +86,7 @@ printf '1000\t2026-09-12 09:00:00\t5242880\t1310720\t30\t20\t15\t10\t8\n' > "$WO
 printf '4000\t2026-09-12 12:00:00\t6291456\t1572864\t31\t22\t16\t12\t9\n' >> "$WORK/runs.tsv"
 printf '1000\t3145728\tnode-fast\n1000\t2097152\tnode-slow\n4000\t3407872\tnode-fast\n' > "$WORK/nodes.tsv"
 printf '12.3\tМБ/с\tnode-fast\n11.9\tМБ/с\tnode-two\n' > "$WORK/last.txt"
-printf 'node-fast\t2026-09-01\tx\tx\tx\tx\tx\tx\tx\tAA\t3407872\t6553600\t2\n' > "$WORK/stability.tsv"
+printf 'node-fast\t2026-09-01\tx\tx\tx\tx\t301\t2\tx\tAA\t3407872\t6553600\t2\n' > "$WORK/stability.tsv"
 printf 'node-slow\t2026-09-02\tx\tx\tx\tx\tx\tx\tx\tAD\t0\t0\t0\n' >> "$WORK/stability.tsv"
 
 OUT=$(awk -v format=json -v last="$WORK/last.txt" -v nodes="$WORK/nodes.tsv" -v cap=8 \
@@ -131,11 +131,14 @@ check(fast["last_seen"] == "x", "node-fast.last_seen (поле f[3] node_stabili
 check(fast["status"] == "alive", "node-fast.status")
 check(fast["uptime_pct"] == 100, "node-fast.uptime_pct")
 check(fast["avg_speed_bytes"] == 3276800, "node-fast.avg_speed_bytes (6553600/2)")
-check(fast["delta_bytes"] == 131072, "node-fast.delta_bytes (3407872-3276800)")
+check(fast["last_speed_bytes"] == 3407872, "node-fast.last_speed_bytes")
+check(fast["avg_delay_ms"] == 151, "node-fast.avg_delay_ms (301/2, округление)")
+check("delta_bytes" not in fast, "delta_bytes больше не отдаётся")
 slow = st_by_name["node-slow"]
 check(slow["status"] == "down", "node-slow.status")
 check(slow["avg_speed_bytes"] is None, "node-slow.avg_speed_bytes (0 замеров -> null)")
-check(slow["delta_bytes"] is None, "node-slow.delta_bytes")
+check(slow["last_speed_bytes"] is None, "node-slow.last_speed_bytes (ни разу не замерялась -> null, не 0)")
+check(slow["avg_delay_ms"] is None, "node-slow.avg_delay_ms (нет данных delay-check -> null)")
 
 print("python checks OK")
 PYCHECK
