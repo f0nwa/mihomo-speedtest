@@ -58,10 +58,10 @@ MAIN_API_OK=0
 SIZE=10485760         # сколько качать с каждой ноды, байт. Меньше 10 МБ занижает: на 3 МБ
                       # треть времени уходит на TTFB и та же нода показывает 4.5 вместо 12 МБ/с
 DL_TIMEOUT=15         # потолок на одну закачку, секунд
-MIN_SPEED=1048576     # порог отбора, байт/с (1 МБ/с для текущего канала)
+MIN_SPEED=1048576     # запасной порог для досрочной остановки, байт/с
 MIN_RATIO=0.25         # динамический порог = доля от прямого канала
 MIN_FLOOR=524288       # абсолютный минимум порога, байт/с (0.5 МиБ/с)
-TOPN=15               # сколько нод класть в fast.yaml
+TOPN=15               # сколько нод держать в быстром пуле суммарно, включая WG
 ENOUGH=20             # набрали столько выше порога - дальше не меряем
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод во всём быстром пуле, включая WG - см. select_winners()
@@ -286,10 +286,13 @@ select_candidates() {
 }
 
 select_winners() {
-  # $6 (min_winners) - минимум для всего быстрого пула. Если прошедших
-  # порог меньше, добираем из остальных РАБОЧИХ (speed > 0) по скорости.
+  # $5 (top) - целевой максимум всего быстрого пула. Свободные места
+  # заполняются рабочими нодами (speed > 0) по убыванию скорости, даже
+  # когда нод выше порога меньше top.
+  # $6 (min_winners) - минимум, для которого можно добрать нестабильные
+  # обычные ноды, если стабильных не хватило.
   # $8/$9 - проверенные WG и файл их победителей. WG идут в группу
-  # прямыми ссылками, а $5 (top) ограничивает только обычные ноды.
+  # прямыми ссылками, обычные ноды - в fast.yaml.
   # $7 (stabfile, опционально) - node_stability.tsv. Нода, у которой за
   # последние STABLE_LOOKBACK прогонов не меньше STABLE_MIN_RUNS проверок
   # (A/D) и доля живых ниже STABLE_MIN_UPTIME %, считается нестабильной:
@@ -315,7 +318,7 @@ select_winners() {
     function emit(sp, idx, name,   wireguard) {
       wireguard = (idx in wg)
       if (wireguard) print name > wgout
-      else { print sp, idx; regular++ }
+      else print sp, idx
       if (sp < minimum) below++
       seen[name] = 1
       count++
@@ -352,7 +355,7 @@ select_winners() {
     }
     {
       name = names[$2]
-      if (name == "" || seen[name]) next
+      if (name == "" || seen[name] || $1 <= 0) next
       wireguard = ($2 in wg)
       if (!wireguard && name in unstable) {
         if ($1 > 0 && !useen[name]) {
@@ -361,29 +364,26 @@ select_winners() {
         }
         next
       }
-      if ($1 >= minimum && (wireguard || regular < top)) {
+      if ($1 >= minimum && count < top) {
         emit($1, $2, name)
       } else if ($1 > 0) {
-        # кандидат на добор ниже порога - вход уже отсортирован по
-        # убыванию скорости (sort -rn), поэтому backlog тоже в порядке
-        # убывания - на случай, если прошедших порог не хватит на
-        # min_winners
+        # Вход отсортирован по убыванию скорости, поэтому backlog тоже
+        # идёт от быстрых к медленным для заполнения до top.
         backlog_sp[bn] = $1
         backlog_idx[bn] = $2
         backlog_name[bn] = name
-        backlog_wg[bn] = wireguard
         bn++
       }
     }
     END {
-      for (i = 0; i < bn && count < min_winners; i++) {
-        if (seen[backlog_name[i]] || (!backlog_wg[i] && regular >= top)) continue
+      for (i = 0; i < bn && count < top; i++) {
+        if (seen[backlog_name[i]]) continue
         emit(backlog_sp[i], backlog_idx[i], backlog_name[i])
       }
       # нестабильные - самый последний резерв, тоже по убыванию скорости
       printf "" > exclfile
       for (i = 0; i < un; i++) {
-        if (count < min_winners && regular < top) {
+        if (count < min_winners && count < top) {
           emit(u_sp[i], u_idx[i], u_name[i])
         } else {
           print unstable[u_name[i]] "% " u_name[i] > exclfile
@@ -839,7 +839,8 @@ wg_delays() {
 
 # WG-победители входят в быстрый пул ссылками на исходные ноды.
 # Конфиг перечитывается только при изменении состава; копий туннелей нет.
-# Незамеренные ноды сохраняют прежнее участие, как и до удаления FAST-WG.
+# При общем отборе состав ссылок равен победителям; старый вызов без
+# списка победителей сохраняет незамеренные ноды для совместимости.
 wg_publish_fast() {
   [ -s "$WORK/wg_ok.txt" ] || return 0
   if ! wg_publish_config "$1" "${2:-}"; then
@@ -927,7 +928,9 @@ wg_publish_config() (
   if [ -n "$2" ]; then
     cp "$2" "$WORK/wg-winners" || exit 1
   fi
-  awk -v WINNERS="$WORK/wg-winners" -v TESTED="$WORK/wg-tested" \
+  tested_file=$WORK/wg-tested
+  [ -z "$2" ] || tested_file=
+  awk -v WINNERS="$WORK/wg-winners" -v TESTED="$tested_file" \
     -f "$FAST_WG_AWK" "$WORK/wg-config.old" > "$WORK/wg-config.new" || exit 1
   cmp -s "$WORK/wg-config.old" "$WORK/wg-config.new" && exit 0
   if ! "$BIN" -t -d "$MIHOMO_DIR" -f "$WORK/wg-config.new" > "$WORK/wg-check.log" 2>&1; then
@@ -1248,7 +1251,7 @@ WG_WIN=$(wc -l < "$WORK/win-wg.txt")
 POOL_WIN=$((WIN + WG_WIN))
 BELOW_MIN=$(cat "$WORK/win.txt.below")
 below_note=""
-[ "$BELOW_MIN" -eq 0 ] || below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - добор до минимума $MIN_WINNERS)"
+[ "$BELOW_MIN" -eq 0 ] || below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - заполнено до лимита $TOPN)"
 if [ "$WIN" -lt 1 ]; then
   if [ "$WG_WIN" -gt 0 ]; then
     say "WG: Отобрано $WG_WIN нод для быстрого пула (обычных победителей нет, прежний fast.yaml сохранён)$below_note"

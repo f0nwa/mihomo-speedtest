@@ -216,10 +216,8 @@ grep -q 'n0001' "$TEST_ROOT/win.txt" || fail "fastest duplicate was lost"
 grep -q 'n0003' "$TEST_ROOT/win.txt" || fail "unique node B was lost"
 grep -q 'n0004' "$TEST_ROOT/win.txt" || fail "unique node C was lost"
 
-# --- MIN_WINNERS: если порог прошло меньше минимума, добираем из
-#     остальных РАБОЧИХ (SP>0) нод по убыванию скорости - см.
-#     "важное дополнение" от 2026-09-08: пустая/недобранная "самая
-#     быстрая" группа хуже, чем нода медленнее порога, но живая.
+# --- TOPN: свободные места заполняем РАБОЧИМИ (SP>0) нодами по скорости,
+#     даже если порог никто не прошёл.
 printf '%s\n' \
   '100 n0001' \
   '90 n0002' \
@@ -227,18 +225,18 @@ printf '%s\n' \
   '70 n0004' \
   '0 n0005' > "$TEST_ROOT/results-mw.txt"
 printf 'n0001\tA\nn0002\tB\nn0003\tC\nn0004\tD\nn0005\tE\n' > "$TEST_ROOT/map-mw.txt"
-# порог 1000 - никто не проходит, но 4 ноды рабочие (SP>0) - добор до 3-х
+# порог 1000 - никто не проходит, но 4 ноды рабочие (SP>0)
 select_winners "$TEST_ROOT/results-mw.txt" "$TEST_ROOT/map-mw.txt" "$TEST_ROOT/win-mw1.txt" 1000 20 3
-assert_eq "$(wc -l < "$TEST_ROOT/win-mw1.txt" | tr -d ' ')" 3
+assert_eq "$(wc -l < "$TEST_ROOT/win-mw1.txt" | tr -d ' ')" 4
 grep -q 'n0001' "$TEST_ROOT/win-mw1.txt" || fail "MIN_WINNERS: самая быстрая рабочая нода потеряна при доборе"
 grep -q 'n0002' "$TEST_ROOT/win-mw1.txt" || fail "MIN_WINNERS: вторая по скорости рабочая нода потеряна при доборе"
 grep -q 'n0003' "$TEST_ROOT/win-mw1.txt" || fail "MIN_WINNERS: третья по скорости рабочая нода потеряна при доборе"
-grep -q 'n0004' "$TEST_ROOT/win-mw1.txt" && fail "MIN_WINNERS: добрано больше, чем требовал минимум"
+grep -q 'n0004' "$TEST_ROOT/win-mw1.txt" || fail "TOPN: четвёртая рабочая нода потеряна"
 grep -q 'n0005' "$TEST_ROOT/win-mw1.txt" && fail "MIN_WINNERS: полностью нерабочая (SP=0) нода не должна попадать в добор"
 
-# Минимум относится ко всему быстрому пулу: WG входит прямой ссылкой,
-# обычные ноды остаются в fast.yaml. Среди результатов ниже порога
-# выбираются три самых быстрых независимо от транспорта.
+# TOPN ограничивает весь быстрый пул: WG входит прямой ссылкой,
+# обычные ноды остаются в fast.yaml. Свободные места заполняются
+# самыми быстрыми рабочими результатами даже ниже порога.
 printf '%s\n' \
   '968 n0001' \
   '956 n0002' \
@@ -248,16 +246,32 @@ printf '%s\n' \
 printf 'n0001\tWG fast\nn0002\tRegular 1\nn0003\tRegular 2\nn0004\tRegular 3\nn0005\tWG slow\n' > "$TEST_ROOT/map-mixed.txt"
 printf 'n0001\tWG fast\nn0005\tWG slow\n' > "$TEST_ROOT/wg-mixed.txt"
 select_winners "$TEST_ROOT/results-mixed.txt" "$TEST_ROOT/map-mixed.txt" \
-  "$TEST_ROOT/win-mixed.txt" 1053 15 3 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed.txt"
-assert_eq "$(cat "$TEST_ROOT/win-mixed.txt")" "$(printf '956 n0002\n954 n0003')"
+  "$TEST_ROOT/win-mixed.txt" 1053 4 3 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed.txt"
+assert_eq "$(cat "$TEST_ROOT/win-mixed.txt")" "$(printf '956 n0002\n954 n0003\n927 n0004')"
 assert_eq "$(cat "$TEST_ROOT/win-wg-mixed.txt")" 'WG fast'
 
-# Уже прошедшие порог WG учитываются в минимуме; лишние медленные
-# обычные ноды не добираются.
+# Когда порог прошли больше TOPN нод, WG занимают место в общем лимите.
+printf '1200 n0002\n1190 n0001\n1180 n0003\n1170 n0005\n' > "$TEST_ROOT/results-mixed-cap.txt"
+select_winners "$TEST_ROOT/results-mixed-cap.txt" "$TEST_ROOT/map-mixed.txt" \
+  "$TEST_ROOT/win-mixed-cap.txt" 1000 3 1 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed-cap.txt"
+assert_eq "$(cat "$TEST_ROOT/win-mixed-cap.txt")" "$(printf '1200 n0002\n1180 n0003')"
+assert_eq "$(cat "$TEST_ROOT/win-wg-mixed-cap.txt")" 'WG fast'
+
+# Порог прошли две обычные ноды, третья обычная закрыла минимум.
+# WG всё равно занимает свободные места до общего TOPN.
+printf '1343 n0001\n1162 n0002\n901 n0003\n830 n0004\n812 n0005\n612 n0006\n' > "$TEST_ROOT/results-user.txt"
+printf 'n0001\tNL\nn0002\tDE\nn0003\tSE\nn0004\tWG FR\nn0005\tWG NO\nn0006\tHysteria2\n' > "$TEST_ROOT/map-user.txt"
+printf 'n0004\tWG FR\nn0005\tWG NO\n' > "$TEST_ROOT/wg-user.txt"
+select_winners "$TEST_ROOT/results-user.txt" "$TEST_ROOT/map-user.txt" \
+  "$TEST_ROOT/win-user.txt" 1053 5 3 "" "$TEST_ROOT/wg-user.txt" "$TEST_ROOT/win-wg-user.txt"
+assert_eq "$(cat "$TEST_ROOT/win-user.txt")" "$(printf '1343 n0001\n1162 n0002\n901 n0003')"
+assert_eq "$(cat "$TEST_ROOT/win-wg-user.txt")" "$(printf 'WG FR\nWG NO')"
+
+# Уже прошедшие порог WG и обычные ноды занимают места в общем лимите.
 printf '1200 n0002\n1190 n0001\n960 n0005\n950 n0003\n' > "$TEST_ROOT/results-mixed-high.txt"
 select_winners "$TEST_ROOT/results-mixed-high.txt" "$TEST_ROOT/map-mixed.txt" \
   "$TEST_ROOT/win-mixed-high.txt" 1000 15 3 "" "$TEST_ROOT/wg-mixed.txt" "$TEST_ROOT/win-wg-mixed-high.txt"
-assert_eq "$(cat "$TEST_ROOT/win-mixed-high.txt")" '1200 n0002'
+assert_eq "$(cat "$TEST_ROOT/win-mixed-high.txt")" "$(printf '1200 n0002\n950 n0003')"
 assert_eq "$(cat "$TEST_ROOT/win-wg-mixed-high.txt")" "$(printf 'WG fast\nWG slow')"
 
 # частично прошли порог (только n0001, т.к. 290 < 295) + добор с дедупом

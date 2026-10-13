@@ -169,6 +169,13 @@ printf 'Other WG\n' > "$T/selected-wg.txt"
 wg_publish_fast 1000000 "$T/selected-wg.txt"
 grep -qF "proxies: ['Other WG']" "$MAIN_CONFIG" || fail "публикация проигнорировала общий отбор WG"
 ! grep -qF "proxies: ['Blanc_NL_AMS_1', 'Other WG']" "$MAIN_CONFIG" || fail "WG вне общего отбора попала в пул"
+# При общем лимите незамеренная WG из прежнего списка тоже не должна
+# остаться сверх TOPN: состав прямых ссылок равен результату отбора.
+printf 'Blanc_NL_AMS_1\n' > "$T/selected-wg.txt"
+wg_publish_fast 1000000 "$T/selected-wg.txt"
+grep -qF "proxies: ['Blanc_NL_AMS_1']" "$MAIN_CONFIG" || fail "незамеренная WG осталась сверх общего лимита"
+printf 'Other WG\n' > "$T/selected-wg.txt"
+wg_publish_fast 1000000 "$T/selected-wg.txt"
 
 # config.yaml - ссылка на профиль (XKeen UI): правится цель, ссылка остаётся
 mkdir -p "$T/profiles"
