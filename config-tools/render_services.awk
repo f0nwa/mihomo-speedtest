@@ -48,6 +48,8 @@
 #   ownscope<TAB>all                     свои ноды (блок proxies:) попадают не
 #                                        только в базовые группы, но и во все
 #                                        сервисные: в список якоря select-default
+#                                        (и в свой proxies: [...] сервиса, если
+#                                        он перебивает якорь, как у CDN)
 #                                        добавляется служебный токен __OWN_NODES__,
 #                                        который migrate_config.awk заменяет
 #                                        именами своих нод (или убирает, если
@@ -335,6 +337,23 @@ function read_user_rules(  rc) {
   if (rc < 0) err("не удалось прочитать " user_rules_file)
   close(user_rules_file)
 }
+# Доп. ключи сервиса. Свой "proxies: [...]" (например, у CDN с PASS) целиком
+# перебивает список якоря select-default, поэтому то, что делается с якорем
+# для всех сервисных групп (bfirst * и ownscope), повторяется и здесь -
+# иначе такой сервис остаётся без своих нод и со старым порядком.
+function svc_keys(id,  n, a, i, l, r, res) {
+  if (!ownscope && !("*" in bfirst)) return svc_gkeys[id]
+  n = split(svc_gkeys[id], a, "\n"); res = ""
+  for (i = 1; i < n; i++) {
+    l = a[i]
+    if (l ~ /^    proxies: \[/) {
+      if ("*" in bfirst) { r = reorder(l, bfirst["*"]); if (r != "") l = r }
+      if (ownscope) l = add_own(l)
+    }
+    res = res l "\n"
+  }
+  return res
+}
 function gen_groups(  out, i, j, sid, id, cnt) {
   out = ""
   for (i = 1; i <= nsec; i++) {
@@ -348,7 +367,7 @@ function gen_groups(  out, i, j, sid, id, cnt) {
       if (svc_sec[id] != sid || (id in deleted)) continue
       out = out "  - name: " yname(svc_name[id]) "\n    <<: *select-default\n"
       if (id in svc_icon) out = out "    icon: " svc_icon[id] "\n"
-      out = out svc_gkeys[id] "\n"
+      out = out svc_keys(id) "\n"
     }
   }
   return out

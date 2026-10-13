@@ -308,6 +308,19 @@ OB=$(renderb) || fail "ownscope+bfirst: ошибка сборки"
 assert_contains "proxies: ['⚙️Manual', DIRECT, 'Заблок. сервисы', __OWN_NODES__] }" "$OB" "ownscope вместе с bfirst *"
 printf '' > "$WORK/o.tsv"
 assert_not_contains "__OWN_NODES__" "$(renderb)" "без ownscope токена нет"
+# test_own_scope_gkey_proxies: сервис со своим proxies: (как CDN с PASS) перебивает
+# список якоря - ownscope и bfirst * применяются и к нему
+SP="$WORK/sp.tsv"
+printf '%s\n' 'section	misc	Прочее' 'svc	cdn	CDN	misc' "gkey	cdn	proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual', PASS]" > "$SP"
+printf 'ownscope\tall\nbfirst\t*\t⚙️Manual\n' > "$WORK/o.tsv"
+OP=$(awk -v services_file="$SP" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$B") || fail "ownscope+gkey proxies: ошибка сборки"
+assert_contains "  - name: CDN${NL}    <<: *select-default${NL}    proxies: ['⚙️Manual', DIRECT, 'Заблок. сервисы', PASS, __OWN_NODES__]${NL}" "$OP" "ownscope и bfirst * в своём proxies: сервиса"
+printf '%s\n' "$OP" > "$WORK/b4.yaml"
+OP2=$(awk -v services_file="$SP" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$WORK/b4.yaml")
+[ "$OP2" = "$OP" ] || fail "ownscope+gkey proxies: повторная сборка меняет результат"
+printf '' > "$WORK/o.tsv"
+OP=$(awk -v services_file="$SP" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$B")
+assert_contains "    proxies: [DIRECT, 'Заблок. сервисы', '⚙️Manual', PASS]${NL}" "$OP" "без ownscope gkey как есть"
 for bad in 'ownscope	none' 'ownscope	all	x' 'ownscope'; do
   printf '%s\nownscope\tall\n' "$bad" | head -n 1 > "$WORK/o.tsv"
   if renderb >/dev/null 2>&1; then fail "ownscope: '$bad' должен быть ошибкой"; fi

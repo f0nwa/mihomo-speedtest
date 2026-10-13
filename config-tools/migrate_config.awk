@@ -118,15 +118,19 @@ function static_names(text, side,a,n,j,s,value) {
     if (s ~ /^  - name:/) {
       value=s;sub(/^  - name:[ ]*/,"",value);value=trim(value)
       if (value=="" || value ~ /[|\r\n]/) bad("proxies: пустое имя ноды или в имени есть символ |")
-      if (side==1) { staticnames=staticnames sep_next(nstatic++) value }
+      if (side==1) { staticnames=staticnames sep_next(nstatic++) value; static_set[unquote(value)]=1 }
       else template_names[value]=1
     } else if (s ~ /^  - /) bad("proxies: у каждой ноды первым ключом должен идти name (\"  - name: ...\")")
   }
 }
 # Разбивает только однострочные flow-списки ссылок, сохраняя кавычки и запятые.
-function remap_refs(s, start,end,body,j,ch,quote,escape,token,count,result,inserted) {
+function remap_refs(s, start,end,body,j,ch,quote,escape,token,count,result,inserted,own) {
   if (s !~ /proxies:[ ]*\[/) return s
   start=index(s,"[");end=0;quote="";escape=0;token="";count=0
+  # С __OWN_NODES__ свои ноды вставляются все разом; если какие-то из них уже
+  # перечислены явно (свой proxies: группы после импорта собранного конфига),
+  # они пропускаются - иначе в списке будут дубли.
+  own=index(s,"__OWN_NODES__")
   for (j=start+1;j<=length(s);j++) {
     ch=substr(s,j,1)
     if (quote!="") {
@@ -144,7 +148,7 @@ function remap_refs(s, start,end,body,j,ch,quote,escape,token,count,result,inser
       # ноды во всех сервисных группах): заменяется так же, как примерная нода.
       if (token in template_names || token=="__OWN_NODES__") {
         if (!inserted) {if (nstatic) result=result sep_next(count++) staticnames;inserted=1}
-      } else if (token!="") result=result sep_next(count++) token
+      } else if (token!="" && !(own && (unquote(token) in static_set))) result=result sep_next(count++) token
       token=""
       if (ch=="]") {end=j;break}
     } else token=token ch

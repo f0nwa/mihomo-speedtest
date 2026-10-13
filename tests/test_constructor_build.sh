@@ -132,6 +132,9 @@ mkdir "$WORK/os"
 printf '  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK/os/proxies.yaml"
 printf 'https://sub.example/T\t\tprov1\n' > "$WORK/os/subscriptions.tsv"
 anchor_line() { sed -n 's/^  select-default: &select-default \(.*\)$/\1/p' "$1"; }
+# CDN перебивает proxies: якоря своим списком (gkey с PASS) - ownscope должен
+# дойти и до него, иначе в CDN своих нод нет
+cdn_line() { sed -n '/^  - name: CDN$/,/^$/s/^    proxies: \(.*\)$/\1/p' "$1"; }
 : > "$WORK/os/services.tsv"
 sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os0.yaml" --report "$WORK/rep-os0" > "$WORK/log-os0" 2>&1 || fail "ownscope выключен: $(cat "$WORK/log-os0")"
 anchor_line "$WORK/out-os0.yaml" | grep -q 'Own1' && fail "без ownscope своя нода не должна быть в якоре сервисных групп"
@@ -140,6 +143,9 @@ printf 'ownscope\tall\n' > "$WORK/os/services.tsv"
 sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os1.yaml" --report "$WORK/rep-os1" > "$WORK/log-os1" 2>&1 || fail "ownscope all: $(cat "$WORK/log-os1")"
 anchor_line "$WORK/out-os1.yaml" | grep -q "Own1" || fail "ownscope all: своя нода не попала в якорь сервисных групп: $(anchor_line "$WORK/out-os1.yaml")"
 grep -q '__OWN_NODES__' "$WORK/out-os1.yaml" && fail "служебный токен остался в конфиге"
+cdn_line "$WORK/out-os0.yaml" | grep -q 'Own1' && fail "без ownscope своей ноды в CDN быть не должно"
+cdn_line "$WORK/out-os1.yaml" | grep -q 'Own1' || fail "ownscope all: своя нода не попала в CDN (свой proxies:): $(cdn_line "$WORK/out-os1.yaml")"
+cdn_line "$WORK/out-os1.yaml" | grep -q 'PASS' || fail "ownscope all: PASS пропал из CDN"
 # круг: собранный конфиг при импорте снова даёт ownscope all
 mkdir "$WORK/os-rt"
 awk -v defaults="$ROOT/config-tools/services.default.tsv" -v template="$ROOT/config-tools/config.example.yaml" \
@@ -150,6 +156,22 @@ grep -qx 'ownscope	all' "$WORK/os-rt/services.tsv" || fail "круг: ownscope a
 sh "$SCRIPT" --state "$WORK/os" --source "$WORK/source.yaml" --output "$WORK/out-os2.yaml" --report "$WORK/rep-os2" > "$WORK/log-os2" 2>&1 || fail "ownscope all без нод: $(cat "$WORK/log-os2")"
 grep -q '__OWN_NODES__' "$WORK/out-os2.yaml" && fail "без нод служебный токен остался в конфиге"
 [ "$(anchor_line "$WORK/out-os2.yaml")" = "$(anchor_line "$WORK/out-os0.yaml")" ] || fail "без нод якорь должен быть как без ownscope"
+[ "$(cdn_line "$WORK/out-os2.yaml")" = "$(cdn_line "$WORK/out-os0.yaml")" ] || fail "без нод CDN должен быть как без ownscope"
+
+# test_build_own_scope_custom_proxies: своя группа со своим proxies: - свои ноды
+# добавляются и туда, а круг сборка -> импорт -> сборка не даёт дублей
+mkdir "$WORK/oc"
+cp "$WORK/os/subscriptions.tsv" "$WORK/oc/"
+printf '  - name: Own1\n    type: ss\n    server: 5.6.7.8\n    port: 2\n    cipher: aes-128-gcm\n    password: q\n' > "$WORK/oc/proxies.yaml"
+printf 'ownscope\tall\nsvc\tmine\tMine\tother\ngkey\tmine\tproxies: [DIRECT, PASS]\n' > "$WORK/oc/services.tsv"
+mine_line() { sed -n '/^  - name: Mine$/,/^$/s/^    proxies: \(.*\)$/\1/p' "$1"; }
+sh "$SCRIPT" --state "$WORK/oc" --source "$WORK/source.yaml" --output "$WORK/out-oc1.yaml" --report "$WORK/rep-oc1" > "$WORK/log-oc1" 2>&1 || fail "своя группа с proxies: $(cat "$WORK/log-oc1")"
+[ "$(mine_line "$WORK/out-oc1.yaml")" = "[DIRECT, PASS, Own1]" ] || fail "своя группа с proxies: без своей ноды: $(mine_line "$WORK/out-oc1.yaml")"
+mkdir "$WORK/oc-rt"
+awk -v defaults="$ROOT/config-tools/services.default.tsv" -v template="$ROOT/config-tools/config.example.yaml" \
+    -v out_dir="$WORK/oc-rt" -v report="$WORK/oc-rt.report" -f "$ROOT/config-tools/config_to_state.awk" "$WORK/out-oc1.yaml" 2>/dev/null || fail "импорт с своей группой"
+sh "$SCRIPT" --state "$WORK/oc-rt" --source "$WORK/out-oc1.yaml" --output "$WORK/out-oc2.yaml" --report "$WORK/rep-oc2" > "$WORK/log-oc2" 2>&1 || fail "повторная сборка: $(cat "$WORK/log-oc2")"
+[ "$(mine_line "$WORK/out-oc2.yaml")" = "[DIRECT, PASS, Own1]" ] || fail "круг: дубли своей ноды: $(mine_line "$WORK/out-oc2.yaml")"
 
 [ "$FAILED" = 0 ] && echo "OK test_constructor_build"
 exit "$FAILED"
