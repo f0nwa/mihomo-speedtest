@@ -24,15 +24,18 @@ fi
 # test_same_content_as_before: без строк-комментариев и пустых строк
 strip() { grep -v '^[[:space:]]*#' "$1" | grep -v '^[[:space:]]*$'; }
 strip "$FIXTURE" > "$WORK/before.txt"
-# Историческая фикстура не содержит новый вариант выбора у сервисов и CDN.
+# Историческая фикстура не содержит новый вариант выбора у сервисов.
 sed "s/'Заблок[.] сервисы', '🚀 Авто по пингу'/'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу'/g" \
   "$WORK/before.txt" > "$WORK/before-with-fallback.txt"
+# CDN теперь наследует список якоря без собственного proxies: с PASS.
+grep -v -F "    proxies: [DIRECT, 'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]" \
+  "$WORK/before-with-fallback.txt" > "$WORK/before-current.txt"
 # правила с пометкой fresh добавлены после фикстуры - в сравнении их нет
 awk -F'\t' '$1 == "fresh" { print "  - " $3 }' "$TOOLS/services.default.tsv" > "$WORK/fresh.txt"
 strip "$TEMPLATE" | grep -v -x -F -f "$WORK/fresh.txt" > "$WORK/after.txt" || true
-if ! cmp -s "$WORK/before-with-fallback.txt" "$WORK/after.txt"; then
+if ! cmp -s "$WORK/before-current.txt" "$WORK/after.txt"; then
   fail "содержимое шаблона изменилось относительно фикстуры:"
-  diff "$WORK/before-with-fallback.txt" "$WORK/after.txt" | head -20 >&2 || true
+  diff "$WORK/before-current.txt" "$WORK/after.txt" | head -20 >&2 || true
 fi
 
 MARKERS="SERVICE_GROUPS:BEGIN SERVICE_GROUPS:END SERVICE_PROVIDERS:BEGIN SERVICE_PROVIDERS:END SERVICE_RULES:BEGIN SERVICE_RULES:END"

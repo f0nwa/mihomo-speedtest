@@ -265,7 +265,6 @@ proxy-groups:
   - name: CDN
     <<: *select-default
     icon: https://www.svgrepo.com/show/396567/globe-with-meridians.svg
-    proxies: [DIRECT, 'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]
 
   - name: Speedtest
     <<: *select-default

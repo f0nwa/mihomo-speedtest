@@ -54,7 +54,6 @@ svc	intel	intel	games
 icon	intel	https://www.svgrepo.com/show/349412/intel.svg
 svc	cdn	CDN	infra
 icon	cdn	https://www.svgrepo.com/show/396567/globe-with-meridians.svg
-gkey	cdn	proxies: [DIRECT, 'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]
 svc	speedtest	Speedtest	infra
 icon	speedtest	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png
 gkey	speedtest	include-all: true

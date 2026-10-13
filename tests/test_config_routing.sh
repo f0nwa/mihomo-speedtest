@@ -53,6 +53,7 @@ File.foreach(ARGV.fetch(1)) do |line|
   name = fields.fetch(2)
   abort "service fallback reference #{name}" unless groups.fetch(name).fetch("proxies").include?(outer_name)
 end
+abort "CDN differs from shared service options" unless groups.fetch("CDN").fetch("proxies") == groups.fetch("YouTube").fetch("proxies")
 abort "legacy outer name" if groups.key?("⚡ Самые быстрые")
 groups.each_value do |g|
   next if g["name"] == outer_name
