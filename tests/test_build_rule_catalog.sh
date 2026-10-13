@@ -43,11 +43,23 @@ printf 'old\n' > "$WORK/out.tsv"
 CATALOG_FIXTURES=$FIX sh "$SCRIPT" "$WORK/out.tsv" 2>/dev/null || fail "запись в файл"
 grep -q '^netflix' "$WORK/out.tsv" || fail "файл не записан"
 printf 'old\n' > "$WORK/out.tsv"
-mkdir "$WORK/trunc"; cp "$FIX"/*.json "$WORK/trunc/"
-sed 's/"sha": "fixture"/"sha": "fixture", "truncated": true/' "$FIX/metacubex-tree.json" > "$WORK/trunc/metacubex-tree.json"
-rc=0; CATALOG_FIXTURES=$WORK/trunc sh "$SCRIPT" "$WORK/out.tsv" 2>/dev/null || rc=$?
-[ "$rc" != 0 ] || fail "усечённое дерево MetaCubeX должно давать ошибку"
+rc=0; CATALOG_FIXTURES=$FIX CATALOG_META_REPO=$WORK/no-such-repo sh "$SCRIPT" "$WORK/out.tsv" 2>/dev/null || rc=$?
+[ "$rc" != 0 ] || fail "недоступный репозиторий MetaCubeX должен давать ошибку"
 [ "$(cat "$WORK/out.tsv")" = old ] || fail "при ошибке файл каталога испорчен"
+
+# MetaCubeX через git (как в настоящей сборке): список файлов ветки meta,
+# без вариантов с @ и не-.mrs; zxc-rv и itdog - из фикстур.
+G=$WORK/meta-repo
+git init -q -b meta "$G"
+mkdir -p "$G/geo/geosite" "$G/geo/geoip" "$G/asn"
+for f in geo/geosite/zzgit.mrs geo/geosite/zzgit.list geo/geosite/zzgit@cn.mrs geo/geoip/zzgitip.mrs asn/AS1.mrs; do : > "$G/$f"; done
+git -C "$G" add -A && git -C "$G" -c user.name=t -c user.email=t@t commit -q -m t
+CATALOG_FIXTURES=$FIX CATALOG_META_REPO=$G sh "$SCRIPT" > "$WORK/git.tsv" 2>"$WORK/err" || fail "сборка через git: $(cat "$WORK/err")"
+grep -q "^zzgit${T}domain${T}metacubex${T}https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zzgit.mrs$T" "$WORK/git.tsv" || fail "git: нет zzgit domain"
+grep -q "^zzgitip${T}ipcidr${T}metacubex$T" "$WORK/git.tsv" || fail "git: нет zzgitip ipcidr"
+grep -qE '^(zzgit@cn|AS1)' "$WORK/git.tsv" && fail "git: лишние файлы в каталоге"
+grep -q "^netflix$T" "$WORK/git.tsv" && fail "git: MetaCubeX взят из фикстуры, а не из репозитория"
+grep -q "^itdog-russia-inside$T" "$WORK/git.tsv" || fail "git: itdog из фикстуры потерян"
 # адреса совпадающих со встроенными наборов - те же, что в шаблоне
 awk -F'\t' 'FNR==NR && $1=="prov" {split($3,a,":"); m=$3; sub(/.*url: "/,"",m); sub(/".*/,"",m); u[a[1]]=m; next}
   FNR!=NR && !/^#/ && (($1"@"$2) in u) && u[$1"@"$2] != $4 {print $1"@"$2; bad=1} END {exit bad}' \

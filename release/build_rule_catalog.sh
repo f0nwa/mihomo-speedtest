@@ -1,7 +1,8 @@
 #!/bin/sh
 # build_rule_catalog.sh - собирает каталог наборов правил (.mrs) для поиска
 # в конструкторе конфига (config-tools/rule-catalog.tsv). Запускается на
-# машине выпуска с сетью до api.github.com, перед выпуском релиза:
+# машине выпуска с сетью до github.com и api.github.com (нужен git),
+# перед выпуском релиза:
 #
 #   sh release/build_rule_catalog.sh config-tools/rule-catalog.tsv
 #
@@ -17,15 +18,20 @@
 #                и adlist из ad-filter (уже в шаблоне);
 #   metacubex  - дерево ветки meta MetaCubeX/meta-rules-dat:
 #                geo/geosite/*.mrs (domain), geo/geoip/*.mrs (ipcidr);
-#                варианты с @ (steam@cn и т.п.) не берутся;
+#                варианты с @ (steam@cn и т.п.) не берутся. Список файлов -
+#                через git (клон без содержимого файлов, секунды): API
+#                git/trees?recursive=1 отдаёт не больше 100 тыс. записей,
+#                а в ветке их больше - каталог вышел бы неполным;
 #   itdog      - ассеты последнего релиза itdoginfo/allow-domains
 #                (*_domain.mrs, *_ipcidr.mrs), имя с префиксом itdog-;
 #   legiz      - таблица ниже (legiz-ru/mihomo-rule-sets, README), префикс legiz-.
 # Названия - release/rule-catalog-titles.tsv (нет - само имя).
 #
-# CATALOG_FIXTURES=DIR - брать ответы API из файлов DIR/metacubex-tree.json,
-# DIR/zxc-ipcidr-release.json, DIR/itdog-release.json (тесты; начальный
-# каталог в репозитории). CATALOG_DATE - дата в шапке (по умолчанию
+# CATALOG_FIXTURES=DIR - брать ответы API из файлов DIR/metacubex-tree.json
+# (пути из "path"), DIR/zxc-ipcidr-release.json, DIR/itdog-release.json
+# (тесты). CATALOG_META_REPO=URL - список MetaCubeX брать через git из этого
+# репозитория (ветка meta) даже при CATALOG_FIXTURES (тесты, сборка без
+# доступа к API). CATALOG_DATE - дата в шапке (по умолчанию
 # сегодня; окно конструктора показывает её как «базы обновлены»). GITHUB_TOKEN - необязательный токен API.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -47,9 +53,18 @@ fetch() {
 
 API=https://api.github.com/repos
 OUT=${1:-}
-fetch metacubex-tree.json "$API/MetaCubeX/meta-rules-dat/git/trees/meta?recursive=1" > "$WORK/meta.json"
-# Большое дерево API может отдать не целиком - тогда каталог неполный.
-if grep -q '"truncated": *true' "$WORK/meta.json"; then fail "дерево MetaCubeX усечено API - каталог был бы неполным"; fi
+META_REPO=${CATALOG_META_REPO:-}
+[ -n "$META_REPO" ] || [ -n "${CATALOG_FIXTURES:-}" ] || META_REPO=https://github.com/MetaCubeX/meta-rules-dat
+if [ -n "$META_REPO" ]; then
+  # Только деревья, без содержимого файлов; ls-tree читает их локально.
+  GIT_LFS_SKIP_SMUDGE=1 git clone -q --depth 1 --filter=blob:none --no-checkout -b meta "$META_REPO" "$WORK/meta" 2>"$WORK/git.err" ||
+    fail "не удалось получить список MetaCubeX через git: $(tail -n 1 "$WORK/git.err")"
+  git -C "$WORK/meta" ls-tree -r --name-only HEAD -- geo/geosite geo/geoip > "$WORK/meta.paths" ||
+    fail "не удалось прочитать дерево MetaCubeX"
+else
+  fetch metacubex-tree.json - > "$WORK/meta.json"
+  grep -o '"path": *"[^"]*"' "$WORK/meta.json" | sed 's/^"path": *"//; s/"$//' > "$WORK/meta.paths" || true
+fi
 fetch zxc-ipcidr-release.json "$API/zxc-rv/zkeenip-rulesets/releases/latest" > "$WORK/zxc.json"
 fetch itdog-release.json "$API/itdoginfo/allow-domains/releases/latest" > "$WORK/itdog.json"
 
@@ -58,7 +73,7 @@ fetch itdog-release.json "$API/itdoginfo/allow-domains/releases/latest" > "$WORK
   printf 'adlist\tdomain\tzxc-rv\thttps://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs\n'
   grep -o '"name": *"[^"]*@ipcidr\.mrs"' "$WORK/zxc.json" | sed 's/.*"\([^"]*\)@ipcidr\.mrs"$/\1/' |
     while read -r n; do printf '%s\tipcidr\tzxc-rv\thttps://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/%s@ipcidr.mrs\n' "$n" "$n"; done
-  grep -oE '"path": *"geo/geo(site|ip)/[^"/@]*\.mrs"' "$WORK/meta.json" | sed 's/.*"\(geo\/[^"]*\)"$/\1/' |
+  grep -E '^geo/geo(site|ip)/[^/@]*\.mrs$' "$WORK/meta.paths" |
     while read -r p; do
       n=${p##*/}; n=${n%.mrs}
       case $p in geo/geosite/*) k=domain ;; *) k=ipcidr ;; esac
