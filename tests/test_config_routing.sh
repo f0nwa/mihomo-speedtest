@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CONFIG=$ROOT/config-tools/config.example.yaml
 
-ruby - "$CONFIG" <<'RUBY'
+ruby - "$CONFIG" "$ROOT/config-tools/services.default.tsv" <<'RUBY'
 require "yaml"
 
 config = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
@@ -47,6 +47,12 @@ abort "pool visibility" if pool["hidden"]
 master = groups.fetch("Заблок. сервисы")
 abort "master type" unless master["type"] == "select"
 abort "master fallback reference" unless master.fetch("proxies").include?(outer_name)
+File.foreach(ARGV.fetch(1)) do |line|
+  fields = line.chomp.split("\t")
+  next unless fields[0] == "svc"
+  name = fields.fetch(2)
+  abort "service fallback reference #{name}" unless groups.fetch(name).fetch("proxies").include?(outer_name)
+end
 abort "legacy outer name" if groups.key?("⚡ Самые быстрые")
 groups.each_value do |g|
   next if g["name"] == outer_name
