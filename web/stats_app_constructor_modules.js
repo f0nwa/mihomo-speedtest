@@ -643,12 +643,13 @@ export function createModuleCards(ctx) {
   function renderProxies() {
     clear(proxHost);
     var rows = el('div', 'xk-rows');
-    var list = mods.proxies();
+    var list = mods.proxyRows();
     list.forEach(function (p) {
-      var r = el('div', 'xk-row cx-row');
+      var r = el('div', 'xk-row cx-row' + (p.removed ? ' cx-proxy-removed' : ''));
       // Имя правится прямо в строке; «Сохранить имя» появляется, только когда
       // имя изменено (Enter - сохранить, Esc - вернуть как было).
       var nm = el('input', 'cx-name'); nm.type = 'text'; nm.value = p.name; nm.spellcheck = false;
+      nm.disabled = p.removed;
       nm.setAttribute('aria-label', 'Имя ноды ' + p.name);
       var save = button('Сохранить имя', 'small'); save.hidden = true;
       nm.addEventListener('input', function () { save.hidden = nm.value.trim() === p.name; });
@@ -659,8 +660,10 @@ export function createModuleCards(ctx) {
       save.addEventListener('click', function () { ctx.edit(function () { mods.renameProxy(p.name, nm.value); }); });
       r.appendChild(nm); r.appendChild(save);
       r.appendChild(el('span', 'geo-code', (p.type || '?') + (p.server ? ' · ' + p.server + (p.port ? ':' + p.port : '') : '')));
-      var rm = button('Убрать', 'small muted'); rm.setAttribute('aria-label', 'Убрать ' + p.name);
-      rm.addEventListener('click', function () { ctx.edit(function () { mods.removeProxy(p.name); }); });
+      if (p.removed) { r.appendChild(el('span', 'cx-proxy-removed-note', 'Убрана')); }
+      var rm = button(p.removed ? 'Вернуть' : 'Убрать', 'small muted');
+      rm.setAttribute('aria-label', (p.removed ? 'Вернуть ' : 'Убрать ') + p.name);
+      rm.addEventListener('click', function () { ctx.edit(function () { if (p.removed) { mods.restoreProxy(p.name); } else { mods.removeProxy(p.name); } }); });
       r.appendChild(rm);
       rows.appendChild(r);
     });

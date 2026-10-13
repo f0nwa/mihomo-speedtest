@@ -342,7 +342,9 @@ export function createModules(data) {
   var present = { subs: data.subscriptions != null, proxies: data.proxies != null };
 
   function subNames() { return subs.map(function (s) { return s.name; }); }
-  function proxyNames() { return proxies.map(function (p) { return p.name; }); }
+  function activeProxies() { return proxies.filter(function (p) { return !p.removed; }); }
+  function proxyNames() { return activeProxies().map(function (p) { return p.name; }); }
+  function reservedProxyNames() { return proxies.map(function (p) { return p.name; }); }
 
   var model = {
     available: function () { return present; },
@@ -370,12 +372,15 @@ export function createModules(data) {
     removeSub: function (name) { subs = subs.filter(function (s) { return s.name !== name; }); },
     // ----- свои прокси -----
     proxies: function () {
-      return proxies.map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port }; });
+      return activeProxies().map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port }; });
+    },
+    proxyRows: function () {
+      return proxies.map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port, removed: !!p.removed }; });
     },
     // Ссылка -> нода; возвращает итоговое имя (при занятом оно получает адрес
     // сервера или номер, см. uniqueProxyName).
     addProxyLink: function (link) {
-      var r = linkToProxy(link), taken = proxyNames();
+      var r = linkToProxy(link), taken = reservedProxyNames();
       var name = uniqueProxyName(r.name, r.server, taken);
       checkProxyName(name, taken);
       var p = parseProxies(r.yaml)[0];
@@ -387,7 +392,7 @@ export function createModules(data) {
     // strict - повтор имени отклоняется ("уже есть"), без переименования: так
     // добавляется импорт WireGuard-файлов, чтобы повторный импорт не плодил дубли.
     addProxyYaml: function (text, strict) {
-      var list = proxiesFromYaml(text), taken = proxyNames();
+      var list = proxiesFromYaml(text), taken = reservedProxyNames();
       list.forEach(function (p) {
         var name = strict ? p.name : uniqueProxyName(p.name, fieldOf(p, 'server'), taken);
         checkProxyName(name, taken);
@@ -400,13 +405,20 @@ export function createModules(data) {
       list.forEach(function (p) { proxies.push(p); });
       return list.map(function (p) { return p.name; });
     },
-    removeProxy: function (name) { proxies = proxies.filter(function (p) { return p.name !== name; }); },
-    renameProxy: function (name, to) {
+    removeProxy: function (name) {
       var p = proxies.filter(function (x) { return x.name === name; })[0];
+      if (p) { p.removed = true; }
+    },
+    restoreProxy: function (name) {
+      var p = proxies.filter(function (x) { return x.name === name; })[0];
+      if (p) { p.removed = false; }
+    },
+    renameProxy: function (name, to) {
+      var p = activeProxies().filter(function (x) { return x.name === name; })[0];
       if (!p) { throw new Error('Нет ноды ' + name); }
       to = String(to || '').trim();
       if (to === name) { return; }
-      checkProxyName(to, proxyNames());
+      checkProxyName(to, reservedProxyNames());
       if (!/^  - name:/.test(p.lines[0])) { throw new Error('Первым ключом ноды должен идти name'); }
       p.lines[0] = '  - name: ' + yq(to);
       p.name = to;
@@ -431,7 +443,7 @@ export function createModules(data) {
     // Что не даст применить: нет ни подписок, ни своих нод.
     problems: function () {
       var out = [];
-      if (present.subs && present.proxies && !subs.length && !proxies.length) {
+      if (present.subs && present.proxies && !subs.length && !activeProxies().length) {
         out.push('Нужна хотя бы одна подписка или своя нода');
       }
       if (filterErr) { out.push('Исключения нод: ' + filterErr); }
@@ -440,7 +452,7 @@ export function createModules(data) {
     serialize: function () {
       return {
         subscriptions: present.subs ? serializeSubs(subs) : null,
-        proxies: present.proxies ? serializeProxies(proxies) : null,
+        proxies: present.proxies ? serializeProxies(activeProxies()) : null,
         geofilter: words && !model.isDefaultWords() ? words.join('\n') + '\n' : ''
       };
     },
@@ -467,7 +479,7 @@ export function createModules(data) {
       });
       n0.forEach(function (n) { if (subNames().indexOf(n) < 0) { res.push('Убрать подписку ' + n); } });
       var pn0 = p0.map(function (p) { return p.name; });
-      proxies.forEach(function (p) {
+      activeProxies().forEach(function (p) {
         if (pn0.indexOf(p.name) < 0) { res.push('+ нода ' + p.name); }
         else {
           var old = p0.filter(function (x) { return x.name === p.name; })[0];

@@ -38,6 +38,21 @@ eq(M.parseSubs('bad line\n\nu\tua\tn\n').length, 1, 'битая строка п�
 
 // ----- свои прокси -----
 eq(m.proxies().map(p => [p.name, p.type, p.server, p.port]), [['🇩🇪 Hysteria2', 'hysteria2', 'de.example', '443']], 'список нод');
+const pendingProxies = "  - name: First\n    type: ss\n  - name: Middle\n    type: ss\n  - name: Last\n    type: ss\n";
+const pending = M.createModules({ subscriptions: '', proxies: pendingProxies, geofilter: null, geofilter_default: '' });
+pending.removeProxy('Middle');
+eq(pending.proxyRows().map(p => [p.name, p.removed]), [['First', false], ['Middle', true], ['Last', false]], 'убранная нода остаётся на своём месте');
+eq(pending.serialize().proxies, "  - name: First\n    type: ss\n  - name: Last\n    type: ss\n", 'убранная нода не попадает в проверяемый конфиг');
+eq(pending.summary({ proxies: pendingProxies, subscriptions: '', geofilter: '' }), ['Убрать ноду Middle'], 'убранная нода указана в изменениях');
+pending.restoreProxy('Middle');
+eq(pending.proxyRows().map(p => [p.name, p.removed]), [['First', false], ['Middle', false], ['Last', false]], 'возвращённая нода остаётся на своём месте');
+eq(pending.serialize().proxies, pendingProxies, 'возвращённая нода снова входит в конфиг');
+eq(pending.summary({ proxies: pendingProxies, subscriptions: '', geofilter: '' }), [], 'возврат снимает изменение');
+const lastOnly = M.createModules({ subscriptions: '', proxies: "  - name: Last\n    type: ss\n", geofilter: null, geofilter_default: '' });
+lastOnly.removeProxy('Last');
+eq(lastOnly.problems(), ['Нужна хотя бы одна подписка или своя нода'], 'последняя убранная нода не считается действующей');
+lastOnly.restoreProxy('Last');
+eq(lastOnly.problems(), [], 'возврат последней ноды снова разрешает применение');
 m.addProxyLink('hy2://p%40ss@nl.example:8443?sni=nl.example&obfs=salamander&obfs-password=ob&insecure=1&alpn=h3,h2#%F0%9F%87%B3%F0%9F%87%B1%20NL');
 let nl = m.serialize().proxies;
 eq(nl.includes("  - name: '🇳🇱 NL'\n    type: hysteria2\n    server: 'nl.example'\n    port: 8443\n    password: 'p@ss'\n    obfs: 'salamander'\n    obfs-password: 'ob'\n    sni: 'nl.example'\n    alpn: ['h3', 'h2']\n    skip-cert-verify: true\n    udp: true\n"), true, 'hy2 -> YAML');
