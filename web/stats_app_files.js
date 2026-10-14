@@ -121,7 +121,7 @@ export function renderFiles() {
   clearApp();
   fm = {
     guard: viewGuard(), cwd: null, listing: null, hidden: false, sort: 'name',
-    tree: {}, file: null, dirty: false, editor: null, uploads: [], busy: false
+    tree: {}, file: null, dirty: false, editor: null, uploads: [], busy: false, query: ''
   };
   var root = el('div', 'fm');
   root.setAttribute('data-view', 'list');
@@ -140,7 +140,41 @@ export function renderFiles() {
   openDir(start, true);
 }
 
-function setView(v) { if (fm) { fm.root.setAttribute('data-view', v); } }
+function setView(v) {
+  if (!fm) { return; }
+  fm.root.setAttribute('data-view', v);
+  refreshMore();
+}
+
+// ----- прокрутка с маркером «ниже ещё N» -----
+
+// Маркер прилипает к низу прокручиваемого блока и считает строки, которые
+// целиком или наполовину ниже видимой области. Клик прокручивает на экран.
+function moreMarker(box, rowSel) {
+  var more = el('button', 'fm-more');
+  more.type = 'button';
+  more.addEventListener('click', function () { box.scrollTop += Math.max(40, box.clientHeight - 60); });
+  function update() {
+    var bottom = box.scrollTop + box.clientHeight - more.offsetHeight;
+    var rows = box.querySelectorAll(rowSel);
+    var n = 0;
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].hidden) { continue; }
+      if (rows[i].offsetTop + rows[i].offsetHeight / 2 > bottom) { n++; } else { break; }
+    }
+    more.textContent = '▼ ниже ещё ' + n;
+    more.style.visibility = n ? 'visible' : 'hidden';
+  }
+  box.addEventListener('scroll', update);
+  box.appendChild(more);
+  return update;
+}
+
+function refreshMore() {
+  if (!fm) { return; }
+  if (fm.updateTreeMore) { fm.updateTreeMore(); }
+  if (fm.updateListMore) { fm.updateListMore(); }
+}
 
 function notice(text, bad) {
   if (!fm) { return; }
@@ -184,6 +218,7 @@ function revealPath(path) {
 function drawTree() {
   if (!fm) { return; }
   var col = fm.treeCol;
+  var keep = col.scrollTop;
   while (col.firstChild) { col.removeChild(col.firstChild); }
   col.appendChild(el('div', 'fm-head', 'ФАЙЛОВАЯ СИСТЕМА'));
   function walk(path, depth) {
@@ -208,6 +243,9 @@ function drawTree() {
     }
   }
   walk('/', 0);
+  fm.updateTreeMore = moreMarker(col, '.fm-trow');
+  col.scrollTop = keep;
+  fm.updateTreeMore();
 }
 
 // ----- список -----
@@ -218,6 +256,7 @@ function openDir(path, silent) {
   var guard = fm.guard;
   return fetchJson('/api/fm/list?path=' + enc(path) + '&hidden=' + (fm.hidden ? '1' : '0')).then(function (data) {
     if (!guard()) { return; }
+    if (data.path !== fm.cwd) { fm.query = ''; }
     fm.cwd = data.path;
     fm.listing = data;
     try { sessionStorage.setItem('fm.cwd', data.path); } catch (e) { /* не страшно */ }
@@ -272,6 +311,8 @@ function toolBtn(label, cls, fn) {
 
 function drawList() {
   var col = fm.listCol;
+  // Перерисовка того же каталога (открыли файл, загрузили) не сбрасывает прокрутку.
+  var keep = fm.rowsBox && fm.rowsCwd === fm.cwd ? fm.rowsBox.scrollTop : 0;
   while (col.firstChild) { col.removeChild(col.firstChild); }
   var back = toolBtn('← Дерево', 'fm-back', function () { setView('tree'); });
   col.appendChild(back);
@@ -323,15 +364,58 @@ function drawList() {
   fm.progress = el('div', 'fm-progress');
   col.appendChild(fm.progress);
 
+  var find = el('div', 'fm-find');
+  var q = el('input');
+  q.type = 'search';
+  q.placeholder = 'Поиск в каталоге';
+  q.setAttribute('aria-label', 'Поиск в каталоге');
+  q.value = fm.query;
+  q.addEventListener('input', function () { fm.query = q.value; applyFilter(); });
+  q.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && q.value) { e.preventDefault(); q.value = ''; fm.query = ''; applyFilter(); }
+  });
+  find.appendChild(q);
+  fm.findInfo = el('span', 'hint');
+  find.appendChild(fm.findInfo);
+  col.appendChild(find);
+
   var table = el('div', 'fm-rows');
   if (fm.cwd !== '/') {
     table.appendChild(rowFor({ name: '..', type: 'dir' }, parentPath(fm.cwd), true));
   }
-  sortedEntries().forEach(function (e) { table.appendChild(rowFor(e, joinPath(fm.cwd, e.name), false)); });
+  sortedEntries().forEach(function (e) {
+    var row = rowFor(e, joinPath(fm.cwd, e.name), false);
+    row.setAttribute('data-name', e.name.toLowerCase());
+    table.appendChild(row);
+  });
+  fm.noHits = el('p', 'hint fm-nohits', 'Ничего не найдено.');
+  table.appendChild(fm.noHits);
   col.appendChild(table);
+  fm.rowsBox = table;
+  fm.rowsCwd = fm.cwd;
+  fm.updateListMore = moreMarker(table, '.fm-row');
   if (fm.listing.truncated) {
     col.appendChild(el('p', 'hint', 'Показаны не все записи: в каталоге их слишком много.'));
   }
+  applyFilter();
+  table.scrollTop = keep;
+  fm.updateListMore();
+}
+
+// Фильтр по подстроке имени в текущем каталоге, без запроса к роутеру.
+function applyFilter() {
+  var q = fm.query.trim().toLowerCase();
+  var rows = fm.rowsBox.querySelectorAll('.fm-row[data-name]');
+  var shown = 0;
+  Array.prototype.forEach.call(rows, function (r) {
+    var ok = !q || r.getAttribute('data-name').indexOf(q) >= 0;
+    r.hidden = !ok;
+    if (ok) { shown++; }
+  });
+  fm.findInfo.textContent = q ? shown + ' из ' + rows.length : '';
+  fm.noHits.hidden = !(q && !shown);
+  if (q) { fm.rowsBox.scrollTop = 0; }
+  fm.updateListMore();
 }
 
 function rowFor(e, path, isUp) {

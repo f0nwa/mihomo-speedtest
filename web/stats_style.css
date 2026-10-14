@@ -512,7 +512,7 @@ button.geo-chip:hover{border-color:var(--accent)}
 /* Вкладка "Файлы" (stats_app_files.js): дерево + список + редактор. */
 .fm{display:grid;grid-template-columns:220px minmax(300px,380px) minmax(0,1fr);gap:12px;align-items:start}
 .fm-col{background:var(--card);border:1px solid var(--card-border);min-width:0;min-height:60vh}
-.fm-tree{max-height:80vh;overflow:auto}
+.fm-tree{max-height:80vh;overflow:auto;position:relative}
 .fm-head{color:var(--muted);font-size:11px;letter-spacing:1px;padding:8px 12px}
 .fm-trow{display:flex;align-items:center;gap:2px;padding-right:8px;white-space:nowrap}
 .fm-trow.on{background:#222629;border-left:2px solid var(--accent)}
@@ -532,6 +532,13 @@ button.geo-chip:hover{border-color:var(--accent)}
 .fm-drop.over{background:#35c7c71f}
 .fm-up{margin:0 10px 6px;font-size:12.5px}
 .fm-up.bad{color:#ff8a80}
+.fm-find{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--card-border)}
+.fm-find input{flex:1;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--card-border);font:inherit;font-size:12.5px;padding:5px 8px}
+.fm-find input:focus{outline:none;border-color:var(--accent)}
+.fm-rows{position:relative;max-height:62vh;overflow:auto}
+.fm-more{position:sticky;bottom:0;display:block;width:100%;border:0;margin:0;padding:12px 10px 5px;background:linear-gradient(transparent,var(--card) 55%);color:var(--accent);font:inherit;font-size:12px;letter-spacing:.5px;text-align:center;cursor:pointer}
+.fm-nohits{padding:10px;margin:0}
+.fm-nohits[hidden],.fm-row[hidden]{display:none}
 .fm-row{display:flex;align-items:center;border-bottom:1px solid var(--border);font-size:12.5px}
 .fm-row.on{background:#222629;color:var(--accent)}
 .fm-rmain{flex:1;min-width:0;display:grid;grid-template-columns:16px minmax(0,1fr) 70px 92px;gap:6px;align-items:center;padding:4px 10px}
