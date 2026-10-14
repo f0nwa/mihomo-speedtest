@@ -99,4 +99,21 @@ assert_contains '"running":true' "$OUT_BUSY_POST" "POST still reports running wh
 sleep 0.3
 [ -f "$W2/speedtest2.log" ] && fail "POST spawned a second speedtest2.sh despite lock being held"
 
+# --- POST во время диагностики сервисов: прогон не запускается (409), иначе
+#     замеры забьют канал и диагностика покажет ложные блокировки ---
+W3=$TEST_ROOT/w3
+mkdir -p "$W3/mst-diag/lock"
+cp "$ROOT/speedtest-runtime/speedtest2.sh" "$W3/speedtest2.sh"
+cp "$ROOT/web/stats_run.sh" "$W3/stats_run.sh"
+chmod +x "$W3/speedtest2.sh" "$W3/stats_run.sh"
+: > "$W3/speedtest2.env"
+sleep 30 & DIAGPID=$!
+echo "$DIAGPID" > "$W3/mst-diag/lock/pid"
+OUT_DIAG=$(DIR="$W3" ENV="$W3/speedtest2.env" LOCK="$W3/mst.lock" TMPROOT="$W3" REQUEST_METHOD=POST "$W3/stats_run.sh")
+kill "$DIAGPID" 2>/dev/null || true
+assert_contains 'Status: 409' "$OUT_DIAG" "POST while diagnostics runs is refused"
+assert_contains 'диагностика' "$OUT_DIAG" "refusal explains diagnostics is running"
+sleep 0.3
+[ -f "$W3/speedtest2.log" ] && fail "POST spawned speedtest2.sh during diagnostics"
+
 echo "test_stats_run.sh: OK"

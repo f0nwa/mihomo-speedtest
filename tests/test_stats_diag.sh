@@ -354,6 +354,20 @@ r=$(cgi start POST | body); assert_contains '"started":true' "$r" "новый st
 wait_done
 grep -q -- '-X PUT' "$SC/curl.log" && fail "фаза 2 меняла выбор в группах (PUT)"
 
+# ----- опрос состояния не подключает speedtest2.sh/netcheck.sh (лишняя нагрузка раз в 1,5 с) -----
+cp "$W/speedtest2.sh" "$TEST_ROOT/st.bak"
+{ echo 'touch "$DIR/.sourced"'; cat "$TEST_ROOT/st.bak"; } > "$W/speedtest2.sh"
+cgi status GET > /dev/null
+[ -f "$W/.sourced" ] && fail "status подключает speedtest2.sh"
+rm -f "$W/.sourced"; cp "$TEST_ROOT/st.bak" "$W/speedtest2.sh"
+
+# ----- прокси mihomo с паролем (authentication) - понятная ошибка -----
+reset_sc; site https://github.com 0 407; site https://chatgpt.com 0 407; site https://claude.ai 0 407; site https://rutracker.org 0 407; site https://lb.example 0 407; site https://big.example 0 407
+run_diag AUTH
+s=$(cat "$W/tmp/mst-diag/state.json")
+assert_contains '"stage":"error"' "$s" "407 - ошибка прогона"
+assert_contains 'authentication' "$s" "текст называет authentication"
+
 # ----- маршруты и списки файлов установки -----
 for r in '"api/diag": ("stats_diag.sh"' '"api/diag/start": ("stats_diag.sh"' '"api/diag/cancel": ("stats_diag.sh"'; do
   grep -qF "$r" "$ROOT/web/stats_httpd.py" || fail "нет маршрута $r в stats_httpd.py"

@@ -43,12 +43,18 @@
 # раз в конце: $DIR/diag_last.json через временный файл и mv.
 
 DIR=${DIR:-/opt/etc/mihomo-speedtest}
-export MST_LIB_ONLY=1
-[ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
-MST_LIB_ONLY=0
 TMPROOT=${TMPROOT:-/tmp}
 NETCHECK=${NETCHECK:-$DIR/netcheck.sh}
-[ -f "$NETCHECK" ] && . "$NETCHECK"
+# speedtest2.sh (LOCK, API ядра, urlencode, статистика нод) и netcheck.sh
+# нужны запуску и проверке; опросу состояния (раз в 1,5 с) - нет.
+case ${MST_DIAG_ACTION:-status} in
+  start|runner)
+    export MST_LIB_ONLY=1
+    [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
+    MST_LIB_ONLY=0
+    [ -f "$NETCHECK" ] && . "$NETCHECK"
+    ;;
+esac
 DIAG_AWK=${DIAG_AWK:-$DIR/diag.awk}
 SERVICES_DEFAULT=${SERVICES_DEFAULT:-$DIR/services.default.tsv}
 CONFIG_STATE_DIR=${CONFIG_STATE_DIR:-$DIR/config-state}
@@ -185,6 +191,9 @@ probe() {
   P_CODE=${p_out%% *}; p_out=${p_out#* }
   P_MS=$(printf '%s' "${p_out%% *}" | awk '{ t = $1 + 0; if (t > 0) printf "%d", t * 1000 + 0.5 }')
   case $p_out in *' '*) P_REDIR=${p_out#* } ;; *) P_REDIR= ;; esac
+  if [ "$P_CODE" = 407 ]; then
+    run_fail "Прокси mihomo ($PROXY) требует логин и пароль (authentication в config.yaml) - диагностика не может отправить через него запрос. Уберите authentication или разрешите 127.0.0.1 в skip-auth-prefixes."
+  fi
   P_CLASS=$(nc_classify "$P_RC" "$P_CODE")
   P_SIG=
   case $P_CODE in
@@ -316,7 +325,7 @@ phase2() {
     [ $(( $(date +%s) - p2_t0 )) -lt "$DIAG_TOTAL_MAX_SEC" ] || return
     [ "$p2_verdict" = lb ] && p2_node=
     DN=$p2_name awk -F'\t' '$1 == ENVIRON["DN"] { print $5; exit }' "$RUN/resolved.tsv" | tr '\037' '\n' > "$RUN/cands"
-    LC_ALL=C awk -f "$DIAG_AWK" -v mode=order -v exclude="$p2_node" -v min_uptime="${STABLE_MIN_UPTIME:-80}" \
+    DIAG_EXCLUDE=$p2_node LC_ALL=C awk -f "$DIAG_AWK" -v mode=order -v min_uptime="${STABLE_MIN_UPTIME:-80}" \
       -v min_runs="${STABLE_MIN_RUNS:-8}" -v stab_file="${HISTORY_STABILITY:-}" "$RUN/cands" > "$RUN/order"
     p2_n=$(wc -l < "$RUN/order" | tr -d ' ')
     [ "$p2_n" -gt "$DIAG_ALT_MAX_NODES" ] && p2_n=$DIAG_ALT_MAX_NODES

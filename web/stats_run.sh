@@ -6,6 +6,7 @@
 # GET  -> {"running":true|false} - идёт ли сейчас прогон (проверяется тот
 #         же файл-блокировка $LOCK, что и у cron/--force, см. acquire_lock()
 #         в speedtest2.sh).
+# POST во время диагностики сервисов -> 409 с текстом в "error".
 # POST -> если блокировка свободна - запускает "$DIR/speedtest2.sh" --force
 #         в фоне (полностью отвязанным от текущего CGI-процесса: stdin/out/err
 #         не наследуются, иначе httpd/stats_httpd.py будет ждать EOF от
@@ -43,7 +44,21 @@ method=${REQUEST_METHOD:-GET}
 started=false
 running=false
 
+# Идёт диагностика сервисов (stats_diag.sh) - замеры забили бы канал, и
+# диагностика показала бы ложные блокировки: прогон не запускается.
+diag_running() {
+  diag_pid=$(cat "${TMPROOT:-/tmp}/mst-diag/lock/pid" 2>/dev/null)
+  [ -n "$diag_pid" ] && kill -0 "$diag_pid" 2>/dev/null
+}
+
 if [ "$method" = "POST" ]; then
+  if ! is_running && diag_running; then
+    echo "Status: 409"
+    echo "Content-Type: application/json; charset=utf-8"
+    echo
+    printf '{"error":"Сейчас идёт диагностика сервисов. Запустите прогон после неё.","running":false,"started":false}\n'
+    exit 0
+  fi
   if is_running; then
     running=true
   else

@@ -27,14 +27,14 @@
 #   awk -v mode=now -f diag.awk group.json  -> строка с выбором (пусто - нет)
 #
 # mode=order - порядок проверки кандидатов при поиске замены:
-#   awk -v mode=order -v exclude=NODE -v min_uptime=N -v min_runs=N \
+#   DIAG_EXCLUDE=NODE awk -v mode=order -v min_uptime=N -v min_runs=N \
 #       -v stab_file=node_stability.tsv -f diag.awk candidates.txt
 #   candidates.txt - имена по одному в строке. На выходе: сначала ноды с
 #   накопленной статистикой (runs_seen >= min_runs) и uptime >= min_uptime -
 #   по убыванию uptime; затем ноды без достаточной статистики; затем со
 #   слабым uptime - по убыванию. При равенстве - исходный порядок. Мёртвые
-#   по статистике (runs_seen >= min_runs, runs_alive = 0) и exclude
-#   пропускаются. Поля node_stability.tsv - в шапке node_stats_update.awk.
+#   по статистике (runs_seen >= min_runs, runs_alive = 0) и DIAG_EXCLUDE
+#   (или -v exclude, если имя без \) пропускаются. Поля node_stability.tsv - в шапке node_stats_update.awk.
 #
 # mode=render - JSON состояния для вкладки (GET /api/diag):
 #   awk -v mode=render -v meta=PATH -f diag.awk services.tsv
@@ -298,11 +298,13 @@ BEGIN {
   US = "\037"
   if (mode == "resolve" || mode == "now") RS = "\001"
   if (mode == "render") render_head()
+  # имя текущей ноды - через окружение: -v раскрывает \ в имени
+  EXCL = ("DIAG_EXCLUDE" in ENVIRON) ? ENVIRON["DIAG_EXCLUDE"] : exclude
 }
 
 mode == "resolve" || mode == "now" { S = S $0 }
 mode == "render" { render_row() }
-mode == "order" { sub(/\r$/, ""); if ($0 != "" && $0 != exclude && !($0 in O_SEEN)) { O_SEEN[$0] = 1; O_NAME[++O_N] = $0 } }
+mode == "order" { sub(/\r$/, ""); if ($0 != "" && $0 != EXCL && !($0 in O_SEEN)) { O_SEEN[$0] = 1; O_NAME[++O_N] = $0 } }
 mode == "targets" { t_default($0) }
 
 END {

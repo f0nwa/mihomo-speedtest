@@ -103,5 +103,8 @@ assert_eq "$(tr '\n' '|' < "$WORK/ord")" 'B "q"|Top|A|C|New|Few|Low|' "order: с
 LC_ALL=C $AWK -v mode=order -v exclude= -v min_uptime=80 -v min_runs=8 -v stab_file=/nonexistent -f "$SCRIPT" "$WORK/cands" > "$WORK/ord2" || fail "order без файла статистики"
 assert_eq "$(tr '\n' '|' < "$WORK/ord2")" 'A|B "q"|C|Cur|Dead|Low|New|Top|Few|' "order: без статистики - исходный порядок"
 
+printf '%s\n' 'A\B' 'C' > "$WORK/cands3"
+assert_eq "$(DIAG_EXCLUDE='A\B' LC_ALL=C $AWK -v mode=order -v min_uptime=80 -v min_runs=8 -v stab_file= -f "$SCRIPT" "$WORK/cands3" | tr '\n' '|')" 'C|' "order: текущая нода с \\ в имени исключается (DIAG_EXCLUDE)"
+
 [ "$FAILED" = 0 ] || exit 1
 echo "OK test_diag_awk"
