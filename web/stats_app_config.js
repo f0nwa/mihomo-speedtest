@@ -17,7 +17,12 @@ var configView = null;   // {dirty:bool} - есть несохранённые �
 export function configDirty() { return !!(configView && configView.dirty) || constructorDirty(); }
 
 // Вызывается при уходе с вкладки (render() в app.js).
-export function leaveConfig() { configView = null; leaveConstructor(); }
+var activeNav = null;    // createConfigNav() открытой вкладки YAML
+export function leaveConfig() {
+  configView = null;
+  if (activeNav) { activeNav.destroy(); activeNav = null; }
+  leaveConstructor();
+}
 
 // Режим вкладки: «YAML» (редактор ниже, по умолчанию) или «Конструктор»
 // (stats_app_constructor.js). Выбор запоминается в браузере; миграция с
@@ -172,6 +177,7 @@ function createEditor(host, text, onChange) {
     var importMarks = [];
     if (onChange) { cm.on('change', onChange); }
     return {
+      cm: cm,
       getValue: function () { return cm.getValue(); },
       setValue: function (v) { cm.setValue(v); },
       markLine: function (n) {
@@ -205,6 +211,7 @@ function createEditor(host, text, onChange) {
     if (onChange) { ta.addEventListener('input', onChange); }
     host.appendChild(ta);
     return {
+      cm: null,
       getValue: function () { return ta.value; },
       setValue: function (v) { ta.value = v; },
       markLine: function (n) {
@@ -409,6 +416,547 @@ function postText(url, text) {
   return fetchJson(url, { method: 'POST', body: text, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 }
 
+// ----- Навигатор разделов, поиск и полноэкранный режим (вкладка YAML) -----
+//
+// Слева от редактора - дерево разделов config.yaml (клик - прокрутка к
+// разделу) и поиск: найденные строки показываются прямо под своими
+// разделами. Кнопка «На весь экран» разворачивает редактор на всё окно:
+// сверху панель с действиями, плавающее окно поиска и замены, снизу строка
+// состояния. Поиск - простой подстрокой (без regexp), подсветка через
+// markText CodeMirror. На запасном textarea работает только полноэкранный режим.
+
+var SECTION_RU = {
+  dns: 'DNS', hosts: 'хосты', tun: 'TUN', sniffer: 'сниффер', listeners: 'входы', profile: 'профиль',
+  'proxy-providers': 'подписки', proxies: 'ноды', 'proxy-groups': 'группы',
+  'rule-providers': 'наборы правил', rules: 'правила', 'sub-rules': 'подправила',
+  'geox-url': 'гео-базы', experimental: 'экспериментальное', ntp: 'время', tunnels: 'туннели'
+};
+var SEARCH_MARK_LIMIT = 3000;   // больше совпадений не подсвечиваем (счётчик - полный)
+var TREE_HITS_LIMIT = 30;       // строк результатов под одним разделом
+
+// Разделы верхнего уровня: ключ-блок («proxies:») - свой раздел, скалярные
+// ключи верхнего уровня («mode: rule») собраны в «Общие настройки».
+// lineSec[i] - раздел строки i; items - число элементов первого уровня.
+export function yamlSections(lines) {
+  var general = { name: 'Общие настройки', ru: '', line: -1, items: 0 };
+  var secs = [], lineSec = new Array(lines.length), cur = general, childIndent = -1;
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i];
+    if (/^[A-Za-z_"'][^:#]*:(\s|$)/.test(l)) {
+      var key = l.slice(0, l.indexOf(':')).replace(/^["']|["']$/g, '');
+      var val = l.slice(l.indexOf(':') + 1).trim();
+      if (/^(&\S+)?\s*(#.*)?$/.test(val)) {
+        cur = { name: key, ru: SECTION_RU[key] || '', line: i, items: 0 };
+        secs.push(cur);
+      } else {
+        general.items++;
+        if (general.line < 0) { general.line = i; }
+        cur = general;
+      }
+      childIndent = -1;
+      lineSec[i] = cur;
+      continue;
+    }
+    lineSec[i] = cur;
+    if (cur === general || /^\s*(#|$)/.test(l)) { continue; }
+    var ind = /^ */.exec(l)[0].length;
+    if (childIndent < 0) { childIndent = ind; }
+    if (ind === childIndent && (/^\s*-(\s|$)/.test(l) || (ind > 0 && /^\s*[^\s#-][^:]*:(\s|$)/.test(l)))) { cur.items++; }
+  }
+  if (general.items > 0 || !secs.length || secs[0].line > 0) {
+    if (general.line < 0) { general.line = 0; }
+    secs.unshift(general);
+  }
+  return { secs: secs, lineSec: lineSec };
+}
+
+// Подпись строки для «хлебных крошек»: имя элемента списка (- name: X) или ключ.
+function crumbLabel(l) {
+  var t = l.trim(), m = /^- name:\s*["']?(.+?)["']?\s*(#.*)?$/.exec(t);
+  if (m) { return m[1]; }
+  m = /^(?:- )?["']?([^"':#\s][^:#]*?)["']?:(\s|$)/.exec(t);
+  if (m) { return m[1]; }
+  if (/^- /.test(t)) { return t.length > 32 ? t.slice(2, 32) + '…' : t.slice(2); }
+  return null;
+}
+
+// Путь до строки по отступам: proxy-groups › YouTube › type.
+export function yamlCrumbs(getLine, line) {
+  var text = getLine(line) || '', out = [], ind = /^ */.exec(text)[0].length;
+  var lab = /^\s*(#|$)/.test(text) ? null : crumbLabel(text);
+  if (lab) { out.unshift(lab); }
+  var needKey = ind === 0 && /^- /.test(text);
+  for (var j = line - 1, steps = 0; j >= 0 && (ind > 0 || needKey) && steps < 3000; j--, steps++) {
+    var l = getLine(j);
+    if (/^\s*(#|$)/.test(l)) { continue; }
+    var d = /^ */.exec(l)[0].length;
+    if (d < ind || (needKey && d === 0 && !/^- /.test(l))) {
+      var lb = crumbLabel(l);
+      if (lb) { out.unshift(lb); }
+      ind = d;
+      needKey = d === 0 && /^- /.test(l);
+    }
+  }
+  return out.slice(-4);
+}
+
+export function findAllText(lines, q, cs) {
+  var res = [];
+  if (!q) { return res; }
+  var qq = cs ? q : q.toLowerCase();
+  for (var i = 0; i < lines.length; i++) {
+    var s = cs ? lines[i] : lines[i].toLowerCase(), p = 0;
+    while ((p = s.indexOf(qq, p)) >= 0) { res.push({ line: i, col: p, len: qq.length }); p += qq.length; }
+  }
+  return res;
+}
+
+function svgIcon(d, size) {
+  var ns = 'http://www.w3.org/2000/svg';
+  var s = document.createElementNS(ns, 'svg');
+  s.setAttribute('width', size || 16); s.setAttribute('height', size || 16);
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none');
+  s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2');
+  s.setAttribute('aria-hidden', 'true');
+  var p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', d);
+  s.appendChild(p);
+  return s;
+}
+var ICON = {
+  search: 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM20 20l-3.5-3.5', up: 'M6 15l6-6 6 6', down: 'M6 9l6 6 6-6',
+  close: 'M6 6l12 12M18 6L6 18', expand: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  shrink: 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5', right: 'M9 6l6 6-6 6'
+};
+
+// hooks: { diff, check, save } - кнопки панели полноэкранного режима.
+// Возвращает { root, host, attach(editor), setDirty(bool), setCheck(text, kind),
+// setBusy(bool), exitFs(), destroy() }; host - куда createEditor() ставит редактор.
+function createConfigNav(hooks) {
+  var st = { cm: null, editor: null, q: '', cs: false, hits: [], cur: -1, marks: [], curMark: null,
+    secs: [], lineSec: [], fs: false, timer: null, secTimer: null, tree: [] };
+
+  function iconBtn(cls, label, icon, size) {
+    var b = el('button', cls);
+    b.type = 'button';
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    if (icon) { b.appendChild(svgIcon(ICON[icon], size)); }
+    return b;
+  }
+  function csToggle() {
+    var b = iconBtn('config-ib', 'Учитывать регистр');
+    b.textContent = 'Aa';
+    b.setAttribute('aria-pressed', 'false');
+    return b;
+  }
+
+  var root = el('div', 'config-work');
+
+  // --- левая панель: поиск + дерево разделов
+  var aside = el('aside', 'config-nav');
+  aside.setAttribute('aria-label', 'Разделы конфига и поиск');
+  var navTop = el('div', 'config-nav-top');
+  var row = el('div', 'config-nav-row');
+  var s1wrap = el('div', 'config-search');
+  s1wrap.appendChild(svgIcon(ICON.search, 14));
+  var q1 = el('input');
+  q1.type = 'text'; q1.spellcheck = false; q1.placeholder = 'Поиск по конфигу (Ctrl+F)';
+  q1.setAttribute('aria-label', 'Поиск по конфигу');
+  s1wrap.appendChild(q1);
+  var cs1 = csToggle();
+  row.appendChild(s1wrap); row.appendChild(cs1);
+  navTop.appendChild(row);
+  var summaryRow = el('div', 'config-nav-row config-nav-summary');
+  var summary = el('span', 'hint');
+  var clearBtn = el('button', 'config-link', 'очистить');
+  clearBtn.type = 'button'; clearBtn.hidden = true;
+  summaryRow.appendChild(summary); summaryRow.appendChild(clearBtn);
+  navTop.appendChild(summaryRow);
+  aside.appendChild(navTop);
+  var tree = el('div', 'config-nav-tree');
+  aside.appendChild(tree);
+  root.appendChild(aside);
+
+  // --- правая часть: панель полноэкранного режима, шапка, редактор, строка состояния
+  var pane = el('div', 'config-pane');
+  var fsBar = el('div', 'config-fs-bar');
+  var exitBtn = el('button', 'theme-btn config-fs-exit');
+  exitBtn.type = 'button';
+  exitBtn.appendChild(svgIcon(ICON.shrink, 14));
+  exitBtn.appendChild(document.createTextNode(' Выйти '));
+  exitBtn.appendChild(el('span', 'hint', 'Esc'));
+  fsBar.appendChild(exitBtn);
+  fsBar.appendChild(el('span', 'config-fs-title', 'config.yaml'));
+  var fsDirty = el('span', 'config-fs-dirty', '● есть несохранённые изменения');
+  fsDirty.hidden = true;
+  fsBar.appendChild(fsDirty);
+  var secLabel = el('label', 'config-fs-sec', 'Раздел ');
+  var secSelect = el('select');
+  secLabel.appendChild(secSelect);
+  fsBar.appendChild(secLabel);
+  fsBar.appendChild(el('span', 'config-spacer'));
+  function fsAction(text, primary, fn) {
+    var b = el('button', 'submit' + (primary ? '' : ' secondary'), text);
+    b.type = 'button';
+    b.addEventListener('click', fn);
+    fsBar.appendChild(b);
+    return b;
+  }
+  var fsBtns = [
+    fsAction('Изменения', false, function () { exitFs(); hooks.diff(); }),
+    fsAction('Проверить', false, function () { setCheck('проверка...', ''); hooks.check(); }),
+    fsAction('Сохранить и применить', true, function () { exitFs(); hooks.save(); })
+  ];
+  pane.appendChild(fsBar);
+
+  var head = el('div', 'config-pane-head');
+  var crumbs = el('span', 'config-crumbs', 'config.yaml');
+  head.appendChild(crumbs);
+  var fsOpen = el('button', 'theme-btn config-fs-open');
+  fsOpen.type = 'button';
+  fsOpen.title = 'Редактор на всё окно (Esc - выйти)';
+  fsOpen.appendChild(svgIcon(ICON.expand, 14));
+  fsOpen.appendChild(document.createTextNode(' На весь экран'));
+  head.appendChild(fsOpen);
+  pane.appendChild(head);
+
+  var edWrap = el('div', 'config-ed-wrap');
+  var host = el('div', 'config-editor');
+  edWrap.appendChild(host);
+
+  // плавающее окно поиска и замены (только в полноэкранном режиме)
+  var find = el('div', 'config-find');
+  find.setAttribute('role', 'search');
+  find.setAttribute('aria-label', 'Поиск и замена');
+  var repToggle = iconBtn('config-ib config-find-toggle', 'Показать замену (Ctrl+H)', 'right', 14);
+  repToggle.setAttribute('aria-expanded', 'false');
+  find.appendChild(repToggle);
+  var findRows = el('div', 'config-find-rows');
+  var fr1 = el('div', 'config-find-row');
+  var q2 = el('input', 'config-find-input');
+  q2.type = 'text'; q2.spellcheck = false; q2.placeholder = 'Найти';
+  q2.setAttribute('aria-label', 'Найти');
+  var cs2 = csToggle();
+  var count2 = el('span', 'config-find-count hint');
+  var prevBtn = iconBtn('config-ib', 'Предыдущее (Shift+Enter)', 'up');
+  var nextBtn = iconBtn('config-ib', 'Следующее (Enter)', 'down');
+  var closeFind = iconBtn('config-ib', 'Очистить поиск', 'close', 14);
+  [q2, cs2, count2, prevBtn, nextBtn, closeFind].forEach(function (n) { fr1.appendChild(n); });
+  findRows.appendChild(fr1);
+  var fr2 = el('div', 'config-find-row');
+  fr2.hidden = true;
+  var repInput = el('input', 'config-find-input');
+  repInput.type = 'text'; repInput.spellcheck = false; repInput.placeholder = 'Заменить на';
+  repInput.setAttribute('aria-label', 'Заменить на');
+  var repOne = el('button', 'theme-btn', 'Заменить'); repOne.type = 'button';
+  var repAll = el('button', 'theme-btn', 'Все'); repAll.type = 'button';
+  [repInput, repOne, repAll].forEach(function (n) { fr2.appendChild(n); });
+  findRows.appendChild(fr2);
+  find.appendChild(findRows);
+  edWrap.appendChild(find);
+  pane.appendChild(edWrap);
+
+  var statusBar = el('div', 'config-statusbar');
+  var stPos = el('span', null, 'Стр 1, кол 1');
+  var stLines = el('span');
+  var stInfo = el('span', 'config-statusbar-help', 'Ctrl+F поиск · Ctrl+H замена · Enter / Shift+Enter - дальше / назад');
+  var stCheck = el('span');
+  var stCheckVal = el('span', null, 'не проверялся');
+  stCheck.appendChild(document.createTextNode('mihomo -t: '));
+  stCheck.appendChild(stCheckVal);
+  [stPos, stLines, el('span', 'config-spacer'), stInfo, stCheck].forEach(function (n) { statusBar.appendChild(n); });
+  pane.appendChild(statusBar);
+  root.appendChild(pane);
+
+  // --- поиск
+  function lines() { return st.cm.getValue().split('\n'); }
+  function clearMarks() {
+    st.marks.forEach(function (m) { m.clear(); });
+    st.marks = [];
+    if (st.curMark) { st.curMark.clear(); st.curMark = null; }
+  }
+  function cmpPos(h, line, ch) { return h.line - line || h.col - ch; }
+  // keep - оставить номер текущего совпадения (после правки текста);
+  // after - {line, ch}: текущим станет первое совпадение не раньше этой позиции
+  // (по умолчанию - от курсора).
+  function run(opt) {
+    if (!st.cm) { return; }
+    opt = opt || {};
+    var prev = st.cur;
+    st.cm.operation(function () {
+      clearMarks();
+      st.hits = findAllText(lines(), st.q, st.cs);
+      for (var i = 0; i < st.hits.length && i < SEARCH_MARK_LIMIT; i++) {
+        var h = st.hits[i];
+        st.marks.push(st.cm.markText({ line: h.line, ch: h.col }, { line: h.line, ch: h.col + h.len }, { className: 'cm-hit' }));
+      }
+    });
+    if (!st.hits.length) { st.cur = -1; }
+    else if (opt.keep && prev >= 0) { st.cur = Math.min(prev, st.hits.length - 1); }
+    else {
+      var after = opt.after || st.cm.getCursor('from');
+      st.cur = 0;
+      for (var k = 0; k < st.hits.length; k++) {
+        if (cmpPos(st.hits[k], after.line, after.ch) >= 0) { st.cur = k; break; }
+      }
+    }
+    renderTree();
+    select(st.cur, !opt.keep);
+  }
+  function schedule() {
+    clearTimeout(st.timer);
+    st.timer = setTimeout(function () { st.timer = null; run(); }, 150);
+  }
+  function select(i, scroll) {
+    if (st.curMark) { st.curMark.clear(); st.curMark = null; }
+    st.cur = i;
+    var n = st.hits.length;
+    count2.textContent = !st.q ? '' : (n ? (i + 1) + ' из ' + n : 'нет');
+    count2.classList.toggle('config-none', !!st.q && !n);
+    Array.prototype.forEach.call(tree.querySelectorAll('.config-nav-hit.on'), function (b) { b.classList.remove('on'); });
+    if (i < 0 || !st.cm) { return; }
+    var h = st.hits[i];
+    var from = { line: h.line, ch: h.col }, to = { line: h.line, ch: h.col + h.len };
+    st.curMark = st.cm.markText(from, to, { className: 'cm-hit-cur' });
+    if (scroll !== false) {
+      st.cm.setCursor(from, null, { scroll: false });
+      st.cm.scrollIntoView({ from: from, to: to }, 120);
+    }
+    var hb = tree.querySelector('.config-nav-hit[data-i="' + i + '"]');
+    if (hb) {
+      hb.classList.add('on');
+      if (scroll !== false) { tree.scrollTop = Math.max(0, hb.offsetTop - tree.offsetTop - tree.clientHeight / 2); }
+    }
+  }
+  function step(d) {
+    if (!st.hits.length) { return; }
+    select(((st.cur < 0 ? 0 : st.cur + d) % st.hits.length + st.hits.length) % st.hits.length);
+  }
+  function setQuery(q, from) {
+    st.q = q;
+    if (from !== q1) { q1.value = q; }
+    if (from !== q2) { q2.value = q; }
+    clearBtn.hidden = !q;
+    schedule();
+  }
+  function setCs(on) {
+    st.cs = on;
+    [cs1, cs2].forEach(function (b) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+    run();
+  }
+  function onSearchKey(ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (st.timer) { clearTimeout(st.timer); st.timer = null; run(); return; }
+      step(ev.shiftKey ? -1 : 1);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault(); ev.stopPropagation();
+      if (st.q) { setQuery('', null); } else if (st.fs) { exitFs(); } else if (st.cm) { st.cm.focus(); }
+    }
+  }
+  [q1, q2].forEach(function (inp) {
+    inp.addEventListener('input', function () { setQuery(inp.value, inp); });
+    inp.addEventListener('keydown', onSearchKey);
+  });
+  [cs1, cs2].forEach(function (b) { b.addEventListener('click', function () { setCs(!st.cs); }); });
+  clearBtn.addEventListener('click', function () { setQuery('', null); q1.focus(); });
+  closeFind.addEventListener('click', function () { setQuery('', null); q2.focus(); });
+  prevBtn.addEventListener('click', function () { step(-1); });
+  nextBtn.addEventListener('click', function () { step(1); });
+
+  // --- замена (в полноэкранном режиме)
+  function showReplace(on) {
+    fr2.hidden = !on;
+    repToggle.setAttribute('aria-expanded', on ? 'true' : 'false');
+    repToggle.firstChild.firstChild.setAttribute('d', on ? ICON.down : ICON.right);
+  }
+  repToggle.addEventListener('click', function () { showReplace(fr2.hidden); });
+  repInput.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); repOne.click(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); exitFs(); }
+  });
+  repOne.addEventListener('click', function () {
+    if (!st.cm || st.cur < 0) { return; }
+    var h = st.hits[st.cur], rep = repInput.value;
+    st.cm.replaceRange(rep, { line: h.line, ch: h.col }, { line: h.line, ch: h.col + h.len }, '+mst-replace');
+    clearTimeout(st.timer); st.timer = null;
+    run({ after: { line: h.line, ch: h.col + rep.length } });
+  });
+  repAll.addEventListener('click', function () {
+    if (!st.cm || !st.hits.length) { return; }
+    var rep = repInput.value, list = st.hits.slice();
+    st.cm.operation(function () {
+      for (var i = list.length - 1; i >= 0; i--) {
+        var h = list[i];
+        st.cm.replaceRange(rep, { line: h.line, ch: h.col }, { line: h.line, ch: h.col + h.len }, '+mst-replace');
+      }
+    });
+    clearTimeout(st.timer); st.timer = null;
+    run({ keep: true });
+    setCheck('заменено ' + list.length + ', не проверялся', '');
+  });
+
+  // --- дерево разделов
+  function renderSections() {
+    var r = yamlSections(lines());
+    st.secs = r.secs; st.lineSec = r.lineSec;
+    while (secSelect.firstChild) { secSelect.removeChild(secSelect.firstChild); }
+    st.secs.forEach(function (s, k) {
+      var o = el('option', null, s.name + (s.ru ? ' - ' + s.ru : ''));
+      o.value = String(k);
+      secSelect.appendChild(o);
+    });
+    stLines.textContent = st.cm.lineCount() + ' строк';
+  }
+  function goLine(line) {
+    st.cm.setCursor({ line: line, ch: 0 }, null, { scroll: false });
+    st.cm.scrollTo(null, st.cm.heightAtLine(line, 'local'));
+    st.cm.focus();
+  }
+  function snippet(btn, h) {
+    var line = st.cm.getLine(h.line) || '', lead = /^\s*/.exec(line)[0].length, t = line.slice(lead), p = h.col - lead;
+    var a = t.slice(Math.max(0, p - 18), p), b = t.slice(p + h.len, p + h.len + 30);
+    var span = el('span', 'config-nav-snip');
+    span.appendChild(document.createTextNode((p > 18 ? '…' : '') + a));
+    span.appendChild(el('mark', null, t.slice(p, p + h.len)));
+    span.appendChild(document.createTextNode(b + (p + h.len + 30 < t.length ? '…' : '')));
+    btn.appendChild(span);
+  }
+  function renderTree() {
+    while (tree.firstChild) { tree.removeChild(tree.firstChild); }
+    var bySec = st.secs.map(function () { return []; });
+    st.hits.forEach(function (h, i) {
+      var k = st.secs.indexOf(st.lineSec[h.line]);
+      if (k >= 0) { bySec[k].push(i); }
+    });
+    var withHits = 0;
+    st.tree = [];
+    st.secs.forEach(function (s, k) {
+      var b = el('button', 'config-nav-sec');
+      b.type = 'button';
+      b.appendChild(el('span', 'config-nav-name', s.name));
+      if (s.ru) { b.appendChild(el('span', 'config-nav-ru', s.ru)); }
+      b.appendChild(el('span', 'config-spacer'));
+      if (s.items) { b.appendChild(el('span', 'config-nav-items', String(s.items))); }
+      var hits = bySec[k];
+      if (hits.length) { withHits++; b.appendChild(el('span', 'config-nav-badge', String(hits.length))); }
+      if (st.q && !hits.length) { b.classList.add('dim'); }
+      b.addEventListener('click', function () { goLine(s.line); });
+      tree.appendChild(b);
+      st.tree.push(b);
+      hits.slice(0, TREE_HITS_LIMIT).forEach(function (i) {
+        var h = st.hits[i];
+        var hb = el('button', 'config-nav-hit');
+        hb.type = 'button';
+        hb.setAttribute('data-i', String(i));
+        hb.appendChild(el('span', 'config-nav-ln', String(h.line + 1)));
+        snippet(hb, h);
+        hb.addEventListener('click', function () { select(i); });
+        tree.appendChild(hb);
+      });
+      if (hits.length > TREE_HITS_LIMIT) {
+        tree.appendChild(el('div', 'config-nav-more hint', 'ещё ' + (hits.length - TREE_HITS_LIMIT) + ' - переход по Enter в поле поиска'));
+      }
+    });
+    summary.textContent = !st.q ? (st.secs.length + ' разделов · ' + st.cm.lineCount() + ' строк')
+      : (st.hits.length ? st.hits.length + ' совпадений в ' + withHits + ' разделах' : 'ничего не найдено');
+    summary.classList.toggle('config-none', !!st.q && !st.hits.length);
+    markActiveSection();
+  }
+  function markActiveSection() {
+    if (!st.cm) { return; }
+    var k = st.secs.indexOf(st.lineSec[st.cm.getCursor().line]);
+    st.tree.forEach(function (b, j) { b.classList.toggle('on', j === k); });
+    if (k >= 0) { secSelect.value = String(k); }
+  }
+  secSelect.addEventListener('change', function () {
+    var s = st.secs[Number(secSelect.value)];
+    if (s) { goLine(s.line); }
+  });
+
+  function onCursor() {
+    var c = st.cm.getCursor();
+    var path = yamlCrumbs(function (n) { return st.cm.getLine(n); }, c.line);
+    crumbs.textContent = ['config.yaml'].concat(path).join(' › ');
+    stPos.textContent = 'Стр ' + (c.line + 1) + ', кол ' + (c.ch + 1);
+    markActiveSection();
+  }
+
+  // --- полноэкранный режим: тот же редактор, развёрнутый на всё окно
+  function onDocKey(ev) { if (ev.key === 'Escape' && st.fs) { exitFs(); } }
+  function enterFs() {
+    if (st.fs) { return; }
+    st.fs = true;
+    root.classList.add('fs');
+    document.body.classList.add('config-fs-on');
+    document.addEventListener('keydown', onDocKey);
+    if (st.editor) { st.editor.refresh(); }
+    if (st.cm) { st.cm.scrollIntoView(null, 120); st.cm.focus(); }
+  }
+  function exitFs() {
+    if (!st.fs) { return; }
+    st.fs = false;
+    root.classList.remove('fs');
+    document.body.classList.remove('config-fs-on');
+    document.removeEventListener('keydown', onDocKey);
+    if (st.editor) { st.editor.refresh(); }
+    if (st.cm) { st.cm.scrollIntoView(null, 120); }
+  }
+  fsOpen.addEventListener('click', enterFs);
+  exitBtn.addEventListener('click', exitFs);
+
+  function focusFind(withReplace) {
+    var sel = st.cm.getSelection();
+    if (sel && sel.indexOf('\n') < 0) { setQuery(sel, null); }
+    if (withReplace) { enterFs(); showReplace(true); }
+    var inp = st.fs ? q2 : q1;
+    inp.focus(); inp.select();
+  }
+
+  function setCheck(text, kind) {
+    stCheckVal.textContent = text;
+    stCheckVal.className = kind === 'ok' ? 'config-ok' : (kind === 'err' ? 'config-none' : '');
+  }
+
+  return {
+    root: root, host: host,
+    attach: function (editor) {
+      st.editor = editor;
+      st.cm = editor.cm || null;
+      if (!st.cm) {   // запасной textarea: без дерева и поиска
+        aside.hidden = true; find.hidden = true; secLabel.hidden = true; stInfo.textContent = '';
+        return;
+      }
+      st.cm.addKeyMap({
+        'Ctrl-F': function () { focusFind(false); }, 'Cmd-F': function () { focusFind(false); },
+        'Ctrl-H': function () { focusFind(true); }, 'Cmd-Alt-F': function () { focusFind(true); },
+        'Esc': function () { if (!st.fs) { return window.CodeMirror.Pass; } exitFs(); }
+      });
+      st.cm.on('change', function () {
+        clearTimeout(st.secTimer);
+        st.secTimer = setTimeout(function () {
+          st.secTimer = null;
+          renderSections();
+          if (st.q) { run({ keep: true }); } else { renderTree(); }
+        }, 300);
+      });
+      st.cm.on('cursorActivity', onCursor);
+      renderSections();
+      renderTree();
+      onCursor();
+    },
+    setDirty: function (on) { fsDirty.hidden = !on; },
+    setCheck: setCheck,
+    setBusy: function (on) {
+      fsBtns.forEach(function (b) { b.disabled = on; });
+      repOne.disabled = on; repAll.disabled = on;
+    },
+    exitFs: exitFs,
+    destroy: function () { exitFs(); clearTimeout(st.timer); clearTimeout(st.secTimer); }
+  };
+}
+
 function renderYaml(bar) {
   setLoading();
   configView = { dirty: false };
@@ -492,12 +1040,20 @@ function renderYaml(bar) {
     main.appendChild(row1);
 
     var msgBox = el('div', 'config-msg');
-    var editorHost = el('div', 'config-editor');
+    // Навигатор разделов, поиск и полноэкранный режим вокруг редактора;
+    // кнопки полноэкранной панели нажимают кнопки основной панели.
+    var nav = createConfigNav({
+      diff: function () { diffBtn.click(); },
+      check: function () { checkBtn.click(); },
+      save: function () { saveBtn.click(); }
+    });
+    activeNav = nav;
+    var editorHost = nav.host;
     var output = el('div');
     var diffHost = el('div', 'config-sdiff-host');
     diffHost.hidden = true;
     main.appendChild(msgBox);
-    main.appendChild(editorHost);
+    main.appendChild(nav.root);
     main.appendChild(diffHost);
     main.appendChild(output);
 
@@ -535,6 +1091,7 @@ function renderYaml(bar) {
     var all = [checkBtn, saveBtn, diffBtn, resetBtn, fmtBtn, tplBtn, workBtn, wgBtn];  // logBtn - доступна и во время применения
     function busy(on) {
       all.forEach(function (b) { b.disabled = on; });
+      nav.setBusy(on);
       var rb = backupsBody.querySelectorAll('button');
       for (var i = 0; i < rb.length; i++) { rb[i].disabled = on; }
     }
@@ -547,12 +1104,12 @@ function renderYaml(bar) {
     // Сравнение открывается вместо редактора: слева текущий конфиг, справа b.
     function closeDiff() {
       if (diffHost.hidden) { return; }
-      diffHost.hidden = true; editorHost.hidden = false;
+      diffHost.hidden = true; nav.root.hidden = false;
       while (diffHost.firstChild) { diffHost.removeChild(diffHost.firstChild); }
       if (view.editor) { view.editor.refresh(); }
     }
     function openDiff(b, labelB) {
-      editorHost.hidden = true; diffHost.hidden = false;
+      nav.exitFs(); nav.root.hidden = true; diffHost.hidden = false;
       renderSideDiff(diffHost, view.saved, b, 'текущий config.yaml', labelB, closeDiff);
       main.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
@@ -621,9 +1178,11 @@ function renderYaml(bar) {
       view.dirty = view.editor ? view.editor.getValue() !== view.saved : false;
       status.textContent = view.dirty ? 'Есть несохранённые изменения.' : 'Изменений нет.';
       status.classList.toggle('config-dirty', view.dirty);
+      nav.setDirty(view.dirty);
     }
     function showCheck(check, okText) {
       if (!check) { return; }
+      nav.setCheck(check.ok ? 'пройдена' : ('ошибка' + (check.line ? ', строка ' + check.line : '')), check.ok ? 'ok' : 'err');
       if (check.ok) {
         view.editor.markLine(0);
         msg(okText || 'Проверка mihomo -t пройдена.', 'ok');
@@ -735,6 +1294,7 @@ function renderYaml(bar) {
 
     createEditor(editorHost, view.saved, setDirty).then(function (ed) {
       view.editor = ed;
+      nav.attach(ed);
       ed.refresh();
       loadBackups();
       if (pendingMigration) { pendingMigration = false; repair('template'); }
@@ -747,7 +1307,7 @@ function renderYaml(bar) {
     checkBtn.addEventListener('click', function () {
       busy(true); clearOutput(); msg('Проверка...', '');
       postText('/api/config/check', view.editor.getValue()).then(function (c) { showCheck(c); })
-        ['catch'](function (e) { msg('Ошибка проверки: ' + e.message, 'err'); })
+        ['catch'](function (e) { nav.setCheck('ошибка запроса', 'err'); msg('Ошибка проверки: ' + e.message, 'err'); })
         .then(function () { busy(false); });
     });
     saveBtn.addEventListener('click', function () {
@@ -1025,7 +1585,9 @@ function renderYaml(bar) {
       brokenBox.hidden = false;
     }
     postText('/api/config/check', data.text || '').then(function (check) {
-      if (alive() && check && check.ok === false) { renderBrokenBanner(check); }
+      if (!alive() || !check) { return; }
+      nav.setCheck(check.ok ? 'пройдена' : ('ошибка' + (check.line ? ', строка ' + check.line : '')), check.ok ? 'ok' : 'err');
+      if (check.ok === false) { renderBrokenBanner(check); }
     })['catch'](function () {});
   })['catch'](function (err) {
     pendingAction = null;
