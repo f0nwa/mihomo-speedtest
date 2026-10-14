@@ -157,6 +157,52 @@ class ListTests(Base):
         self.assertEqual(sf.tree(self.root), ["d1", "d2"])
 
 
+class FindTests(Base):
+    def setUp(self):
+        Base.setUp(self)
+        os.makedirs(self.path("a", "deep", "deeper"))
+        self.touch(os.path.join("a", "deep", "deeper", "Mihomo.yaml"), b"x")
+        self.touch(os.path.join("a", "mihomo.log"))
+        self.touch(os.path.join("a", "mihomo.yaml.bak"))
+        self.touch("other.txt")
+        os.symlink(self.root, self.path("a", "loop"))
+
+    def test_substring_case_insensitive_bfs(self):
+        res = sf.find(self.root, "MIHOMO")
+        paths = [r["path"] for r in res["results"]]
+        self.assertEqual(paths, [self.path("a", "mihomo.log"),
+                                 self.path("a", "deep", "deeper", "Mihomo.yaml")])
+        self.assertFalse(res["truncated"])
+        self.assertEqual(res["results"][1]["size"], 1)
+
+    def test_hidden_and_mask(self):
+        res = sf.find(self.root, "*.yaml*", show_hidden=True)
+        names = sorted(os.path.basename(r["path"]) for r in res["results"])
+        self.assertEqual(names, ["Mihomo.yaml", "mihomo.yaml.bak"])
+
+    def test_dirs_match_and_symlink_not_followed(self):
+        res = sf.find(self.root, "deep")
+        self.assertEqual([r["type"] for r in res["results"]], ["dir", "dir"])
+        res = sf.find(self.root, "loop")
+        self.assertEqual([r["type"] for r in res["results"]], ["link"])
+
+    def test_limit_and_bad_input(self):
+        res = sf.find(self.root, "o", limit=1)
+        self.assertEqual(len(res["results"]), 1)
+        self.assertTrue(res["truncated"])
+        self.assertEqual(res["reason"], "limit")
+        for q in ("", "a/b"):
+            with self.assertRaises(sf.FileError) as cm:
+                sf.find(self.root, q)
+            self.assertEqual(cm.exception.code, "bad_query")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.find(self.path("other.txt"), "x")
+        self.assertEqual(cm.exception.code, "not_dir")
+        with self.assertRaises(sf.FileError) as cm:
+            sf.find(self.path("missing"), "x")
+        self.assertEqual(cm.exception.status, 404)
+
+
 class ReadTests(Base):
     def test_read_text_ok(self):
         p = self.touch("c.yaml", "ключ: значение\n".encode("utf-8"))

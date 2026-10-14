@@ -12,7 +12,7 @@ grep -q 'href="/files" data-link' "$ROOT/web/stats_index.html" || fail "3: не�
 grep -q "from './app-files.js'" "$ROOT/web/stats_app.js" || fail "4: app.js не импортирует app-files.js"
 grep -q "path === '/files'" "$ROOT/web/stats_app.js" || fail "5: app.js не маршрутизирует /files"
 grep -q 'filesDirty()' "$ROOT/web/stats_app.js" || fail "6: нет защиты от потери правок"
-for ep in tree list read download write upload mkdir rename delete; do
+for ep in tree list find read download write upload mkdir rename delete; do
   grep -q "/api/fm/$ep" "$JS" || fail "7: модуль не обращается к /api/fm/$ep"
 done
 for fn in renderFiles stopFiles filesDirty; do

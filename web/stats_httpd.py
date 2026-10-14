@@ -769,7 +769,7 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
 
         def _handle_files(self, rel):
             action = rel[len("api/fm/"):]
-            reads = {"tree", "list", "read", "download"}
+            reads = {"tree", "list", "find", "read", "download"}
             writes = {"write": "PUT", "upload": "POST", "mkdir": "POST",
                       "rename": "POST", "delete": "POST"}
             if action not in reads and action not in writes:
@@ -795,6 +795,9 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
                 elif action == "list":
                     self._send_json(200, stats_files.list_dir(
                         arg("path"), show_hidden=arg("hidden") == "1"))
+                elif action == "find":
+                    self._send_json(200, stats_files.find(
+                        arg("path"), arg("q"), show_hidden=arg("hidden") == "1"))
                 elif action == "read":
                     self._send_json(200, stats_files.read_text(arg("path")))
                 elif action == "download":

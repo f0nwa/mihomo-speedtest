@@ -10,6 +10,7 @@ import { app, clearApp, el, fetchJson, session, viewGuard } from './app-core.js'
 
 var ERRORS = {
   bad_path: 'Некорректный путь.',
+  bad_query: 'Пустой запрос поиска.',
   bad_name: 'Некорректное имя файла.',
   not_found: 'Не найдено.',
   not_dir: 'Это не каталог.',
@@ -60,6 +61,15 @@ function parentPath(path) {
   return i <= 0 ? '/' : path.slice(0, i);
 }
 function baseName(path) { return path.slice(path.lastIndexOf('/') + 1) || '/'; }
+// Схлопывает «.» и «..»: выше корня не поднимается.
+function normPath(path) {
+  var out = [];
+  path.split('/').forEach(function (s) {
+    if (!s || s === '.') { return; }
+    if (s === '..') { out.pop(); } else { out.push(s); }
+  });
+  return '/' + out.join('/');
+}
 
 export function filesDirty() { return !!(fm && fm.file && fm.dirty); }
 
@@ -121,7 +131,7 @@ export function renderFiles() {
   clearApp();
   fm = {
     guard: viewGuard(), cwd: null, listing: null, hidden: false, sort: 'name',
-    tree: {}, file: null, dirty: false, editor: null, uploads: [], busy: false, query: ''
+    tree: {}, file: null, dirty: false, editor: null, uploads: [], busy: false, query: '', scope: 'here', results: null
   };
   var root = el('div', 'fm');
   root.setAttribute('data-view', 'list');
@@ -256,7 +266,7 @@ function openDir(path, silent) {
   var guard = fm.guard;
   return fetchJson('/api/fm/list?path=' + enc(path) + '&hidden=' + (fm.hidden ? '1' : '0')).then(function (data) {
     if (!guard()) { return; }
-    if (data.path !== fm.cwd) { fm.query = ''; }
+    if (data.path !== fm.cwd) { fm.query = ''; fm.results = null; }
     fm.cwd = data.path;
     fm.listing = data;
     try { sessionStorage.setItem('fm.cwd', data.path); } catch (e) { /* не страшно */ }
@@ -312,7 +322,8 @@ function toolBtn(label, cls, fn) {
 function drawList() {
   var col = fm.listCol;
   // Перерисовка того же каталога (открыли файл, загрузили) не сбрасывает прокрутку.
-  var keep = fm.rowsBox && fm.rowsCwd === fm.cwd ? fm.rowsBox.scrollTop : 0;
+  var key = fm.results ? 'find:' + fm.results.path + '\n' + fm.results.query : fm.cwd;
+  var keep = fm.rowsBox && fm.rowsKey === key ? fm.rowsBox.scrollTop : 0;
   while (col.firstChild) { col.removeChild(col.firstChild); }
   var back = toolBtn('← Дерево', 'fm-back', function () { setView('tree'); });
   col.appendChild(back);
@@ -367,34 +378,62 @@ function drawList() {
   var find = el('div', 'fm-find');
   var q = el('input');
   q.type = 'search';
-  q.placeholder = 'Поиск в каталоге';
-  q.setAttribute('aria-label', 'Поиск в каталоге');
+  q.placeholder = 'Имя, *.yaml или путь /opt/etc/';
+  q.setAttribute('aria-label', 'Поиск');
   q.value = fm.query;
-  q.addEventListener('input', function () { fm.query = q.value; applyFilter(); });
+  q.addEventListener('input', function () {
+    fm.query = q.value;
+    if (fm.results) { fm.results = null; drawList(); focusFind(); return; }
+    applyFilter();
+  });
   q.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && q.value) { e.preventDefault(); q.value = ''; fm.query = ''; applyFilter(); }
+    if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
+    else if (e.key === 'Escape' && (q.value || fm.results)) {
+      e.preventDefault();
+      fm.query = ''; fm.results = null; drawList(); focusFind();
+    }
   });
   find.appendChild(q);
-  fm.findInfo = el('span', 'hint');
-  find.appendChild(fm.findInfo);
+  var scope = el('select', 'fm-sort');
+  [['here', 'в каталоге'], ['deep', 'вглубь'], ['root', 'от корня /']].forEach(function (o) {
+    var opt = el('option', null, o[1]);
+    opt.value = o[0];
+    if (o[0] === fm.scope) { opt.selected = true; }
+    scope.appendChild(opt);
+  });
+  scope.setAttribute('aria-label', 'Где искать');
+  scope.title = 'В каталоге - фильтр текущего списка; вглубь - во всех подкаталогах текущего; от корня - по всему роутеру';
+  scope.addEventListener('change', function () {
+    fm.scope = scope.value;
+    fm.results = null;
+    if (fm.query.trim() && !isLiveFilter()) { runSearch(); } else { drawList(); }
+  });
+  find.appendChild(scope);
   col.appendChild(find);
+  fm.findInfo = el('div', 'hint fm-found');
+  col.appendChild(fm.findInfo);
+  fm.findInput = q;
 
   var table = el('div', 'fm-rows');
-  if (fm.cwd !== '/') {
-    table.appendChild(rowFor({ name: '..', type: 'dir' }, parentPath(fm.cwd), true));
+  if (fm.results) {
+    fm.results.results.forEach(function (r) { table.appendChild(rowForResult(r, fm.results.path)); });
+  } else {
+    if (fm.cwd !== '/') {
+      table.appendChild(rowFor({ name: '..', type: 'dir' }, parentPath(fm.cwd), true));
+    }
+    sortedEntries().forEach(function (e) {
+      var row = rowFor(e, joinPath(fm.cwd, e.name), false);
+      row.setAttribute('data-name', e.name.toLowerCase());
+      table.appendChild(row);
+    });
   }
-  sortedEntries().forEach(function (e) {
-    var row = rowFor(e, joinPath(fm.cwd, e.name), false);
-    row.setAttribute('data-name', e.name.toLowerCase());
-    table.appendChild(row);
-  });
   fm.noHits = el('p', 'hint fm-nohits', 'Ничего не найдено.');
   table.appendChild(fm.noHits);
   col.appendChild(table);
   fm.rowsBox = table;
-  fm.rowsCwd = fm.cwd;
+  fm.rowsKey = key;
   fm.updateListMore = moreMarker(table, '.fm-row');
-  if (fm.listing.truncated) {
+  if (fm.listing.truncated && !fm.results) {
     col.appendChild(el('p', 'hint', 'Показаны не все записи: в каталоге их слишком много.'));
   }
   applyFilter();
@@ -402,20 +441,46 @@ function drawList() {
   fm.updateListMore();
 }
 
-// Фильтр по подстроке имени в текущем каталоге, без запроса к роутеру.
-function applyFilter() {
-  var q = fm.query.trim().toLowerCase();
-  var rows = fm.rowsBox.querySelectorAll('.fm-row[data-name]');
-  var shown = 0;
-  Array.prototype.forEach.call(rows, function (r) {
-    var ok = !q || r.getAttribute('data-name').indexOf(q) >= 0;
-    r.hidden = !ok;
-    if (ok) { shown++; }
+function focusFind() {
+  if (fm && fm.findInput) {
+    fm.findInput.focus();
+    var n = fm.findInput.value.length;
+    try { fm.findInput.setSelectionRange(n, n); } catch (e) { /* type=search без выделения */ }
+  }
+}
+
+// Фильтр текущего списка на лету: область «в каталоге» и запрос без «/».
+function isLiveFilter() { return fm.scope === 'here' && fm.query.indexOf('/') < 0; }
+
+// Строка поиска: имя или маска ищется по области из списка; запрос с «/»
+// задаёт и каталог: «/opt/etc/mih» - от /opt/etc, «etc/mih» - от текущего,
+// «../» или «/opt/etc/» (имя пустое) - просто переход в каталог.
+function runSearch() {
+  var raw = fm.query.trim();
+  if (!raw) { return; }
+  var base, name;
+  var slash = raw.lastIndexOf('/');
+  if (slash >= 0) {
+    var dirPart = raw.slice(0, slash);
+    name = raw.slice(slash + 1);
+    base = normPath(raw.charAt(0) === '/' ? dirPart || '/' : joinPath(fm.cwd, dirPart));
+    if (!name) { fm.query = ''; fm.results = null; openDir(base); return; }
+  } else {
+    if (fm.scope === 'here') { applyFilter(); return; }
+    name = raw;
+    base = fm.scope === 'root' ? '/' : fm.cwd;
+  }
+  fm.findInfo.textContent = 'Ищу «' + name + '» в ' + base + '...';
+  var guard = fm.guard;
+  fetchJson('/api/fm/find?path=' + enc(base) + '&q=' + enc(name) + '&hidden=' + (fm.hidden ? '1' : '0')).then(function (data) {
+    if (!guard()) { return; }
+    fm.results = data;
+    drawList();
+    focusFind();
+  }, function (err) {
+    if (!guard()) { return; }
+    fm.findInfo.textContent = errText(err);
   });
-  fm.findInfo.textContent = q ? shown + ' из ' + rows.length : '';
-  fm.noHits.hidden = !(q && !shown);
-  if (q) { fm.rowsBox.scrollTop = 0; }
-  fm.updateListMore();
 }
 
 function rowFor(e, path, isUp) {
@@ -441,6 +506,61 @@ function rowFor(e, path, isUp) {
     row.appendChild(del);
   }
   return row;
+}
+
+function rowForResult(r, base) {
+  var isDir = r.type === 'dir' || r.link_dir;
+  var row = el('div', 'fm-row' + (fm.file && fm.file.path === r.path ? ' on' : ''));
+  var main = el('button', 'fm-rmain');
+  main.type = 'button';
+  main.title = r.path;
+  main.appendChild(el('span', 'fm-ico ' + (isDir ? 'dir' : 'file')));
+  var rel = base === '/' ? r.path.slice(1) : r.path.slice(base.length + 1);
+  var name = el('span', 'fm-name fm-rpath');
+  var cut = rel.lastIndexOf('/');
+  if (cut >= 0) { name.appendChild(el('span', 'fm-rdir', rel.slice(0, cut + 1))); }
+  name.appendChild(el('span', 'fm-rfile', rel.slice(cut + 1)));
+  main.appendChild(name);
+  main.appendChild(el('span', 'fm-size', isDir ? '' : fmtSize(r.size)));
+  main.appendChild(el('span', 'fm-time', fmtTime(r.mtime)));
+  main.addEventListener('click', function () {
+    if (isDir) { openDir(r.path); }
+    else if (r.type === 'file' || r.type === 'link') { openFile(r.path); }
+  });
+  row.appendChild(main);
+  return row;
+}
+
+var STOPPED = {
+  limit: 'показаны первые совпадения - уточните запрос',
+  dirs: 'просмотрено слишком много каталогов - начните поиск глубже',
+  time: 'поиск остановлен по времени - начните глубже'
+};
+
+function applyFilter() {
+  if (fm.results) {
+    var res = fm.results;
+    var n = res.results.length;
+    fm.findInfo.textContent = 'Найдено ' + n + ' в ' + res.path +
+      (res.truncated ? ' · ' + (STOPPED[res.reason] || 'не все') : '') + ' · Esc - к каталогу';
+    fm.noHits.hidden = n > 0;
+    fm.updateListMore();
+    return;
+  }
+  var q = isLiveFilter() ? fm.query.trim().toLowerCase() : '';
+  var rows = fm.rowsBox.querySelectorAll('.fm-row[data-name]');
+  var shown = 0;
+  Array.prototype.forEach.call(rows, function (r) {
+    var ok = !q || r.getAttribute('data-name').indexOf(q) >= 0;
+    r.hidden = !ok;
+    if (ok) { shown++; }
+  });
+  if (q) { fm.findInfo.textContent = shown + ' из ' + rows.length + ' в каталоге'; }
+  else if (fm.query.trim()) { fm.findInfo.textContent = 'Enter - искать'; }
+  else { fm.findInfo.textContent = ''; }
+  fm.noHits.hidden = !(q && !shown);
+  if (q) { fm.rowsBox.scrollTop = 0; }
+  fm.updateListMore();
 }
 
 // ----- операции со списком -----

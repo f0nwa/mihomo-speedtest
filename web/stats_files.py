@@ -12,11 +12,14 @@ docs/superpowers/specs/2026-10-07-web-file-manager-design.md).
 
 Только стандартная библиотека, Python 3.7+.
 """
+import collections
 import errno
+import fnmatch
 import os
 import posixpath
 import shutil
 import stat
+import time
 
 TEXT_LIMIT = 1024 * 1024
 WRITE_LIMIT = 2 * 1024 * 1024
@@ -25,6 +28,11 @@ CHUNK = 64 * 1024
 LIST_LIMIT = 2000
 SNIFF_BYTES = 8192
 HIDDEN_SUFFIXES = (".bak", ".part")
+FIND_LIMIT = 300
+FIND_DIRS = 20000
+FIND_SECONDS = 8.0
+# Псевдо-ФС: обход заходит в них, только если поиск начат внутри них.
+FIND_SKIP = ("/proc", "/sys", "/dev")
 PROTECTED = frozenset([
     "/", "/bin", "/sbin", "/lib", "/etc", "/opt", "/proc", "/sys", "/dev",
 ])
@@ -208,6 +216,85 @@ def tree(path):
     except OSError as exc:
         raise _oserror(exc)
     return sorted(names)
+
+
+def find(path, query, show_hidden=False, limit=FIND_LIMIT, max_dirs=FIND_DIRS,
+         seconds=FIND_SECONDS):
+    """Поиск по имени вглубь от path: подстрока без учёта регистра или маска
+    с * и ?. Обход в ширину (ближние совпадения первыми), по ссылкам не
+    ходит, каждый каталог посещается один раз. Останавливается на limit
+    совпадений, max_dirs каталогов или seconds секунд - тогда truncated.
+    """
+    base = normalize(path)
+    q = (query or "").strip().lower()
+    if not q or "/" in q or "\0" in q:
+        raise FileError(400, "bad_query")
+    if any(ch in q for ch in "*?["):
+        match = lambda name: fnmatch.fnmatchcase(name, q)
+    else:
+        match = lambda name: q in name
+    try:
+        if not stat.S_ISDIR(os.stat(base).st_mode):
+            raise FileError(400, "not_dir")
+    except OSError as exc:
+        raise _oserror(exc)
+    skip = tuple(d for d in FIND_SKIP if not (base == d or base.startswith(d + "/")))
+    deadline = time.monotonic() + seconds
+    results = []
+    seen = set()
+    queue = collections.deque([base])
+    dirs = 0
+    reason = None
+    while queue:
+        if len(results) >= limit:
+            reason = "limit"
+            break
+        if dirs >= max_dirs:
+            reason = "dirs"
+            break
+        if time.monotonic() > deadline:
+            reason = "time"
+            break
+        cur = queue.popleft()
+        dirs += 1
+        try:
+            st = os.stat(cur, follow_symlinks=False)
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            it = os.scandir(cur)
+        except OSError:
+            continue
+        with it:
+            for entry in it:
+                name = entry.name
+                full = posixpath.join(cur, name)
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    is_dir = False
+                if is_dir and full not in skip:
+                    queue.append(full)
+                if not show_hidden and name.endswith(HIDDEN_SUFFIXES):
+                    continue
+                if len(results) >= limit or not match(_display(name).lower()):
+                    continue
+                try:
+                    est = entry.stat(follow_symlinks=False)
+                    kind = _kind(est.st_mode)
+                    size = est.st_size if kind == "file" else None
+                    mtime = est.st_mtime
+                except OSError:
+                    kind, size, mtime = "other", None, None
+                results.append({
+                    "path": _display(full), "type": kind, "size": size, "mtime": mtime,
+                    "link_dir": kind == "link" and os.path.isdir(full),
+                })
+    if reason is None and len(results) >= limit and queue:
+        reason = "limit"
+    return {"path": base, "query": query, "results": results,
+            "truncated": reason is not None, "reason": reason, "dirs": dirs}
 
 
 def read_text(path, limit=TEXT_LIMIT):

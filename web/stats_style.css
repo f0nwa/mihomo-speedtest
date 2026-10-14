@@ -532,12 +532,17 @@ button.geo-chip:hover{border-color:var(--accent)}
 .fm-drop.over{background:#35c7c71f}
 .fm-up{margin:0 10px 6px;font-size:12.5px}
 .fm-up.bad{color:#ff8a80}
-.fm-find{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--card-border)}
+.fm-find{display:flex;align-items:center;gap:8px;padding:8px 10px 6px}
 .fm-find input{flex:1;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--card-border);font:inherit;font-size:12.5px;padding:5px 8px}
 .fm-find input:focus{outline:none;border-color:var(--accent)}
-.fm-rows{position:relative;max-height:62vh;overflow:auto}
+.fm-rows{position:relative;max-height:62vh;overflow:auto;border-top:1px solid var(--card-border)}
 .fm-more{position:sticky;bottom:0;display:block;width:100%;border:0;margin:0;padding:12px 10px 5px;background:linear-gradient(transparent,var(--card) 55%);color:var(--accent);font:inherit;font-size:12px;letter-spacing:.5px;text-align:center;cursor:pointer}
 .fm-nohits{padding:10px;margin:0}
+.fm-found{padding:0 10px 6px;font-size:12px}
+.fm-found:empty{display:none}
+.fm-rpath{display:flex;min-width:0}
+.fm-rdir{color:var(--muted);flex:0 100 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
+.fm-rfile{flex:0 1 auto;min-width:2ch;overflow:hidden;text-overflow:ellipsis}
 .fm-nohits[hidden],.fm-row[hidden]{display:none}
 .fm-row{display:flex;align-items:center;border-bottom:1px solid var(--border);font-size:12.5px}
 .fm-row.on{background:#222629;color:var(--accent)}
