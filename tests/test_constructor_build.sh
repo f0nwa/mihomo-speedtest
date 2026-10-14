@@ -20,7 +20,7 @@ sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,mine.example,Mine\
 
 # test_build_with_state
 mkdir "$WORK/state"
-printf '%s\n' 'del	spotify' 'svc	netflix	Netflix	media' 'src	netflix	netflix	domain	https://n/d.mrs' > "$WORK/state/services.tsv"
+printf '%s\n' 'del	spotify' 'svc	netflix	Netflix	media' 'src	netflix	netflix	domain	https://n/d.mrs' 'check	netflix	https://www.netflix.com' > "$WORK/state/services.tsv"
 if sh "$SCRIPT" --state "$WORK/state" --source "$WORK/source.yaml" --output "$WORK/out1.yaml" --report "$WORK/rep1" > "$WORK/log1" 2>&1; then
   grep -q '^  - name: Spotify$' "$WORK/out1.yaml" && fail "del spotify не применился"
   grep -q '^  - name: Netflix$' "$WORK/out1.yaml" || fail "своего сервиса нет"

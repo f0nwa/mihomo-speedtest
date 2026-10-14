@@ -471,6 +471,7 @@ STATIC_FILES = {
     "app-xkeen.js": "stats_app_xkeen.js",
     "app-components.js": "stats_app_components.js",
     "app-files.js": "stats_app_files.js",
+    "app-diag.js": "stats_app_diag.js",
     "app-constructor.js": "stats_app_constructor.js",
     "app-constructor-model.js": "stats_app_constructor_model.js",
     "app-constructor-modules.js": "stats_app_constructor_modules.js",

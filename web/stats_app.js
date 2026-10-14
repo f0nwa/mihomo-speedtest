@@ -15,6 +15,7 @@ import { renderLog, stopLogPolling } from './app-log.js';
 import { configDirty, leaveConfig, renderConfig } from './app-config.js';
 import { renderXkeen, stopXkeenPolling, xkeenDirty } from './app-xkeen.js';
 import { filesDirty, renderFiles, stopFiles } from './app-files.js';
+import { renderDiag, stopDiagPolling } from './app-diag.js';
 
 function updateActiveNav(path) {
   var links = document.querySelectorAll('nav a[data-link]');
@@ -65,12 +66,14 @@ function render(path) {
   stopLogPolling();
   stopXkeenPolling();
   stopFiles();
+  stopDiagPolling();
   if (path === '/updates') { renderUpdates(); }
   else if (path === '/settings') { renderSettings(); }
   else if (path === '/log') { renderLog(); }
   else if (path === '/config') { renderConfig(); }
   else if (path === '/xkeen') { renderXkeen(); }
   else if (path === '/files') { renderFiles(); }
+  else if (path === '/diag') { renderDiag(); }
   else { renderStats(); }
   if (path !== '/updates') { refreshUpdatesBadge(); }
 }

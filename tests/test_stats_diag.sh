@@ -53,6 +53,8 @@ svc${T}lb${T}LB${T}s
 check${T}lb${T}https://lb.example
 svc${T}bare${T}Bare${T}s
 svc${T}nope${T}Nope${T}s
+svc${T}big${T}Big${T}s
+check${T}big${T}https://big.example
 check${T}nope${T}https://nope.example
 TSV
 cp "$ROOT/tests/fixtures/diag/proxies.json" "$SC/proxies.json"
@@ -79,7 +81,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     -o) out=$2; shift ;;
     -w) fmt=$2; shift ;;
-    -x|-K|-m|-A|-H|-X|--data-binary|--max-time|--connect-timeout) shift ;;
+    -x|-K|-m|-A|-H|-X|--data-binary|--max-time|--connect-timeout|--max-filesize) shift ;;
     -*) ;;
     *) url=$1 ;;
   esac
@@ -95,7 +97,8 @@ case $url in
     emit < "$f"; exit 0 ;;
   "$API/proxies/"*"/delay"*)
     k=${url#"$API/proxies/"}; k=${k%%/delay*}
-    d=$(cat "$SC/delay-$k" 2>/dev/null || echo fail)
+    case $url in *cp.cloudflare.com*|*msftconnecttest*|*captive.apple.com*) f=$SC/delay-$k ;; *) f=$SC/alt-$k ;; esac
+    d=$(cat "$f" 2>/dev/null || echo fail)
     if [ "$d" = fail ]; then printf '{"message":"Timeout"}' | emit; else printf '{"delay":%s}' "$d" | emit; fi
     exit 0 ;;
   "$API/proxies/"*)
@@ -106,14 +109,14 @@ esac
 k=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
 if [ -f "$SC/site-$k" ]; then read -r rc code < "$SC/site-$k"; else rc=7; code=000; fi
 if [ -f "$SC/body-$k" ]; then emit < "$SC/body-$k"; else : | emit; fi
-[ -z "$fmt" ] || printf '%s 0.096' "$code"
+[ -z "$fmt" ] || printf '%s 0.096 %s' "$code" "$(cat "$SC/redir-$k" 2>/dev/null)"
 exit "$rc"
 STUB
 chmod +x "$W/bin/curl"
 
 cgi() {
   # $1 - действие, $2 - метод, $3 - QUERY_STRING
-  DIR=$W TMPROOT=$W/tmp LOCK=$W/tmp/mst.lock MIHOMO_DIR=$W/mihomo PATH="$W/bin:$PATH" \
+  DIAG_ALT_MAX_SEC=${DIAG_ALT_MAX_SEC:-60} DIAG_TOTAL_MAX_SEC=${DIAG_TOTAL_MAX_SEC:-300} DIR=$W TMPROOT=$W/tmp LOCK=$W/tmp/mst.lock MIHOMO_DIR=$W/mihomo PATH="$W/bin:$PATH" \
     CONFIG_STATE_DIR=$W/config-state REQUEST_METHOD=$2 QUERY_STRING=${3:-} MST_DIAG_ACTION=$1 \
     DIAG_STATE_POLL=0 "$W/stats_diag.sh"
 }
@@ -126,7 +129,7 @@ wait_done() {
   done
   fail "диагностика не завершилась за 15 с: $(cat "$W/tmp/mst-diag/state.json" 2>/dev/null)"
 }
-reset_sc() { rm -f "$SC"/site-* "$SC"/body-* "$SC"/delay-* "$SC/proxies.count" "$SC/proxies2.json" "$SC/slow" "$SC/curl.log"; now_tsv; }
+reset_sc() { rm -f "$SC"/site-* "$SC"/body-* "$SC"/redir-* "$SC"/delay-* "$SC"/alt-* "$SC/proxies.count" "$SC/proxies2.json" "$SC/slow" "$SC/curl.log"; now_tsv; }
 site() { printf '%s %s\n' "$2" "$3" > "$SC/site-$(key "$1")"; }
 svc() {
   # svc ИМЯ ПОЛЕ - значение поля сервиса из state.json (через python3)
@@ -160,7 +163,7 @@ assert_contains '"stage":"none"' "$r" "до первой проверки"
 reset_sc
 ls "$W" > "$TEST_ROOT/dir.before"
 site https://github.com 0 403; echo 84 > "$SC/delay-$E_NL"
-site https://chatgpt.com 28 000; site https://claude.ai 0 200
+site https://chatgpt.com 0 403; site https://claude.ai 0 200
 site https://rutracker.org 0 200
 run_diag A
 assert_eq "$(svc GitHub verdict)" blocked "403 - сервис не пускает ноду"
@@ -168,14 +171,18 @@ assert_contains 403 "$(svc GitHub detail)" "detail с кодом"
 assert_eq "$(svc GitHub control_ms)" 84 "контрольный запрос через ноду"
 assert_eq "$(svc GitHub node)" "$NL" "текущая нода с кавычками"
 assert_eq "$(svc GitHub chain)" "GitHub|⚡ FAST|$NL" "цепочка"
-assert_eq "$(svc 'A&B' verdict)" ok "основной адрес не ответил, запасной - да"
-assert_eq "$(svc 'A&B' url)" https://claude.ai "url - тот, что дал вердикт"
+assert_eq "$(svc 'A&B' verdict)" blocked "несколько адресов - разные продукты: худший результат"
+assert_eq "$(svc 'A&B' url)" https://chatgpt.com "url - тот, что дал вердикт"
 assert_eq "$(svc Torrents verdict)" direct "DIRECT"
 assert_eq "$(svc Ads verdict)" rejected "REJECT"
 assert_eq "$(svc LB verdict)" lb "load-balance"
 assert_eq "$(svc Bare verdict)" no_url "без адреса проверки"
 assert_eq "$(svc Nope verdict)" missing "группы нет в ядре"
-assert_eq "$(svc GitHub alt.state)" none "фаза 2 пока не запускается"
+assert_eq "$(svc GitHub alt.state)" done "поиск замены для заблокированного"
+assert_eq "$(svc GitHub alt.found)" "" "у DE-01 нет ответа - замены нет"
+assert_eq "$(svc GitHub alt.checked)" 1 "кандидат один (текущая нода исключена)"
+assert_eq "$(svc Telegram alt.state 2>/dev/null)" "<нет сервиса>" "служебная проверка svc"
+assert_eq "$(svc Torrents alt.state)" none "сервису напрямую замена не ищется"
 s=$(cat "$W/tmp/mst-diag/state.json")
 assert_contains '"stage":"done"' "$s" "stage done"
 grep -q -- '-X PUT' "$SC/curl.log" && fail "диагностика меняла выбор в группах (PUT)"
@@ -188,12 +195,39 @@ cmp -s "$TEST_ROOT/dir.before" "$TEST_ROOT/dir.after" || fail "в \$DIR появ
 r=$(cgi status GET | body)
 assert_contains '"running":false' "$r" "status после прогона"
 
-# ----- B: страница блокировки при 200 -----
+# ----- B: страницы блокировки и обычные страницы с похожим текстом -----
 reset_sc
-site https://github.com 0 200; printf '{"error":{"code":"unsupported_country"}}' > "$SC/body-$(key https://github.com)"
+site https://github.com 0 503; printf '<title>Just a moment</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate"></script>' > "$SC/body-$(key https://github.com)"
 echo 84 > "$SC/delay-$E_NL"
+site https://chatgpt.com 0 200; printf '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>unsupported_country' > "$SC/body-$(key https://chatgpt.com)"
+site https://claude.ai 0 200
 run_diag B
-assert_eq "$(svc GitHub verdict)" blocked "unsupported_country при 200"
+assert_eq "$(svc GitHub verdict)" blocked "503 + страница проверки Cloudflare"
+assert_eq "$(svc 'A&B' verdict)" ok "200 со скриптом Cloudflare - это рабочая страница"
+reset_sc
+site https://github.com 0 302; echo 'https://github.com/app-unavailable-in-region' > "$SC/redir-$(key https://github.com)"
+echo 84 > "$SC/delay-$E_NL"; site https://chatgpt.com 0 302; echo 'https://chatgpt.com/auth/login' > "$SC/redir-$(key https://chatgpt.com)"
+site https://claude.ai 63 200
+run_diag B2
+assert_eq "$(svc GitHub verdict)" blocked "редирект на страницу «недоступно в регионе»"
+assert_eq "$(svc 'A&B' verdict)" ok "обычный редирект и обрезанный по размеру ответ - работает"
+grep -q -- '--max-filesize' "$SC/curl.log" || fail "размер ответа не ограничен"
+
+# ----- I7: HTTP-ответ есть, контроль не прошёл - нода жива -----
+reset_sc
+site https://github.com 0 503
+run_diag B3
+assert_eq "$(svc GitHub verdict)" suspect "ответ сервиса пришёл - значит, нода работает"
+
+# ----- контрольный адрес не совпадает с test-url групп -----
+reset_sc
+cp "$SC/proxies.json" "$TEST_ROOT/p.bak"
+sed 's|"testUrl":"https://www.gstatic.com/generate_204"|"testUrl":"https://cp.cloudflare.com/generate_204"|' "$TEST_ROOT/p.bak" > "$SC/proxies.json"
+site https://github.com 28 000; echo 84 > "$SC/delay-$E_NL"
+run_diag T
+grep -q 'cp.cloudflare.com' "$SC/curl.log" && fail "контрольный адрес совпал с test-url группы"
+assert_eq "$(svc GitHub verdict)" suspect "контроль через другой адрес"
+cp "$TEST_ROOT/p.bak" "$SC/proxies.json"
 
 # ----- C/D: таймаут сервиса, контроль ok / fail -----
 reset_sc
@@ -204,6 +238,29 @@ reset_sc
 site https://github.com 28 000
 run_diag D
 assert_eq "$(svc GitHub verdict)" node_dead "таймаут и нода не отвечает"
+
+# ----- I1: блокировка без pid (запуск ещё пишет её) - не «прервалась» -----
+reset_sc
+mkdir -p "$W/tmp/mst-diag/lock"; rm -f "$W/tmp/mst-diag/lock/pid"
+printf 'running\t1\nstage\tphase1\n' > "$W/tmp/mst-diag/meta"; : > "$W/tmp/mst-diag/services.tsv"
+r=$(cgi status GET | body)
+[ -d "$W/tmp/mst-diag/lock" ] || fail "status снял блокировку, в которую запуск ещё не записал pid"
+case $r in *'"stage":"error"'*) fail "status объявил ошибку во время запуска" ;; esac
+rm -rf "$W/tmp/mst-diag/lock"
+
+# ----- I8: остановка в фазе 1 - непроверенные помечаются, а не «проверяются» -----
+reset_sc; echo 0.4 > "$SC/slow"; site https://github.com 0 403; echo 84 > "$SC/delay-$E_NL"
+r=$(cgi start POST | body)
+i=0; until grep -q '"done":1' "$W/tmp/mst-diag/state.json" 2>/dev/null || [ "$i" -ge 150 ]; do sleep 0.1; i=$((i + 1)); done
+cgi cancel POST > /dev/null
+wait_done; rm -f "$SC/slow"
+s=$(cat "$W/tmp/mst-diag/state.json")
+case $s in *'"verdict":"pending"'*) fail "после остановки остались строки «проверяется»" ;; esac
+assert_contains '"verdict":"skipped"' "$s" "непроверенные - skipped"
+# лимит времени фазы 2 - не начатые поиски помечены
+reset_sc; site https://github.com 0 403; echo 84 > "$SC/delay-$E_NL"
+DIAG_TOTAL_MAX_SEC=0 run_diag L
+assert_eq "$(svc GitHub alt.state)" skipped "поиск не начат из-за лимита времени"
 
 # ----- E: выбор группы сменился во время проверки -----
 reset_sc
@@ -240,6 +297,62 @@ cp "$TEST_ROOT/cfg" "$W/mihomo/config.yaml"
 
 # ----- GET на start - 405 -----
 r=$(cgi start GET); assert_contains 'Status: 405' "$r" "start только POST"
+
+# ----- фаза 2: поиск рабочих нод -----
+# Группа Big: 20 нод, выбрана N0.
+python3 - "$SC/proxies.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+names = ['N%d' % i for i in range(20)]
+for n in names:
+    d['proxies'][n] = {'name': n, 'type': 'Vless', 'history': []}
+d['proxies']['Big'] = {'name': 'Big', 'type': 'Selector', 'now': 'N0', 'all': names}
+json.dump(d, open(p, 'w'), ensure_ascii=False)
+PY
+alt() { echo "$2" > "$SC/alt-$(enc "$1")"; }
+reset_sc; site https://big.example 0 403; echo 50 > "$SC/delay-$(enc N0)"
+site https://github.com 0 403; echo 84 > "$SC/delay-$E_NL"; alt DE-01 90
+run_diag P1
+assert_eq "$(svc GitHub alt.found)" DE-01 "нашлась рабочая нода"
+assert_eq "$(svc Big alt.state)" done "Big: поиск закончен"
+assert_eq "$(svc Big alt.checked)" 15 "Big: не больше 15 нод"
+assert_eq "$(svc Big alt.limit)" 15 "Big: лимит 15"
+assert_eq "$(svc Big alt.found)" "" "Big: ни одна не подошла"
+grep -q 'expected=200-399' "$SC/curl.log" || fail "поиск замены без expected=200-399"
+
+reset_sc; site https://big.example 0 403; echo 50 > "$SC/delay-$(enc N0)"
+for i in 3 5 6 7 9; do alt "N$i" 40; done
+# порядок по статистике: N9 стабильнее всех, N5 - мёртвая
+printf 'N9\tx\tx\tx\t10\t10\nN5\tx\tx\tx\t10\t0\nN3\tx\tx\tx\t10\t9\n' > "$W/node_stability.tsv"
+run_diag P2
+assert_eq "$(svc Big alt.found)" "N9|N3|N6" "три первые рабочие по порядку стабильности, мёртвая пропущена"
+assert_eq "$(svc Big alt.checked)" 6 "остановка после трёх найденных (порядок N9 N3, затем без статистики N1 N2 N4 N6)"
+rm -f "$W/node_stability.tsv"
+
+reset_sc; site https://lb.example 0 200; alt DE-01 50
+run_diag P3
+assert_eq "$(svc LB verdict)" lb "load-balance"
+assert_eq "$(svc LB alt.found)" DE-01 "load-balance: поиск по нодам группы"
+assert_eq "$(svc LB alt.checked)" 2 "load-balance: обе ноды проверены"
+
+reset_sc; site https://big.example 0 403; echo 50 > "$SC/delay-$(enc N0)"; echo 0.3 > "$SC/slow"
+DIAG_ALT_MAX_SEC=1 run_diag P4
+c=$(svc Big alt.checked)
+[ "$c" -ge 1 ] && [ "$c" -lt 15 ] || fail "остановка по времени: проверено $c"
+
+# остановка посреди поиска
+reset_sc; site https://big.example 0 403; echo 50 > "$SC/delay-$(enc N0)"; echo 0.4 > "$SC/slow"
+r=$(cgi start POST | body); assert_contains '"started":true' "$r" "start перед остановкой"
+i=0; until grep -q '"state":"searching"' "$W/tmp/mst-diag/state.json" 2>/dev/null || [ "$i" -ge 150 ]; do sleep 0.1; i=$((i + 1)); done
+r=$(cgi cancel POST | body); assert_contains '"cancelled":true' "$r" "cancel"
+wait_done
+assert_contains '"stage":"cancelled"' "$(cat "$W/tmp/mst-diag/state.json")" "stage cancelled"
+assert_contains '"state":"stopped"' "$(cat "$W/tmp/mst-diag/state.json")" "поиск, на котором остановили, помечен остановленным"
+[ ! -d "$W/tmp/mst-diag/lock" ] || fail "после остановки блокировка не снята"
+rm -f "$SC/slow"
+r=$(cgi start POST | body); assert_contains '"started":true' "$r" "новый start после остановки"
+wait_done
+grep -q -- '-X PUT' "$SC/curl.log" && fail "фаза 2 меняла выбор в группах (PUT)"
 
 # ----- маршруты и списки файлов установки -----
 for r in '"api/diag": ("stats_diag.sh"' '"api/diag/start": ("stats_diag.sh"' '"api/diag/cancel": ("stats_diag.sh"'; do

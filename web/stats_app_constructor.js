@@ -284,6 +284,25 @@ export function renderConstructor(modeBar, opts) {
       return row;
     }
 
+    // Адрес, который открывает вкладка «Диагностика», чтобы понять, пускает
+    // ли сервис ноду (строка check в services.tsv). Пусто - по умолчанию.
+    function checkUrlRow(id) {
+      var wrap = el('div');
+      var def = model.defaultCheckUrls(id);
+      wrap.appendChild(el('div', 'hint', 'Адрес для проверки (необязательно): страница, которую открывает вкладка «Диагностика», чтобы понять, пускает ли сервис ноду. ' +
+        (def.length ? 'Пусто - ' + def.join(', ') + '.' : 'Пусто - первый домен сервиса.')));
+      var row = el('div', 'xk-add');
+      var inp = el('input'); inp.type = 'text'; inp.value = model.checkUrl(id);
+      inp.placeholder = def[0] || 'https://example.com';
+      inp.setAttribute('aria-label', 'Адрес для проверки');
+      var save = button('Сохранить', 'small');
+      save.addEventListener('click', function () { edit(function () { model.setCheckUrl(id, inp.value); }); });
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { save.click(); } });
+      row.appendChild(inp); row.appendChild(save);
+      wrap.appendChild(row);
+      return wrap;
+    }
+
     function serviceRow(s) {
       var box = el('div');
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
@@ -333,6 +352,7 @@ export function renderConstructor(modeBar, opts) {
           chips.appendChild(c);
         });
         if (chips.firstChild) { p.appendChild(chips); }
+        p.appendChild(checkUrlRow(s.id));
         box.appendChild(p);
       }
       return box;

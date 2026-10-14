@@ -85,5 +85,23 @@ if command -v python3 >/dev/null 2>&1; then
     "False done 100 Ищу \"x\" 2 GitHub|NL \"03\" \\ x NL \"03\" \\ x 84 80 {'state': 'done', 'checked': 15, 'limit': 15, 'found': ['DE-01', 'FI-02']} None {'state': 'none', 'checked': 0, 'limit': 0, 'found': []}" "render: JSON состояния"
 fi
 
+# ----- order (порядок кандидатов для поиска замены) -----
+# node_stability.tsv: name first last last_in_pool runs_seen runs_alive ...
+printf '%s\n' 'A' 'B "q"' 'C' 'Cur' 'Dead' 'Low' 'New' 'Top' 'Few' > "$WORK/cands"
+{
+  printf 'A\tx\tx\tx\t10\t9\n'
+  printf 'B "q"\tx\tx\tx\t10\t10\n'
+  printf 'C\tx\tx\tx\t10\t9\n'
+  printf 'Cur\tx\tx\tx\t10\t10\n'
+  printf 'Dead\tx\tx\tx\t10\t0\n'
+  printf 'Low\tx\tx\tx\t10\t5\n'
+  printf 'Top\tx\tx\tx\t20\t20\n'
+  printf 'Few\tx\tx\tx\t3\t0\n'
+} > "$WORK/stab"
+LC_ALL=C $AWK -v mode=order -v exclude=Cur -v min_uptime=80 -v min_runs=8 -v stab_file="$WORK/stab" -f "$SCRIPT" "$WORK/cands" > "$WORK/ord" || fail "order завершился с ошибкой"
+assert_eq "$(tr '\n' '|' < "$WORK/ord")" 'B "q"|Top|A|C|New|Few|Low|' "order: стабильные по убыванию uptime, без статистики, слабые; мёртвая и текущая исключены"
+LC_ALL=C $AWK -v mode=order -v exclude= -v min_uptime=80 -v min_runs=8 -v stab_file=/nonexistent -f "$SCRIPT" "$WORK/cands" > "$WORK/ord2" || fail "order без файла статистики"
+assert_eq "$(tr '\n' '|' < "$WORK/ord2")" 'A|B "q"|C|Cur|Dead|Low|New|Top|Few|' "order: без статистики - исходный порядок"
+
 [ "$FAILED" = 0 ] || exit 1
 echo "OK test_diag_awk"

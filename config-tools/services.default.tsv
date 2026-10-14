@@ -47,7 +47,6 @@ svc	ai	AI	platforms
 icon	ai	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
 check	ai	https://chatgpt.com
 check	ai	https://claude.ai
-check	ai	https://gemini.google.com
 svc	apple	Apple	platforms
 icon	apple	https://www.svgrepo.com/show/494227/apple-rounded-border.svg
 check	apple	https://www.apple.com

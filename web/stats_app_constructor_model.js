@@ -48,7 +48,7 @@ var RESERVED = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL
   'Заблок. сервисы', '⚡ Быстрый пул', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'];
 
 export function parseDefaults(text) {
-  var d = { sections: [], services: [], byId: {}, rules: [] };
+  var d = { sections: [], services: [], byId: {}, rules: [], checks: {} };
   lines(text).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
     var f = line.split(TAB);
@@ -57,6 +57,7 @@ export function parseDefaults(text) {
       var s = { id: f[1], name: f[2], section: f[3] };
       d.services.push(s); d.byId[s.id] = s;
     } else if (f[0] === 'rule') { d.rules.push({ owner: f[1], text: f[2] }); }
+    else if (f[0] === 'check') { (d.checks[f[1]] = d.checks[f[1]] || []).push(f[2]); }
   });
   return d;
 }
@@ -148,6 +149,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var bfirsts = [];          // [{group,value}] первое значение proxies
   var bmembers = {};         // группа -> [групповые токены] (состав)
   var ownScope = false;      // прокси и во всех сервисных группах (ownscope all)
+  var checks = {};           // id -> свой адрес проверки (вкладка «Диагностика»)
 
   lines(servicesText).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
@@ -164,6 +166,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
     else if (f[0] === 'bmembers') { bmembers[f[1]] = f[2] ? f[2].split('|') : []; }
     else if (f[0] === 'bfirst') { bfirsts.push({ group: f[1], value: f.slice(2).join(TAB) }); }
     else if (f[0] === 'ownscope') { ownScope = true; }
+    else if (f[0] === 'check') { checks[f[1]] = f[2] || ''; }
     else { provLines.push(line); }
   });
   lines(userRulesText).forEach(function (l) { l = l.trim(); if (l) { userRules.push(l); } });
@@ -369,6 +372,19 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       users = users.filter(function (u) { return u.id !== id; });
       doms = doms.filter(function (x) { return x.owner !== id; });
       srcLines = srcLines.filter(function (l) { return l.split(TAB)[1] !== id; });
+      delete checks[id];
+    },
+    // Адрес проверки сервиса для вкладки «Диагностика»: свой (строка check
+    // overlay) и адреса по умолчанию из services.default.tsv.
+    checkUrl: function (id) { return checks[id] || ''; },
+    defaultCheckUrls: function (id) { return (d.checks[id] || []).slice(); },
+    setCheckUrl: function (id, url) {
+      needService(id);
+      url = String(url || '').trim();
+      if (!url) { delete checks[id]; return; }
+      if (/[\s"']/.test(url)) { throw new Error('Адрес проверки - без пробелов и кавычек'); }
+      if (!/^https?:\/\/[^\/]+/.test(url)) { throw new Error('Адрес проверки должен начинаться с http:// или https://'); }
+      checks[id] = url;
     },
     addDomain: function (id, type, value) {
       needService(id);
@@ -505,6 +521,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       // домены убранного встроенного сервиса сохраняются (сборка их
       // пропускает) - «Вернуть» сервис возвращает и их
       doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
+      Object.keys(checks).forEach(function (id) { out.push(['check', id, checks[id]].join(TAB)); });
       provLines.forEach(function (l) { out.push(l); });
       bsets.forEach(function (x) { out.push(['bset', x.group, x.key, x.value].join(TAB)); });
       tb.order.concat(Object.keys(bmembers).filter(function (k) { return !tb.groups[k]; })).forEach(function (k) {
@@ -556,6 +573,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         }
         if (f[0] === 'svc') { return (added ? 'Новый сервис ' : 'Удалить свой сервис ') + f[2]; }
         if (f[0] === 'dom') { return added ? '+ домен ' + f[3] + ' → ' + nameOf(f[1]) : 'Убрать домен ' + f[3] + ' (' + nameOf(f[1]) + ')'; }
+        if (f[0] === 'check') { return added ? '+ адрес проверки ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать адрес проверки (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'src') { return added ? '+ набор ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать набор ' + f[2] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'bset') { return added ? 'Группа ' + f[1] + ': ' + f[2] + ' = ' + f[3] : 'Группа ' + f[1] + ': ' + f[2] + ' как в шаблоне'; }
         if (f[0] === 'bmembers') {
@@ -569,10 +587,10 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }
-      ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bmembers', 'bfirst', ''].forEach(function (kind) {
+      ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'bset', 'bmembers', 'bfirst', ''].forEach(function (kind) {
         function mine(l) {
           var k = l.split(TAB)[0];
-          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'bset', 'bmembers', 'bfirst'].indexOf(k) < 0;
+          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'bset', 'bmembers', 'bfirst'].indexOf(k) < 0;
         }
         // изменённое значение базовой группы - одна строка («стало»), без «было»
         function replaced(l) {

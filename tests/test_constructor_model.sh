@@ -302,6 +302,31 @@ const mr = M.createModel(D, ['bset', '⚙️Manual', 'type', 'url-test'].join(T)
 eq(mr.baseGroups()[4].tolerance, { def: 50, value: 50 }, 'edit: состояние - url-test с tolerance');
 eq(mr.serialize().services, ['bset', '⚙️Manual', 'type', 'url-test'].join(T) + '\n' + ['bmembers', 'Заблок. сервисы', 'DIRECT'].join(T) + '\n', 'edit: состояние сериализуется как было');
 
+// ----- адрес проверки для вкладки «Диагностика» (строка check) -----
+const DC = D + ['check', 'youtube', 'https://www.youtube.com'].join(T) + '\n' + ['check', 'youtube', 'https://m.youtube.com'].join(T) + '\n';
+const mc = M.createModel(DC, ['check', 'spotify', 'https://open.spotify.com/x'].join(T) + '\n', '');
+eq(mc.serialize().services, ['check', 'spotify', 'https://open.spotify.com/x'].join(T) + '\n', 'check: roundtrip без правок');
+eq(mc.checkUrl('spotify'), 'https://open.spotify.com/x', 'check: свой адрес');
+eq(mc.checkUrl('youtube'), '', 'check: своего нет');
+eq(mc.defaultCheckUrls('youtube'), ['https://www.youtube.com', 'https://m.youtube.com'], 'check: адреса по умолчанию из таблицы');
+const ic = mc.serialize();
+mc.setCheckUrl('youtube', 'https://www.youtube.com/feed');
+mc.setCheckUrl('youtube', ' https://www.youtube.com/feed/you ');
+eq(mc.serialize().services.split('\n').filter(l => l.startsWith('check' + T + 'youtube')), [['check', 'youtube', 'https://www.youtube.com/feed/you'].join(T)], 'check: повторная установка заменяет');
+eq(mc.summary(ic), ['+ адрес проверки https://www.youtube.com/feed/you → YouTube'], 'check: сводка добавления');
+eq(mc.changes(ic).services, true, 'check: блок сервисов изменён');
+mc.setCheckUrl('spotify', '');
+eq(mc.checkUrl('spotify'), '', 'check: пустая строка удаляет');
+eq(mc.summary(ic).indexOf('Убрать адрес проверки (Spotify)') >= 0, true, 'check: сводка удаления');
+throws(() => mc.setCheckUrl('youtube', 'ftp://x'), 'check: не http');
+throws(() => mc.setCheckUrl('youtube', 'https://a b'), 'check: пробел');
+throws(() => mc.setCheckUrl('youtube', 'https://a"b'), 'check: кавычка');
+throws(() => mc.setCheckUrl('nosuch', 'https://a'), 'check: нет сервиса');
+const nid = mc.addService('Мой', 'other');
+mc.setCheckUrl(nid, 'https://my.example');
+mc.removeUserService(nid);
+eq(mc.serialize().services.indexOf('my.example'), -1, 'check: удаляется вместе со своим сервисом');
+
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
 JS

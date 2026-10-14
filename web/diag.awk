@@ -26,6 +26,16 @@
 # mode=now - выбор (now) одной группы из ответа GET /proxies/<имя>:
 #   awk -v mode=now -f diag.awk group.json  -> строка с выбором (пусто - нет)
 #
+# mode=order - порядок проверки кандидатов при поиске замены:
+#   awk -v mode=order -v exclude=NODE -v min_uptime=N -v min_runs=N \
+#       -v stab_file=node_stability.tsv -f diag.awk candidates.txt
+#   candidates.txt - имена по одному в строке. На выходе: сначала ноды с
+#   накопленной статистикой (runs_seen >= min_runs) и uptime >= min_uptime -
+#   по убыванию uptime; затем ноды без достаточной статистики; затем со
+#   слабым uptime - по убыванию. При равенстве - исходный порядок. Мёртвые
+#   по статистике (runs_seen >= min_runs, runs_alive = 0) и exclude
+#   пропускаются. Поля node_stability.tsv - в шапке node_stats_update.awk.
+#
 # mode=render - JSON состояния для вкладки (GET /api/diag):
 #   awk -v mode=render -v meta=PATH -f diag.awk services.tsv
 #   meta - строки ключ<TAB>значение: id running(0|1) stage error started
@@ -209,6 +219,39 @@ function t_print(   j, id, u) {
   }
 }
 
+# --- order ---
+function order_print(   line, f, i, j, n, up, grp, key, tmp, k) {
+  if (stab_file != "") {
+    while ((getline line < stab_file) > 0) {
+      n = split(line, f, "\t")
+      if (n >= 6) { O_RS[f[1]] = f[5] + 0; O_RA[f[1]] = f[6] + 0 }
+    }
+    close(stab_file)
+  }
+  k = 0
+  for (i = 1; i <= O_N; i++) {
+    n = O_NAME[i]
+    if ((n in O_RS) && O_RS[n] >= min_runs + 0 && O_RS[n] > 0) {
+      if (O_RA[n] == 0) continue
+      up = O_RA[n] * 100 / O_RS[n]
+      grp = (up >= min_uptime + 0) ? 1 : 3
+    } else { grp = 2; up = 0 }
+    # ключ сортировки: группа, затем uptime по убыванию, затем исходный порядок
+    k++; L_NAME[k] = n; L_G[k] = grp; L_U[k] = up; L_I[k] = i
+  }
+  for (i = 2; i <= k; i++) {
+    j = i
+    while (j > 1 && (L_G[j - 1] > L_G[j] || (L_G[j - 1] == L_G[j] && (L_U[j - 1] < L_U[j] || (L_U[j - 1] == L_U[j] && L_I[j - 1] > L_I[j]))))) {
+      tmp = L_NAME[j]; L_NAME[j] = L_NAME[j - 1]; L_NAME[j - 1] = tmp
+      tmp = L_G[j]; L_G[j] = L_G[j - 1]; L_G[j - 1] = tmp
+      tmp = L_U[j]; L_U[j] = L_U[j - 1]; L_U[j - 1] = tmp
+      tmp = L_I[j]; L_I[j] = L_I[j - 1]; L_I[j - 1] = tmp
+      j--
+    }
+  }
+  for (i = 1; i <= k; i++) print L_NAME[i]
+}
+
 # --- render ---
 function jq(v,   i, c, out, L) {
   out = ""; L = length(v)
@@ -259,6 +302,7 @@ BEGIN {
 
 mode == "resolve" || mode == "now" { S = S $0 }
 mode == "render" { render_row() }
+mode == "order" { sub(/\r$/, ""); if ($0 != "" && $0 != exclude && !($0 in O_SEEN)) { O_SEEN[$0] = 1; O_NAME[++O_N] = $0 } }
 mode == "targets" { t_default($0) }
 
 END {
@@ -273,6 +317,8 @@ END {
     if (NOW["\001"] != "") print NOW["\001"]
   } else if (mode == "render") {
     print "]}"
+  } else if (mode == "order") {
+    order_print()
   } else if (mode == "targets") {
     if (overlay_file != "") {
       while ((getline line < overlay_file) > 0) t_overlay(line)

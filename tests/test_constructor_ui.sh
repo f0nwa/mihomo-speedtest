@@ -132,4 +132,8 @@ if command -v node >/dev/null 2>&1; then
     node --check "$T/${f%.js}.mjs" || fail "синтаксис $f"
   done
 fi
+# Поле «Адрес для проверки» (вкладка «Диагностика») в раскрытом сервисе.
+grep -q 'Адрес для проверки' "$ROOT/web/stats_app_constructor.js" || fail "нет поля «Адрес для проверки» в редакторе сервиса"
+grep -q 'model.setCheckUrl(' "$ROOT/web/stats_app_constructor.js" || fail "поле адреса проверки не сохраняет в модель"
+grep -q 'model.defaultCheckUrls(' "$ROOT/web/stats_app_constructor.js" || fail "подсказка не показывает адрес по умолчанию"
 echo "OK test_constructor_ui"

@@ -56,6 +56,7 @@ FILE|web|web/stats_app_log.js|/opt/etc/mihomo-speedtest/stats_app_log.js|0644|no
 FILE|web|web/stats_app_config.js|/opt/etc/mihomo-speedtest/stats_app_config.js|0644|none
 FILE|web|web/stats_app_files.js|/opt/etc/mihomo-speedtest/stats_app_files.js|0644|none
 FILE|web|web/stats_app_xkeen.js|/opt/etc/mihomo-speedtest/stats_app_xkeen.js|0644|none
+FILE|web|web/stats_app_diag.js|/opt/etc/mihomo-speedtest/stats_app_diag.js|0644|none
 FILE|web|web/stats_app_components.js|/opt/etc/mihomo-speedtest/stats_app_components.js|0644|none
 FILE|web|web/stats_app_constructor.js|/opt/etc/mihomo-speedtest/stats_app_constructor.js|0644|none
 FILE|web|web/stats_app_constructor_model.js|/opt/etc/mihomo-speedtest/stats_app_constructor_model.js|0644|none

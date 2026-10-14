@@ -11,7 +11,7 @@
    встроенном <style> в web/stats_cgi.sh и в web/render_stats.awk -
    менять нужно все три места одинаково. */
 
-:root{--bg:#17191b;--card:#1e2124;--card-border:#33383c;--border:#26292c;--text:#e7e6e2;--muted:#8b9096;--shadow:none;--accent:#35c7c7;--danger:#d1453b}
+:root{--bg:#17191b;--card:#1e2124;--card-border:#33383c;--border:#26292c;--text:#e7e6e2;--muted:#8b9096;--shadow:none;--accent:#35c7c7;--danger:#d1453b;--ok:#4cbf6b;--warn:#d9a43a}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{font:14px/1.5 ui-monospace,"SF Mono",Consolas,Menlo,monospace;margin:0;background:var(--bg);color:var(--text)}
@@ -569,3 +569,25 @@ button.geo-chip:hover{border-color:var(--accent)}
   .fm-rmain{grid-template-columns:16px minmax(0,1fr) 64px}
   .fm-time{display:none}
 }
+/* Вкладка «Диагностика» (stats_app_diag.js): пилюли вердиктов, подсветка
+   проблемных строк, плитки «работают» и «похоже на блокировку». --ok и
+   --warn нужны только SPA, в stats_cgi.sh и render_stats.awk их нет. */
+.kpi.kpi-ok{border-top-color:var(--ok)}
+.kpi.kpi-warn{border-top-color:var(--warn)}
+.v{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid;font-size:12px;white-space:nowrap}
+.v::before{content:"";width:7px;height:7px;background:currentColor;flex:0 0 auto}
+.v.ok,.v.direct{color:var(--ok)}
+.v.blocked,.v.error,.v.missing{color:var(--danger)}
+.v.suspect{color:var(--warn)}
+.v.node_dead,.v.no_url,.v.rejected,.v.pending,.v.skipped{color:var(--muted)}
+.v.lb{color:var(--accent)}
+.diag-table td{vertical-align:top}
+.diag-table tr.diag-problem td{background:rgba(209,69,59,.06)}
+.diag-chain{color:var(--muted)}
+.diag-chain b{color:var(--text);font-weight:400}
+.diag-detail{color:var(--muted)}
+.diag-detail code{color:var(--text)}
+.diag-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px;font-size:12px;color:var(--muted)}
+.diag-error{border-top:3px solid var(--danger)}
+.table-scroll td.diag-detail{white-space:normal;min-width:240px}
+.table-scroll td.diag-alt{white-space:normal;min-width:160px}
