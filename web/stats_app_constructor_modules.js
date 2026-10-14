@@ -550,7 +550,19 @@ export function createModuleCards(ctx) {
   function subRow(s) {
     if (editingSub === s.name) { return subEditor(s); }
     var r = el('div', 'xk-row cx-row');
-    r.appendChild(el('span', 'xk-val', s.name));
+    // Имя правится прямо в строке, как у нод в «Прокси»: «Сохранить имя»
+    // появляется, только когда имя изменено (Enter - сохранить, Esc - вернуть).
+    // Адрес и User-Agent - по кнопке «Изменить».
+    var nm = el('input', 'cx-name'); nm.type = 'text'; nm.value = s.name; nm.spellcheck = false;
+    nm.setAttribute('aria-label', 'Имя подписки ' + s.name);
+    var save = button('Сохранить имя', 'small'); save.hidden = true;
+    nm.addEventListener('input', function () { save.hidden = nm.value.trim() === s.name; });
+    nm.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !save.hidden) { e.preventDefault(); save.click(); }
+      if (e.key === 'Escape') { nm.value = s.name; save.hidden = true; }
+    });
+    save.addEventListener('click', function () { ctx.edit(function () { mods.editSub(s.name, { name: nm.value }); }); });
+    r.appendChild(nm); r.appendChild(save);
     r.appendChild(el('span', 'geo-code', hostOf(s.url) + (s.ua ? ' · ' + s.ua : '')));
     var ed = button('Изменить', 'small muted');
     ed.addEventListener('click', function () { editingSub = s.name; render(); });
@@ -563,16 +575,14 @@ export function createModuleCards(ctx) {
   function subEditor(s) {
     var r = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.value = s.url; url.setAttribute('aria-label', 'Адрес подписки');
-    var name = el('input'); name.type = 'text'; name.value = s.name; name.setAttribute('aria-label', 'Имя подписки');
     var ua = uaField(s.ua, function () { return url.value; });
     var row = el('div', 'xk-add');
     var ok = button('Сохранить', 'submit'), cancel = button('Отмена', 'submit secondary');
     ok.addEventListener('click', function () {
-      ctx.edit(function () { mods.editSub(s.name, { url: url.value, name: name.value, ua: ua.value() }); editingSub = null; });
+      ctx.edit(function () { mods.editSub(s.name, { url: url.value, ua: ua.value() }); editingSub = null; });
     });
     cancel.addEventListener('click', function () { editingSub = null; render(); });
     r.appendChild(el('label', null, 'Адрес')); r.appendChild(url);
-    r.appendChild(el('label', null, 'Имя (латиница, цифры, - и _)')); r.appendChild(name);
     r.appendChild(el('label', null, 'User-Agent')); r.appendChild(ua);
     row.appendChild(ok); row.appendChild(cancel);
     r.appendChild(row);
