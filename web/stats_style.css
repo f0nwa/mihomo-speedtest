@@ -343,9 +343,10 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .xk-text{margin:10px 0 6px;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
 .xk-add .xk-grow{align-self:center}
 .cx-row input.cx-name{flex:1 1 160px;min-width:0}
-.cx-row.cx-proxy-removed{border-color:var(--danger);background:#d1453b22}
+.cx-row.cx-proxy-removed,.cx-row.cx-service-removed{border-color:var(--danger);background:#d1453b22}
 .cx-row.cx-proxy-removed input.cx-name:disabled{color:var(--danger);opacity:1;-webkit-text-fill-color:var(--danger)}
-.cx-proxy-removed-note{color:var(--danger);font-size:12px}
+.cx-row.cx-service-removed .xk-val{color:var(--danger)}
+.cx-proxy-removed-note,.cx-service-removed-note{color:var(--danger);font-size:12px}
 .cx-paste{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:0 0 6px}
 .cx-paste .xk-text{flex:1 1 260px;width:auto;min-width:0;margin:0}
 .cx-paste .submit{margin-top:0;flex:0 0 auto}

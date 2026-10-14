@@ -286,7 +286,7 @@ export function renderConstructor(modeBar, opts) {
 
     function serviceRow(s) {
       var box = el('div');
-      var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off' : ''));
+      var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
       var doms = model.domains(s.id).filter(function (d) { return !d.removed; }).length;
       var rules = model.sources(s.id).length + (s.user ? 0 : model.rules(s.id).filter(function (x) { return !x.removed; }).length);
       r.appendChild(el('span', 'xk-val', s.name));
@@ -297,7 +297,9 @@ export function renderConstructor(modeBar, opts) {
         t.addEventListener('click', function () { expanded[s.id] = !expanded[s.id]; draw(); });
         r.appendChild(t);
       }
+      if (s.deleted) { r.appendChild(el('span', 'cx-service-removed-note', 'Убрана')); }
       var del = button(s.deleted ? 'Вернуть' : (s.user ? 'Удалить' : 'Убрать'), 'small muted');
+      del.setAttribute('aria-label', (s.deleted ? 'Вернуть ' : (s.user ? 'Удалить ' : 'Убрать ')) + s.name);
       del.addEventListener('click', function () {
         edit(function () {
           if (s.deleted) { model.restoreService(s.id); }
