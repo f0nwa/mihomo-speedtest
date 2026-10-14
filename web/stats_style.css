@@ -561,6 +561,17 @@ button.geo-chip:hover{border-color:var(--accent)}
 .fm-empty{padding:12px}
 .fm-msg{margin:8px 10px}
 .fm-back{display:none;margin:8px 10px 0}
+/* Десктоп: три колонки одной высоты, прокручивается содержимое внутри
+   (дерево целиком, список строк, редактор), а не страница. */
+@media (min-width:901px){
+  .fm{align-items:stretch;height:calc(100vh - 180px);min-height:460px}
+  .fm-col{min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .fm-tree{display:block;max-height:none;overflow:auto}
+  .fm-col>*{flex:none}
+  .fm-rows{flex:1 1 auto;min-height:0;max-height:none}
+  .fm-cm{flex:1 1 auto;min-height:0;position:relative}
+  .fm-cm .CodeMirror,.fm-cm .fm-textarea{position:absolute;inset:0;height:auto;min-height:0}
+}
 @media (max-width:900px){
   .fm{grid-template-columns:minmax(0,1fr)}
   .fm .fm-col{display:none}
