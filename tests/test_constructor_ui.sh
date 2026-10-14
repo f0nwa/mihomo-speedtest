@@ -115,6 +115,8 @@ M="$ROOT/web/stats_app_constructor_modules.js"
 for t in 'model.setMembers' 'model.resetBase' "'url-test'" "'fallback'" "'lazy'" 'Входят в группу' 'Вернуть как в шаблоне' 'Плюс закреплено'; do
   grep -q "$t" "$M" || fail "«Базовые группы»: нет $t"
 done
+grep -q 'baseOpen\[g.name\]' "$M" || fail "«Базовые группы»: группы не сворачиваются (аккордеон)"
+grep -q "head.setAttribute('aria-expanded'" "$M" || fail "«Базовые группы»: у шапки группы нет aria-expanded"
 grep -q 'setRoute(rt.name' "$M" || fail "«Базовые группы»: пропал выбор по умолчанию для сервисных групп"
 grep -q 'model.setOwnScope' "$M" || fail "«Прокси»: нет переключателя ownscope"
 grep -q 'model.ownScope()' "$M" || fail "«Прокси»: переключатель не читает состояние"

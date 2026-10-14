@@ -350,9 +350,19 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .cx-paste{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:0 0 6px}
 .cx-paste .xk-text{flex:1 1 260px;width:auto;min-width:0;margin:0}
 .cx-paste .submit{margin-top:0;flex:0 0 auto}
-.cx-bgroup{border:1px solid var(--border);padding:8px 10px;margin:10px 0}
-.cx-bhead{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.cx-bhead .xk-val{flex:1 1 auto;font-weight:600}
+/* Базовые группы - аккордеон: свёрнутая строка-кнопка, раскрытая группа в акцентной рамке. */
+.cx-bgroup{border:1px solid var(--card-border);background:#1a1c1f;margin:6px 0}
+.cx-bgroup.open{border-color:var(--accent)}
+.cx-bhead{display:flex;gap:10px;align-items:center;width:100%;min-height:44px;padding:8px 12px;background:transparent;border:0;border-radius:0;color:var(--text);font:inherit;font-size:14px;text-align:left;cursor:pointer}
+.cx-bhead:hover{background:var(--border)}
+.cx-chev{width:14px;flex:0 0 auto;color:var(--muted)}
+.cx-bname{flex:0 1 auto;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.cx-bsum{flex:1 1 auto;min-width:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cx-bcnt{flex:0 0 auto;color:var(--muted);font-size:11.5px}
+.cx-bcnt.cx-bchanged{color:var(--accent)}
+.cx-bbody{padding:4px 12px 12px 36px;border-top:1px solid var(--card-border)}
+.cx-breset{margin-top:8px}
+@media (max-width:600px){.cx-bhead{flex-wrap:wrap}.cx-bsum{order:3;flex-basis:100%;padding-left:24px;white-space:normal}.cx-bbody{padding-left:12px}}
 .cx-bparams{margin:8px 0 0;background:transparent;border:0;padding:0;gap:12px}
 .cx-url{flex:1 1 220px}
 .cx-url input{flex:1 1 auto;min-width:0;width:auto}

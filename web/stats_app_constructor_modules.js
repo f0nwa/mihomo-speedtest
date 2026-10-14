@@ -791,8 +791,11 @@ export function createModuleCards(ctx) {
     'fallback - первая рабочая по порядку. interval - как часто проверять ноды (секунды), tolerance - на сколько мс текущая нода может ' +
     'отставать от лучшей, прежде чем url-test переключится, lazy - не проверять, пока группа не выбрана. ' +
     'Для групп со всеми нодами подписок interval ниже 300 не ставьте (при 100+ нодах - 600). ' +
-    'В состав группы можно включать другие базовые группы; первая в составе выбирается по умолчанию.'));
+    'В состав группы можно включать другие базовые группы; первая в составе выбирается по умолчанию. ' +
+    'Нажмите на группу, чтобы открыть её параметры.'));
   var baseHost = el('div');
+  // Раскрытые группы (аккордеон): переживают перерисовку после правки.
+  var baseOpen = {};
   baseCard.appendChild(baseHost);
 
   // Текстовое поле параметра (interval, tolerance, url): пусто - как в шаблоне.
@@ -852,20 +855,40 @@ export function createModuleCards(ctx) {
     return box;
   }
 
+  // Сводка для свёрнутой группы: «url-test · 600 с · tol 50 · lazy».
+  function baseSummary(g) {
+    var parts = [g.type.value];
+    if (g.interval) { parts.push(g.interval.value + ' с'); }
+    if (g.tolerance) { parts.push('tol ' + g.tolerance.value); }
+    if (g.lazy && g.lazy.value === 'true') { parts.push('lazy'); }
+    return parts.join(' · ');
+  }
+
   function renderBase() {
     clear(baseHost);
     var groups = model.baseGroups();
     groups.forEach(function (g) {
-      var box = el('div', 'cx-bgroup');
-      var head = el('div', 'cx-bhead');
-      head.appendChild(el('span', 'xk-val', g.name));
-      if (g.locked) { head.appendChild(el('span', 'geo-code', 'закреплена')); }
-      if (changedGroup(g)) {
-        var rs = button('Вернуть как в шаблоне', 'small muted');
-        rs.addEventListener('click', function () { ctx.edit(function () { model.resetBase(g.name); }); });
-        head.appendChild(rs);
-      }
+      var open = !!baseOpen[g.name], changed = changedGroup(g);
+      var box = el('div', 'cx-bgroup' + (open ? ' open' : ''));
+      // Шапка - кнопка: стрелка, имя, сводка параметров, состав.
+      var head = el('button', 'cx-bhead');
+      head.type = 'button';
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      head.appendChild(el('span', 'cx-chev', open ? '▾' : '▸'));
+      head.appendChild(el('span', 'cx-bname', g.name));
+      head.appendChild(el('span', 'cx-bsum', baseSummary(g)));
+      if (changed) { head.appendChild(el('span', 'cx-bcnt cx-bchanged', 'изменена')); }
+      head.appendChild(el('span', 'cx-bcnt', g.locked ? 'закреплена' :
+        (g.members.value.length ? g.members.value.length + ' в составе' : 'без вложенных групп')));
+      head.addEventListener('click', function () { baseOpen[g.name] = !open; renderBase(); });
       box.appendChild(head);
+      if (!open) { baseHost.appendChild(box); return; }
+      var body = el('div', 'cx-bbody');
+      if (changed) {
+        var rs = button('Вернуть как в шаблоне', 'small muted cx-breset');
+        rs.addEventListener('click', function () { ctx.edit(function () { model.resetBase(g.name); }); });
+        body.appendChild(rs);
+      }
       var params = el('div', 'xk-row cx-row cx-bparams');
       var tw = el('label', 'cx-num');
       tw.appendChild(el('span', null, 'тип'));
@@ -887,9 +910,10 @@ export function createModuleCards(ctx) {
         lw.appendChild(cb); lw.appendChild(el('span', null, 'lazy'));
         params.appendChild(lw);
       }
-      box.appendChild(params);
-      if (g.locked) { box.appendChild(el('p', 'hint', 'Плюс закреплено: ' + g.fixed + ' - их отбирает спидтест, состав не правится.')); }
-      else { box.appendChild(membersEditor(g)); }
+      body.appendChild(params);
+      if (g.locked) { body.appendChild(el('p', 'hint', 'Плюс закреплено: ' + g.fixed + ' - их отбирает спидтест, состав не правится.')); }
+      else { body.appendChild(membersEditor(g)); }
+      box.appendChild(body);
       baseHost.appendChild(box);
     });
     var routes = model.routes();
