@@ -106,5 +106,13 @@ assert_eq "$(tr '\n' '|' < "$WORK/ord2")" 'A|B "q"|C|Cur|Dead|Low|New|Top|Few|' 
 printf '%s\n' 'A\B' 'C' > "$WORK/cands3"
 assert_eq "$(DIAG_EXCLUDE='A\B' LC_ALL=C $AWK -v mode=order -v min_uptime=80 -v min_runs=8 -v stab_file= -f "$SCRIPT" "$WORK/cands3" | tr '\n' '|')" 'C|' "order: текущая нода с \\ в имени исключается (DIAG_EXCLUDE)"
 
+# Нода из подписки: группа её выбрала и держит в all, но отдельной записи в
+# /proxies нет (найдено на роутере: Twitter -> Fallback-Stable -> нода).
+printf '%s' '{"proxies":{"Tw":{"all":["FB"],"name":"Tw","now":"FB","type":"Selector"},"FB":{"all":[" Prov-1(ss)","DE-01"],"name":"FB","now":" Prov-1(ss)","type":"Fallback"},"DE-01":{"name":"DE-01","type":"Vless"}}}' > "$WORK/prov.json"
+printf 'Tw\nAbsent\n' > "$WORK/provg"
+LC_ALL=C $AWK -v mode=resolve -v groups_file="$WORK/provg" -f "$SCRIPT" "$WORK/prov.json" > "$WORK/provres"
+assert_eq "$(sed -n 1p "$WORK/provres" | cut -f3,4,5)" " Prov-1(ss)${T}node${T} Prov-1(ss)${U}DE-01" "нода без своей записи в /proxies - всё равно нода и кандидат"
+assert_eq "$(sed -n 2p "$WORK/provres" | cut -f4)" missing "группы без записи - по-прежнему missing"
+
 [ "$FAILED" = 0 ] || exit 1
 echo "OK test_diag_awk"

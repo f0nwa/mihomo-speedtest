@@ -136,7 +136,8 @@ function collect(g,   n, i, m, arr, t) {
   n = split(ALL[g], arr, US)
   for (i = 1; i <= n; i++) {
     m = arr[i]; t = TYPE[m]
-    if (!(m in KNOWN)) continue
+    # Имени нет среди записей /proxies (нода из подписки) - это нода, не
+    # группа: группы ядро отдаёт всегда.
     if (isgroup(t)) { if (!(m in SEEN_G)) collect(m); continue }
     if (isdirect(t) || isreject(t)) continue
     if (m in SEEN_N) continue
@@ -149,7 +150,11 @@ function resolve(g,   chain, cur, kind, t, nxt, depth, vis) {
   chain = g; cur = g; kind = ""
   split("", vis); vis[g] = 1
   for (depth = 0; depth < 16; depth++) {
-    if (!(cur in KNOWN)) { kind = "missing"; break }
+    if (!(cur in KNOWN)) {
+      # Сама группа не найдена - missing; выбор группы (now) без своей
+      # записи в /proxies - нода из подписки.
+      kind = (cur == g) ? "missing" : "node"; break
+    }
     t = TYPE[cur]
     if (follows(t)) {
       nxt = NOW[cur]
@@ -164,7 +169,7 @@ function resolve(g,   chain, cur, kind, t, nxt, depth, vis) {
     break
   }
   if (kind == "") kind = "loop"
-  END_ = (kind == "missing" && !(cur in KNOWN)) ? "" : cur
+  END_ = (kind == "missing") ? "" : cur
   if (kind == "loop") END_ = ""
   CANDS = ""; split("", SEEN_G); split("", SEEN_N)
   if (g in KNOWN) collect(g)
