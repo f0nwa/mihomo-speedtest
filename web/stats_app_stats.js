@@ -8,8 +8,8 @@ import { refreshUpdatesBadge } from './app-updates.js';
 //
 // Узкая панель над KPI: состояние (идёт прогон / нет), время последнего
 // прогона, число прогонов в истории и кнопка ручного запуска. Пока идёт
-// прогон, updateProgressCard() пишет сюда "N из M нод" и двигает полосу
-// прогресса под панелью (см. runBar ниже).
+// прогон, updateProgressCard() пишет сюда состояние замеров скорости и
+// двигает полосу прогресса под панелью (см. runBar ниже).
 
 var runBar = null;
 
@@ -37,6 +37,12 @@ function renderRunBar(container, onRunning, lastRun, runsCount) {
   }
   var btn = el('button', 'submit', '\u25B6 Запустить сейчас');
   btn.type = 'button';
+  var detailsBtn = el('button', 'theme-btn', 'Показать замеры по нодам');
+  detailsBtn.type = 'button';
+  detailsBtn.hidden = true;
+  detailsBtn.setAttribute('aria-controls', 'run-node-results');
+  detailsBtn.setAttribute('aria-expanded', 'false');
+  row.appendChild(detailsBtn);
   row.appendChild(btn);
   var track = el('div', 'run-progress');
   var fill = el('div', 'run-progress-fill');
@@ -47,6 +53,12 @@ function renderRunBar(container, onRunning, lastRun, runsCount) {
   container.appendChild(bar);
 
   var running = false;
+  detailsBtn.addEventListener('click', function () {
+    if (!progressCardEl) { return; }
+    progressCardEl.hidden = !progressCardEl.hidden;
+    detailsBtn.textContent = progressCardEl.hidden ? 'Показать замеры по нодам' : 'Скрыть замеры по нодам';
+    detailsBtn.setAttribute('aria-expanded', progressCardEl.hidden ? 'false' : 'true');
+  });
   function setRunning(on, text) {
     running = on;
     bar.classList.toggle('running', on);
@@ -58,10 +70,14 @@ function renderRunBar(container, onRunning, lastRun, runsCount) {
   }
 
   runBar = {
-    progress: function (tested, total) {
+    showDetails: function () { detailsBtn.hidden = false; },
+    progress: function (tested, total, measuring) {
       if (!running) { setRunning(true); }
-      if (total > 0) {
-        stateText.textContent = 'Идёт прогон: ' + tested + ' из ' + total + ' нод';
+      if (!measuring) {
+        stateText.textContent = 'Замеры завершены, обрабатываем результаты...';
+        fill.style.width = '100%';
+      } else if (total > 0) {
+        stateText.textContent = 'Проверка скорости: ' + tested + ' из ' + total + ' нод';
         fill.style.width = Math.min(100, Math.round(tested / total * 100)) + '%';
       }
     }
@@ -99,10 +115,12 @@ function renderRunBar(container, onRunning, lastRun, runsCount) {
 var PROGRESS_POLL_MS = 2000;
 var progressPollTimer = null;
 var progressCardEl = null;
+var seenLiveProgress = false;
 
 export function stopProgressPolling() {
   if (progressPollTimer) { clearInterval(progressPollTimer); progressPollTimer = null; }
   progressCardEl = null;
+  seenLiveProgress = false;
 }
 
 function buildProgressTable(results) {
@@ -133,7 +151,7 @@ function updateProgressCard(progress) {
   var tested = progress && typeof progress.tested === 'number' ? progress.tested : 0;
   var total = progress && typeof progress.total === 'number' ? progress.total : 0;
   var results = (progress && progress.results) || [];
-  if (runBar) { runBar.progress(tested, total); }
+  if (runBar && progress) { runBar.progress(tested, total, !!progress.running); }
   var summary = progressCardEl.querySelector('.progress-summary');
   summary.textContent = total > 0
     ? ('Протестировано ' + tested + ' из ' + total + '.')
@@ -149,7 +167,10 @@ function progressPollTick() {
     if (!alive()) { return; }
     // {} - прогона ещё не было (файла progress.json нет) - трактуем как
     // "прогресса ещё нет", а не как ошибку.
-    updateProgressCard(data && typeof data.tested === 'number' ? data : null);
+    // До начала нового замера /api/progress может отдавать завершённый
+    // прошлый прогон. Не показываем его как результат текущего.
+    if (data && data.running) { seenLiveProgress = true; }
+    updateProgressCard(seenLiveProgress && data && typeof data.tested === 'number' ? data : null);
   })['catch'](function () { /* временная сетевая заминка - опрос продолжится следующим тиком */ });
 
   fetchJson('/api/run').then(function (d) {
@@ -163,9 +184,12 @@ function progressPollTick() {
 
 function startProgressPolling(container, insertBefore) {
   if (!progressCardEl) {
-    progressCardEl = card('Идёт прогон');
+    progressCardEl = card('Замеры скорости нод');
+    progressCardEl.id = 'run-node-results';
+    progressCardEl.hidden = true;
     progressCardEl.appendChild(el('p', 'hint progress-summary', 'Ожидание начала скоростного теста...'));
     if (insertBefore) { container.insertBefore(progressCardEl, insertBefore); } else { container.appendChild(progressCardEl); }
+    if (runBar) { runBar.showDetails(); }
   }
   if (progressPollTimer) { return; }
   progressPollTick();
