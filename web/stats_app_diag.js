@@ -251,15 +251,9 @@ export function renderDiag() {
   // ----- ручная проверка домена через группу other -----
   var oneCard = card('Свои домены');
   oneCard.appendChild(el('p', 'hint', 'Домены и адреса, которых нет в группах сервисов, проверяются через группу other - ' +
-    'сначала через её текущую ноду, а если не открылись, перебираются другие ноды other. Проверить домен:'));
-  var oneRow = el('div', 'xk-add');
-  var oneInp = el('input'); oneInp.type = 'text'; oneInp.placeholder = 'rutracker.org или https://example.com/page';
-  oneInp.setAttribute('aria-label', 'Домен или адрес');
-  var oneBtn = el('button', 'submit', 'Проверить'); oneBtn.type = 'button';
-  oneRow.appendChild(oneInp); oneRow.appendChild(oneBtn);
-  oneCard.appendChild(oneRow);
+    'сначала через её текущую ноду, а если не открылись, перебираются другие ноды other. ' +
+    'По одному домену или адресу на строку, строки с # - комментарии, не больше 50.'));
   // Сохранённый список: по строке, # - комментарий.
-  oneCard.appendChild(el('p', 'hint', 'Список для проверки: по одному домену или адресу на строку, строки с # - комментарии, не больше 50.'));
   var listTa = el('textarea', 'diag-list');
   listTa.rows = 6; listTa.spellcheck = false;
   listTa.placeholder = '# трекеры\nrutracker.org\nhttps://nnmclub.to/forum/';
@@ -278,7 +272,7 @@ export function renderDiag() {
 
   function drawOne(d) {
     while (oneRes.firstChild) { oneRes.removeChild(oneRes.firstChild); }
-    oneBtn.disabled = !!d.running; listBtn.disabled = !!d.running;
+    listBtn.disabled = !!d.running;
     if (d.stage === 'none') { return; }
     if (d.running) {
       var st = el('div', 'run-bar-row');
@@ -301,16 +295,6 @@ export function renderDiag() {
     })['catch'](function () { /* результат домена - необязательная часть вкладки */ });
   }
 
-  oneBtn.addEventListener('click', function () {
-    var v = oneInp.value.trim();
-    if (!v) { return; }
-    oneBtn.disabled = true; oneMsg.hidden = true;
-    fetchJson('/api/diag/check?url=' + encodeURIComponent(v), { method: 'POST' }).then(function () { loadOne(); })['catch'](function (e) {
-      oneBtn.disabled = false;
-      oneMsg.textContent = (e.data && e.data.message) || ('Не удалось запустить проверку: ' + e.message);
-      oneMsg.hidden = false;
-    });
-  });
   var savedText = '';
   function saveList() {
     oneMsg.hidden = true;
@@ -343,8 +327,6 @@ export function renderDiag() {
     if (!alive()) { return; }
     listTa.value = r.text || ''; savedText = listTa.value;
   })['catch'](function () { /* список - необязательная часть вкладки */ });
-
-  oneInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { oneBtn.click(); } });
 
   load();
   loadOne();

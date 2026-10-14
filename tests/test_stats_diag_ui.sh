@@ -18,7 +18,7 @@ grep -q 'ALL_PROJECT_FILES=.* stats_app_diag.js' "$ROOT/install.sh" || fail "sta
 grep -q 'stats_app_diag.js' "$ROOT/release/components.txt" || fail "stats_app_diag.js нет в components.txt"
 grep -q 'stats_app_diag.js' "$ROOT/uninstall.sh" || fail "stats_app_diag.js нет в uninstall.sh"
 grep -q '\.v\.blocked' "$ROOT/web/stats_style.css" || fail "нет стилей пилюль вердиктов"
-grep -q 'Проверить домен' "$JS" || fail "нет ручной проверки домена"
+! grep -q 'Проверить домен' "$JS" || fail "отдельная строка проверки домена должна быть убрана - только список"
 grep -q "/api/diag/check" "$JS" || fail "проверка домена не вызывает /api/diag/check"
 grep -q "/api/diag/one" "$JS" || fail "результат проверки домена не опрашивается"
 grep -q "/api/diag/domains/save" "$JS" || fail "список доменов не сохраняется"
