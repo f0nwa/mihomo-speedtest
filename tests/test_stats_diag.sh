@@ -37,7 +37,7 @@ if [ "${DIAG_BUSYBOX:-0}" = 1 ]; then
   done
 fi
 : > "$W/speedtest2.env"
-printf 'mixed-port: 7890\nexternal-controller: 0.0.0.0:9090\nsecret: ""\n' > "$W/mihomo/config.yaml"
+printf 'redir-port: 5000\ntproxy-port: 5001\nexternal-controller: 0.0.0.0:9090\nsecret: ""\n' > "$W/mihomo/config.yaml"
 T=$(printf '\t')
 cat > "$W/services.default.tsv" <<TSV
 section${T}s${T}Сервисы
@@ -97,8 +97,23 @@ case $url in
     emit < "$f"; exit 0 ;;
   "$API/proxies/"*"/delay"*)
     k=${url#"$API/proxies/"}; k=${k%%/delay*}
-    case $url in *cp.cloudflare.com*|*msftconnecttest*|*captive.apple.com*) f=$SC/delay-$k ;; *) f=$SC/alt-$k ;; esac
-    d=$(cat "$f" 2>/dev/null || echo fail)
+    q=${url#*\?}
+    u=$(printf '%s' "$q" | tr '&' '\n' | sed -n 's/^url=//p')
+    e=$(printf '%s' "$q" | tr '&' '\n' | sed -n 's/^expected=//p')
+    d=fail
+    case $u in
+      *cp.cloudflare.com*|*msftconnecttest*|*captive.apple.com*) d=$(cat "$SC/delay-$k" 2>/dev/null || echo fail) ;;
+      *)
+        if [ -f "$SC/alt-$k" ]; then d=$(cat "$SC/alt-$k")
+        else
+          # как mihomo: ответ сайта с кодом из expected (пусто - любой) - задержка
+          sk=$(printf '%s' "$u" | tr -c 'A-Za-z0-9' '_')
+          if [ -f "$SC/site-$sk" ]; then read -r rc code < "$SC/site-$sk"; else rc=7; code=000; fi
+          if [ "$rc" = 0 ] && awk -v c="$code" -v e="$e" 'BEGIN { if (e == "") exit 0; n = split(e, r, "/")
+              for (i = 1; i <= n; i++) { m = split(r[i], ab, "-"); lo = ab[1] + 0; hi = (m > 1 ? ab[2] : ab[1]) + 0
+                if (c + 0 >= lo && c + 0 <= hi) exit 0 } exit 1 }'; then d=96; fi
+        fi ;;
+    esac
     if [ "$d" = fail ]; then printf '{"message":"Timeout"}' | emit; else printf '{"delay":%s}' "$d" | emit; fi
     exit 0 ;;
   "$API/proxies/"*)
@@ -106,11 +121,8 @@ case $url in
     now=$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$SC/now.tsv")
     printf '{"alive":true,"name":"x","now":"%s","type":"Selector"}' "$now" | emit; exit 0 ;;
 esac
-k=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
-if [ -f "$SC/site-$k" ]; then read -r rc code < "$SC/site-$k"; else rc=7; code=000; fi
-if [ -f "$SC/body-$k" ]; then emit < "$SC/body-$k"; else : | emit; fi
-[ -z "$fmt" ] || printf '%s 0.096 %s' "$code" "$(cat "$SC/redir-$k" 2>/dev/null)"
-exit "$rc"
+echo "unexpected request: $url" >> "$SC/unexpected.log"
+exit 7
 STUB
 chmod +x "$W/bin/curl"
 
@@ -123,14 +135,14 @@ cgi() {
 body() { sed '1,/^\r\{0,1\}$/d'; }
 wait_done() {
   i=0
-  while [ "$i" -lt 150 ]; do
+  while [ "$i" -lt 400 ]; do
     grep -q '"running":false' "$W/tmp/mst-diag/state.json" 2>/dev/null && return 0
     sleep 0.1; i=$((i + 1))
   done
   fail "диагностика не завершилась за 15 с: $(cat "$W/tmp/mst-diag/state.json" 2>/dev/null)"
 }
-reset_sc() { rm -f "$SC"/site-* "$SC"/body-* "$SC"/redir-* "$SC"/delay-* "$SC"/alt-* "$SC/proxies.count" "$SC/proxies2.json" "$SC/slow" "$SC/curl.log"; now_tsv; }
-site() { printf '%s %s\n' "$2" "$3" > "$SC/site-$(key "$1")"; }
+reset_sc() { rm -f "$SC/unexpected.log" "$SC"/site-* "$SC"/body-* "$SC"/redir-* "$SC"/delay-* "$SC"/alt-* "$SC/proxies.count" "$SC/proxies2.json" "$SC/slow" "$SC/curl.log"; now_tsv; }
+site() { printf '%s %s\n' "$2" "$3" > "$SC/site-$(key "$(enc "$1")")"; }
 svc() {
   # svc ИМЯ ПОЛЕ - значение поля сервиса из state.json (через python3)
   python3 - "$W/tmp/mst-diag/state.json" "$1" "$2" <<'PY'
@@ -195,23 +207,13 @@ cmp -s "$TEST_ROOT/dir.before" "$TEST_ROOT/dir.after" || fail "в \$DIR появ
 r=$(cgi status GET | body)
 assert_contains '"running":false' "$r" "status после прогона"
 
-# ----- B: страницы блокировки и обычные страницы с похожим текстом -----
+# ----- B: сервис отвечает ошибкой (не 403/451), нода жива -----
 reset_sc
-site https://github.com 0 503; printf '<title>Just a moment</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate"></script>' > "$SC/body-$(key https://github.com)"
-echo 84 > "$SC/delay-$E_NL"
-site https://chatgpt.com 0 200; printf '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>unsupported_country' > "$SC/body-$(key https://chatgpt.com)"
-site https://claude.ai 0 200
+site https://github.com 0 503; echo 84 > "$SC/delay-$E_NL"
+site https://chatgpt.com 0 302; site https://claude.ai 0 200
 run_diag B
-assert_eq "$(svc GitHub verdict)" blocked "503 + страница проверки Cloudflare"
-assert_eq "$(svc 'A&B' verdict)" ok "200 со скриптом Cloudflare - это рабочая страница"
-reset_sc
-site https://github.com 0 302; echo 'https://github.com/app-unavailable-in-region' > "$SC/redir-$(key https://github.com)"
-echo 84 > "$SC/delay-$E_NL"; site https://chatgpt.com 0 302; echo 'https://chatgpt.com/auth/login' > "$SC/redir-$(key https://chatgpt.com)"
-site https://claude.ai 63 200
-run_diag B2
-assert_eq "$(svc GitHub verdict)" blocked "редирект на страницу «недоступно в регионе»"
-assert_eq "$(svc 'A&B' verdict)" ok "обычный редирект и обрезанный по размеру ответ - работает"
-grep -q -- '--max-filesize' "$SC/curl.log" || fail "размер ответа не ограничен"
+assert_eq "$(svc GitHub verdict)" suspect "503 - сервис ответил ошибкой"
+assert_eq "$(svc 'A&B' verdict)" ok "редирект - работает"
 
 # ----- I7: HTTP-ответ есть, контроль не прошёл - нода жива -----
 reset_sc
@@ -278,7 +280,7 @@ r=$(cgi start POST)
 assert_contains 'Status: 409' "$r" "при прогоне замеров - 409"
 assert_contains speedtest_running "$r" "код speedtest_running"
 kill "$SP" 2>/dev/null; rm -rf "$W/tmp/mst.lock"
-echo 1 > "$SC/slow"; site https://github.com 0 200
+echo 0.3 > "$SC/slow"; site https://github.com 0 200
 r=$(cgi start POST | body); assert_contains '"started":true' "$r" "первый start"
 r=$(cgi start POST)
 assert_contains 'Status: 409' "$r" "второй start - 409"
@@ -329,7 +331,7 @@ assert_eq "$(svc Big alt.found)" "N9|N3|N6" "три первые рабочие 
 assert_eq "$(svc Big alt.checked)" 6 "остановка после трёх найденных (порядок N9 N3, затем без статистики N1 N2 N4 N6)"
 rm -f "$W/node_stability.tsv"
 
-reset_sc; site https://lb.example 0 200; alt DE-01 50
+reset_sc; site https://lb.example 7 000; alt DE-01 50
 run_diag P3
 assert_eq "$(svc LB verdict)" lb "load-balance"
 assert_eq "$(svc LB alt.found)" DE-01 "load-balance: поиск по нодам группы"
@@ -361,12 +363,9 @@ cgi status GET > /dev/null
 [ -f "$W/.sourced" ] && fail "status подключает speedtest2.sh"
 rm -f "$W/.sourced"; cp "$TEST_ROOT/st.bak" "$W/speedtest2.sh"
 
-# ----- прокси mihomo с паролем (authentication) - понятная ошибка -----
-reset_sc; site https://github.com 0 407; site https://chatgpt.com 0 407; site https://claude.ai 0 407; site https://rutracker.org 0 407; site https://lb.example 0 407; site https://big.example 0 407
-run_diag AUTH
-s=$(cat "$W/tmp/mst-diag/state.json")
-assert_contains '"stage":"error"' "$s" "407 - ошибка прогона"
-assert_contains 'authentication' "$s" "текст называет authentication"
+# ----- без mixed-port (шаблон: только redir/tproxy) - всё через API ядра -----
+grep -q -- ' -x ' "$SC/curl.log" && fail "запросы через прокси-порт, а его в конфиге нет"
+[ ! -f "$SC/unexpected.log" ] || fail "запросы мимо API ядра: $(cat "$SC/unexpected.log")"
 
 # ----- маршруты и списки файлов установки -----
 for r in '"api/diag": ("stats_diag.sh"' '"api/diag/start": ("stats_diag.sh"' '"api/diag/cancel": ("stats_diag.sh"'; do

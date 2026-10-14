@@ -19,14 +19,15 @@
 #   - группы и цепочки - GET /proxies + diag.awk mode=resolve; адреса
 #     проверки - diag.awk mode=targets (services.default.tsv + свой overlay
 #     конструктора);
-#   - запрос к сервису - curl через mixed-port ядра: по правилам он уходит в
-#     группу сервиса, т. е. через её текущую ноду; адресов у сервиса может
-#     быть несколько (разные продукты одной группы) - проверяются все,
-#     вердикт - по первому не прошедшему; 5xx/429 и страница блокировки (в
-#     ответе не 2xx или редирект на «unavailable») - не прошёл;
-#   - контрольный запрос через ту же ноду - GET /proxies/<нода>/delay на
-#     DIAG_CONTROL_URL (не совпадает с test-url групп, чтобы не влиять на
-#     url-test);
+#   - запрос к сервису - GET /proxies/<текущая нода>/delay?url=<адрес>:
+#     mihomo сам открывает адрес через эту ноду (прокси-порт в конфиге не
+#     нужен - в шаблоне его нет). Успех с expected=200-399 - работает; иначе
+#     expected=403/451 - доступ запрещён; иначе любой ответ - сервис ответил
+#     ошибкой; иначе - ответа нет. Адресов у сервиса может быть несколько
+#     (разные продукты одной группы) - проверяются все, вердикт - по первому
+#     не прошедшему;
+#   - контрольный запрос через ту же ноду - тот же delay на контрольный
+#     адрес (не совпадает с test-url групп, чтобы не влиять на url-test);
 #   - после проверки выбор групп цепочки перечитывается; если сменился -
 #     сервис перепроверяется один раз через новую ноду.
 #   - фаза 2: для blocked, suspect и lb - поиск нод, через которые сервис
@@ -44,15 +45,13 @@
 
 DIR=${DIR:-/opt/etc/mihomo-speedtest}
 TMPROOT=${TMPROOT:-/tmp}
-NETCHECK=${NETCHECK:-$DIR/netcheck.sh}
-# speedtest2.sh (LOCK, API ядра, urlencode, статистика нод) и netcheck.sh
-# нужны запуску и проверке; опросу состояния (раз в 1,5 с) - нет.
+# speedtest2.sh (LOCK, API ядра, urlencode, статистика нод) нужен запуску
+# и проверке; опросу состояния (раз в 1,5 с) - нет.
 case ${MST_DIAG_ACTION:-status} in
   start|runner)
     export MST_LIB_ONLY=1
     [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
     MST_LIB_ONLY=0
-    [ -f "$NETCHECK" ] && . "$NETCHECK"
     ;;
 esac
 DIAG_AWK=${DIAG_AWK:-$DIR/diag.awk}
@@ -63,7 +62,6 @@ RUN=$TMPROOT/mst-diag
 # Контрольный адрес - первый из списка, который не test-url ни одной группы
 # (запрос delay пишет историю ноды по этому адресу - url-test её читает).
 DIAG_CONTROL_URLS=${DIAG_CONTROL_URLS:-"https://cp.cloudflare.com/generate_204 http://www.msftconnecttest.com/connecttest.txt http://captive.apple.com/hotspot-detect.html"}
-DIAG_MAX_BODY=${DIAG_MAX_BODY:-2097152}
 DIAG_REQ_TIMEOUT=${DIAG_REQ_TIMEOUT:-8}
 # Поиск рабочих нод (фаза 2): на сервис - до DIAG_ALT_FOUND найденных,
 # DIAG_ALT_MAX_NODES проверенных или DIAG_ALT_MAX_SEC секунд; на весь
@@ -72,12 +70,6 @@ DIAG_ALT_FOUND=${DIAG_ALT_FOUND:-3}
 DIAG_ALT_MAX_NODES=${DIAG_ALT_MAX_NODES:-15}
 DIAG_ALT_MAX_SEC=${DIAG_ALT_MAX_SEC:-60}
 DIAG_TOTAL_MAX_SEC=${DIAG_TOTAL_MAX_SEC:-300}
-DIAG_UA=${DIAG_UA:-'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'}
-# Признаки страницы блокировки - только в ответах не 2xx (обычные страницы
-# Cloudflare тоже подключают /cdn-cgi/challenge-platform); у редиректа
-# смотрится адрес, куда он ведёт.
-DIAG_BLOCK_RE='unsupported_country|unsupported_region|not available in your (country|region)|/cdn-cgi/challenge-platform|google\.com/sorry'
-DIAG_REDIR_RE='unavailable|unsupported|not[-_]available|restricted|geo[-_]?block'
 TAB=$(printf '\t')
 US=$(printf '\037')
 
@@ -180,35 +172,33 @@ cmd_cancel() {
 
 # ----- проверка (раннер) -----
 
-# probe URL - запрос через mixed-port; P_RC P_CODE P_MS P_CLASS P_SIG.
+# delay УЗЕЛ АДРЕС EXPECTED - GET /proxies/<узел>/delay: mihomo сам ходит на
+# адрес через этот узел (нода, DIRECT). EXPECTED - коды ответа, которые
+# считаются успехом (пусто - любой ответ). Печатает задержку, код 0 -
+# успех.
+delay() {
+  d_q="url=$(urlencode "$2")&timeout=$((DIAG_REQ_TIMEOUT * 1000))"
+  [ -z "$3" ] || d_q="$d_q&expected=$3"
+  d_ms=$(main_curl -s -m $((DIAG_REQ_TIMEOUT + 2)) "http://$API_MAIN/proxies/$(urlencode "$1")/delay?$d_q" 2>/dev/null \
+    | sed -n 's/.*"delay":\([0-9][0-9]*\).*/\1/p')
+  [ -n "$d_ms" ] || return 1
+  echo "$d_ms"
+}
+
+# probe УЗЕЛ АДРЕС -> P_STATE: ok (ответ 2xx/3xx), denied (403/451), error
+# (другой код ошибки), none (ответа нет); P_MS - задержка при ok.
 probe() {
-  rm -f "$RUN/body"
-  P_RC=0
-  p_out=$(curl -s -o "$RUN/body" -w '%{http_code} %{time_total} %{redirect_url}' -m "$DIAG_REQ_TIMEOUT" \
-    --max-filesize "$DIAG_MAX_BODY" -A "$DIAG_UA" -x "$PROXY" "$1" 2>/dev/null) || P_RC=$?
-  # 63 - ответ больше DIAG_MAX_BODY: сервис ответил, тело не нужно
-  [ "$P_RC" = 63 ] && P_RC=0
-  P_CODE=${p_out%% *}; p_out=${p_out#* }
-  P_MS=$(printf '%s' "${p_out%% *}" | awk '{ t = $1 + 0; if (t > 0) printf "%d", t * 1000 + 0.5 }')
-  case $p_out in *' '*) P_REDIR=${p_out#* } ;; *) P_REDIR= ;; esac
-  if [ "$P_CODE" = 407 ]; then
-    run_fail "Прокси mihomo ($PROXY) требует логин и пароль (authentication в config.yaml) - диагностика не может отправить через него запрос. Уберите authentication или разрешите 127.0.0.1 в skip-auth-prefixes."
-  fi
-  P_CLASS=$(nc_classify "$P_RC" "$P_CODE")
-  P_SIG=
-  case $P_CODE in
-    2??) ;;
-    3??) printf '%s' "$P_REDIR" | grep -q -i -E "$DIAG_REDIR_RE" && P_SIG="редирект на $P_REDIR" ;;
-    *) [ -s "$RUN/body" ] && P_SIG=$(head -c 65536 "$RUN/body" | grep -o -i -E "$DIAG_BLOCK_RE" | head -n 1) ;;
-  esac
-  rm -f "$RUN/body"
+  P_STATE=none; P_MS=
+  if P_MS=$(delay "$1" "$2" 200-399); then P_STATE=ok; return; fi
+  P_MS=
+  diag_cancelled && return
+  if delay "$1" "$2" 403/451 > /dev/null; then P_STATE=denied; return; fi
+  if delay "$1" "$2" "" > /dev/null; then P_STATE=error; fi
 }
 
 # control NODE -> C_MS (пусто, если нода не ответила)
 control() {
-  C_MS=$(main_curl -s -m $((DIAG_REQ_TIMEOUT + 2)) \
-    "http://$API_MAIN/proxies/$(urlencode "$1")/delay?url=$(urlencode "$CONTROL_URL")&timeout=$((DIAG_REQ_TIMEOUT * 1000))" 2>/dev/null \
-    | sed -n 's/.*"delay":\([0-9][0-9]*\).*/\1/p')
+  C_MS=$(delay "$1" "$CONTROL_URL" "") || C_MS=
 }
 
 # Цепочка (через \037) всё ещё та же? Перечитывает now у групп цепочки.
@@ -231,12 +221,11 @@ resolve_one() {
   R_CHAIN=$(cut -f2 "$RUN/one.res"); R_END=$(cut -f3 "$RUN/one.res"); R_KIND=$(cut -f4 "$RUN/one.res")
 }
 
-reason_text() {
-  # $1 - класс nc_classify, $2 - HTTP-код
+state_text() {
   case $1 in
-    ok) echo "HTTP $2" ;;
-    http403|http451) echo "HTTP $2 - доступ запрещён" ;;
-    *) nc_reason "$1" ;;
+    denied) echo "ответ 403 или 451 - доступ запрещён" ;;
+    error) echo "сервис ответил кодом ошибки (не 2xx/3xx)" ;;
+    *) echo "нет ответа" ;;
   esac
 }
 
@@ -256,47 +245,36 @@ check_service() {
   fi
   # Несколько адресов у сервиса - разные продукты одной группы (AI:
   # ChatGPT, Claude): проверяются все, вердикт - по первому не прошедшему.
-  f_url= ok_url= ok_code= ok_ms=
+  f_url= f_state= ok_url= ok_ms=
   set -f
   for u in $cs_urls; do
     diag_cancelled && { set +f; return; }
-    probe "$u"
-    # 5xx и 429 - сервис не отдал страницу: не «работает».
-    case $P_CODE in 5??|429) p_bad=1 ;; *) p_bad=0 ;; esac
-    if [ "$P_CLASS" = ok ] && [ -z "$P_SIG" ] && [ "$p_bad" = 0 ]; then
-      [ -n "$ok_url" ] || { ok_url=$u ok_code=$P_CODE ok_ms=$P_MS; }
+    probe "$cs_end" "$u"
+    if [ "$P_STATE" = ok ]; then
+      [ -n "$ok_url" ] || { ok_url=$u ok_ms=$P_MS; }
     elif [ -z "$f_url" ]; then
-      f_url=$u f_rc=$P_RC f_code=$P_CODE f_class=$P_CLASS f_sig=$P_SIG f_ms=$P_MS
+      f_url=$u f_state=$P_STATE
     fi
   done
   set +f
   if [ -z "$f_url" ]; then
-    detail="HTTP $ok_code${ok_ms:+, $ok_ms мс}"
-    if [ "$cs_kind" = direct ]; then set_verdict direct "$ok_url" "напрямую: $detail" "$ok_ms"
-    else set_verdict ok "$ok_url" "$detail" "$ok_ms"; fi
+    if [ "$cs_kind" = direct ]; then set_verdict direct "$ok_url" "напрямую: отвечает, $ok_ms мс" "$ok_ms"
+    else set_verdict ok "$ok_url" "отвечает, $ok_ms мс" "$ok_ms"; fi
     return
   fi
   if [ "$cs_kind" = direct ]; then
-    set_verdict direct "$f_url" "напрямую: $(reason_text "$f_class" "$f_code")"; return
+    set_verdict direct "$f_url" "напрямую: $(state_text "$f_state")"; return
   fi
   control "$cs_end"
   diag_set_field "$cs_name" control_ms "$C_MS"
-  if [ "$f_rc" = 0 ] && [ -n "$f_sig" ]; then
-    case $f_sig in
-      'редирект на '*) set_verdict blocked "$f_url" "HTTP $f_code, $f_sig" "$f_ms" ;;
-      *) set_verdict blocked "$f_url" "HTTP $f_code, страница блокировки ($f_sig)" "$f_ms" ;;
-    esac
-  elif [ "$f_class" = http403 ] || [ "$f_class" = http451 ]; then
-    set_verdict blocked "$f_url" "$(reason_text "$f_class" "$f_code")" "$f_ms"
-  elif [ -n "$C_MS" ] || { [ -n "$f_code" ] && [ "$f_code" != 000 ]; }; then
+  case $f_state in
+    denied) set_verdict blocked "$f_url" "$(state_text denied)" ;;
     # Сервис ответил кодом - трафик через ноду прошёл, нода жива.
-    if [ "$f_code" = 429 ]; then d="HTTP 429 - слишком много запросов"
-    elif [ "$f_class" = ok ]; then d="HTTP $f_code"
-    else d=$(reason_text "$f_class" "$f_code"); fi
-    set_verdict suspect "$f_url" "$d; нода отвечает" "$f_ms"
-  else
-    set_verdict node_dead "$f_url" "$(reason_text "$f_class" "$f_code"); нода не прошла контрольный запрос"
-  fi
+    error) set_verdict suspect "$f_url" "$(state_text error); нода отвечает" ;;
+    *)
+      if [ -n "$C_MS" ]; then set_verdict suspect "$f_url" "нет ответа от сервиса; нода отвечает"
+      else set_verdict node_dead "$f_url" "нет ответа; нода не прошла контрольный запрос"; fi ;;
+  esac
 }
 
 set_verdict() {
@@ -387,10 +365,7 @@ cmd_runner() {
   WORK=$RUN/work
   mkdir -p "$WORK"
   [ -f "$DIAG_AWK" ] || run_fail "Не найден $DIAG_AWK - переустановите проект"
-  command -v nc_classify >/dev/null 2>&1 || run_fail "Не найден $NETCHECK - переустановите проект"
   main_api_init || run_fail "Не удалось найти адрес API ядра mihomo: в config.yaml нет external-controller"
-  PROXY=$(nc_proxy_url)
-  [ -n "$PROXY" ] || run_fail "В config.yaml нет mixed-port, port или socks-port - не через что отправить запрос к сервису"
   main_curl -f -s -m 10 -o "$RUN/proxies.json" "http://$API_MAIN/proxies" 2>/dev/null \
     || run_fail "API ядра mihomo не отвечает ($API_MAIN). Ядро запущено?"
   CONTROL_URL=
