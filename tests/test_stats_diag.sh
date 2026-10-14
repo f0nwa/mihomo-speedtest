@@ -367,6 +367,66 @@ rm -f "$W/.sourced"; cp "$TEST_ROOT/st.bak" "$W/speedtest2.sh"
 grep -q -- ' -x ' "$SC/curl.log" && fail "запросы через прокси-порт, а его в конфиге нет"
 [ ! -f "$SC/unexpected.log" ] || fail "запросы мимо API ядра: $(cat "$SC/unexpected.log")"
 
+# ----- ручная проверка домена через группу other -----
+python3 - "$SC/proxies.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+d['proxies']['other'] = {'name': 'other', 'type': 'Selector', 'now': 'DE-01', 'all': ['DE-01', 'FI-02', 'N1']}
+json.dump(d, open(p, 'w'), ensure_ascii=False)
+PY
+one() {
+  i=0
+  while [ "$i" -lt 400 ]; do
+    grep -q '"running":false' "$W/tmp/mst-diag/one.json" 2>/dev/null && break
+    [ -d "$W/tmp/mst-diag/lock" ] || [ "$i" -lt 20 ] || break
+    sleep 0.1; i=$((i + 1))
+  done
+  python3 - "$W/tmp/mst-diag/one.json" "$1" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+if sys.argv[2] == 'stage': print(d['stage']); sys.exit()
+if sys.argv[2] == 'error': print(d['error']); sys.exit()
+s = d['services'][0]; v = s
+for k in sys.argv[2].split('.'): v = v[k]
+print(v if not isinstance(v, list) else '|'.join(v))
+PY
+}
+reset_sc
+cp "$W/diag_last.json" "$TEST_ROOT/last.bak"; cp "$W/tmp/mst-diag/state.json" "$TEST_ROOT/state.bak"
+site https://rutracker.org 0 403; echo 50 > "$SC/delay-$(enc DE-01)"; alt FI-02 40
+r=$(cgi check POST 'url=rutracker.org' | body); assert_contains '"started":true' "$r" "check: запуск"
+assert_eq "$(one name)" rutracker.org "check: имя - домен"
+assert_eq "$(one chain)" "other|DE-01" "check: через группу other"
+assert_eq "$(one verdict)" blocked "check: 403"
+assert_eq "$(one url)" https://rutracker.org "check: домен -> https://"
+assert_eq "$(one alt.found)" FI-02 "check: найдена рабочая нода other"
+cmp -s "$W/diag_last.json" "$TEST_ROOT/last.bak" || fail "check затёр последнюю полную диагностику"
+cmp -s "$W/tmp/mst-diag/state.json" "$TEST_ROOT/state.bak" || fail "check изменил состояние полной диагностики"
+r=$(cgi one GET | body); assert_contains '"name":"rutracker.org"' "$r" "GET /api/diag/one"
+reset_sc; site https://rutracker.org/forum/index.php 0 200
+cgi check POST 'url=https%3A%2F%2Frutracker.org%2Fforum%2Findex.php' > /dev/null
+assert_eq "$(one url)" https://rutracker.org/forum/index.php "check: полный адрес"
+assert_eq "$(one verdict)" ok "check: работает"
+r=$(cgi check POST 'url=bad%20host'); assert_contains 'Status: 400' "$r" "check: неверный адрес"
+r=$(cgi check GET 'url=a.ru'); assert_contains 'Status: 405' "$r" "check: только POST"
+# пока идёт проверка домена, полная не запускается
+reset_sc; echo 0.3 > "$SC/slow"
+cgi check POST 'url=rutracker.org' > /dev/null
+r=$(cgi start POST); assert_contains diag_running "$r" "полная во время проверки домена - 409"
+one stage > /dev/null; rm -f "$SC/slow"
+# группы other нет
+cp "$SC/proxies.json" "$TEST_ROOT/p2.bak"
+python3 - "$SC/proxies.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p)); del d['proxies']['other']; json.dump(d, open(p, 'w'), ensure_ascii=False)
+PY
+reset_sc; cgi check POST 'url=rutracker.org' > /dev/null
+assert_eq "$(one stage)" error "без other - ошибка"
+assert_contains 'other' "$(one error)" "текст называет группу other"
+cp "$TEST_ROOT/p2.bak" "$SC/proxies.json"
+grep -q '"api/diag/check": ("stats_diag.sh"' "$ROOT/web/stats_httpd.py" || fail "нет маршрута api/diag/check"
+grep -q '"api/diag/one": ("stats_diag.sh"' "$ROOT/web/stats_httpd.py" || fail "нет маршрута api/diag/one"
+
 # ----- маршруты и списки файлов установки -----
 for r in '"api/diag": ("stats_diag.sh"' '"api/diag/start": ("stats_diag.sh"' '"api/diag/cancel": ("stats_diag.sh"'; do
   grep -qF "$r" "$ROOT/web/stats_httpd.py" || fail "нет маршрута $r в stats_httpd.py"

@@ -602,3 +602,4 @@ button.geo-chip:hover{border-color:var(--accent)}
 .diag-error{border-top:3px solid var(--danger)}
 .table-scroll td.diag-detail{white-space:normal;min-width:240px}
 .table-scroll td.diag-alt{white-space:normal;min-width:160px}
+.diag-one-error{color:var(--danger);margin:8px 0 0}

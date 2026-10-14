@@ -18,6 +18,9 @@ grep -q 'ALL_PROJECT_FILES=.* stats_app_diag.js' "$ROOT/install.sh" || fail "sta
 grep -q 'stats_app_diag.js' "$ROOT/release/components.txt" || fail "stats_app_diag.js нет в components.txt"
 grep -q 'stats_app_diag.js' "$ROOT/uninstall.sh" || fail "stats_app_diag.js нет в uninstall.sh"
 grep -q '\.v\.blocked' "$ROOT/web/stats_style.css" || fail "нет стилей пилюль вердиктов"
+grep -q 'Проверить домен' "$JS" || fail "нет ручной проверки домена"
+grep -q "/api/diag/check" "$JS" || fail "проверка домена не вызывает /api/diag/check"
+grep -q "/api/diag/one" "$JS" || fail "результат проверки домена не опрашивается"
 
 command -v node >/dev/null 2>&1 || { echo "SKIP test_stats_diag_ui (функции): нет node"; echo "OK test_stats_diag_ui"; exit 0; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

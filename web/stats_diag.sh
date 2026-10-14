@@ -11,6 +11,11 @@
 #   start   POST /api/diag/start   - запустить фоновую проверку: {"started":true,
 #                                    "id":...}; 409 speedtest_running - идёт
 #                                    прогон замеров; 409 diag_running - уже идёт
+#   check   POST /api/diag/check?url=<домен или адрес> - ручная проверка
+#                                    одного домена через группу other (с
+#                                    поиском рабочих нод), итог не пишется на
+#                                    флешку
+#   one     GET  /api/diag/one     - состояние ручной проверки домена
 #   cancel  POST /api/diag/cancel  - остановить (частичный итог сохраняется)
 #   runner  - внутреннее: сама проверка (не маршрутизируется)
 #
@@ -48,7 +53,7 @@ TMPROOT=${TMPROOT:-/tmp}
 # speedtest2.sh (LOCK, API ядра, urlencode, статистика нод) нужен запуску
 # и проверке; опросу состояния (раз в 1,5 с) - нет.
 case ${MST_DIAG_ACTION:-status} in
-  start|runner)
+  start|check|runner)
     export MST_LIB_ONLY=1
     [ -f "$DIR/speedtest2.sh" ] && . "$DIR/speedtest2.sh"
     MST_LIB_ONLY=0
@@ -59,6 +64,18 @@ SERVICES_DEFAULT=${SERVICES_DEFAULT:-$DIR/services.default.tsv}
 CONFIG_STATE_DIR=${CONFIG_STATE_DIR:-$DIR/config-state}
 DIAG_LAST=${DIAG_LAST:-$DIR/diag_last.json}
 RUN=$TMPROOT/mst-diag
+# Файлы состояния: полная диагностика - services.tsv/meta/state.json;
+# ручная проверка домена (MST_DIAG_ONE - адрес) - свои, чтобы не затирать
+# итог полной. Блокировка и cancel - общие: обе сразу не идут.
+DIAG_ONE_GROUP=${DIAG_ONE_GROUP:-other}
+set_paths() {
+  if [ -n "${MST_DIAG_ONE:-}" ] || [ "$1" = one ]; then
+    D_SVC=$RUN/check.tsv D_META=$RUN/check.meta D_STATE=$RUN/one.json
+  else
+    D_SVC=$RUN/services.tsv D_META=$RUN/meta D_STATE=$RUN/state.json
+  fi
+}
+set_paths
 # Контрольный адрес - первый из списка, который не test-url ни одной группы
 # (запрос delay пишет историю ноды по этому адресу - url-test её читает).
 DIAG_CONTROL_URLS=${DIAG_CONTROL_URLS:-"https://cp.cloudflare.com/generate_204 http://www.msftconnecttest.com/connecttest.txt http://captive.apple.com/hotspot-detect.html"}
@@ -95,13 +112,13 @@ meta_set() {
     BEGIN { k = ENVIRON["MK"]; v = ENVIRON["MV"] }
     $1 == k { print k "\t" v; done = 1; next }
     { print }
-    END { if (!done) print k "\t" v }' "$RUN/meta" > "$RUN/meta.tmp" 2>/dev/null
-  mv -f "$RUN/meta.tmp" "$RUN/meta"
+    END { if (!done) print k "\t" v }' "$D_META" > "$D_META.tmp" 2>/dev/null
+  mv -f "$D_META.tmp" "$D_META"
 }
 
 diag_write_state() {
-  dawk -v mode=render -v meta="$RUN/meta" "$RUN/services.tsv" > "$RUN/state.json.tmp" 2>/dev/null \
-    && mv -f "$RUN/state.json.tmp" "$RUN/state.json"
+  dawk -v mode=render -v meta="$D_META" "$D_SVC" > "$D_STATE.tmp" 2>/dev/null \
+    && mv -f "$D_STATE.tmp" "$D_STATE"
 }
 
 # diag_set_field ИМЯ ПОЛЕ ЗНАЧЕНИЕ - поле строки сервиса в services.tsv.
@@ -113,7 +130,7 @@ diag_set_field() {
   esac
   DN=$1 DV=$(printf '%s' "$3" | tr '\t\n\r' '   ') awk -F'\t' -v OFS='\t' -v fi="$fi" '
     $1 == ENVIRON["DN"] { $fi = ENVIRON["DV"] }
-    { print }' "$RUN/services.tsv" > "$RUN/services.tmp" && mv -f "$RUN/services.tmp" "$RUN/services.tsv"
+    { print }' "$D_SVC" > "$D_SVC.tmp" && mv -f "$D_SVC.tmp" "$D_SVC"
 }
 
 diag_cancelled() { [ -f "$RUN/cancel" ]; }
@@ -124,20 +141,45 @@ cmd_status() {
   lp=$(cat "$RUN/lock/pid" 2>/dev/null)
   if [ -d "$RUN/lock" ] && [ -n "$lp" ] && ! pid_alive "$lp"; then
     # Раннер умер, не дописав итог (перезагрузка службы, kill).
-    [ -f "$RUN/meta" ] && {
+    [ -f "$D_META" ] && {
       meta_set running 0; meta_set stage error
       meta_set error "Проверка прервалась неожиданно. Запустите её ещё раз."
       meta_set finished "$(date +%s)"; diag_write_state
     }
     rm -rf "$RUN/lock"
   fi
-  if [ -f "$RUN/state.json" ]; then reply 200 "$(cat "$RUN/state.json")"; fi
-  if [ -f "$DIAG_LAST" ]; then reply 200 "$(cat "$DIAG_LAST")"; fi
+  if [ -f "$D_STATE" ]; then reply 200 "$(cat "$D_STATE")"; fi
+  if [ -z "${MST_DIAG_ONE:-}" ] && [ -f "$DIAG_LAST" ] && [ "$D_STATE" = "$RUN/state.json" ]; then reply 200 "$(cat "$DIAG_LAST")"; fi
   reply 200 '{"id":"","running":false,"stage":"none","error":"","started":0,"finished":0,"current":"","total":0,"done":0,"services":[]}'
+}
+
+# Адрес для ручной проверки: домен (example.com) или http(s)-адрес.
+# QUERY_STRING url=... (процентное кодирование раскрывается).
+check_url() {
+  cu_v=$(printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | sed -n 's/^url=//p' | head -n 1 | awk '
+    function hv(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+    { s = $0; gsub(/\+/, " ", s); out = ""
+      for (i = 1; i <= length(s); i++) { c = substr(s, i, 1)
+        if (c == "%" && i + 2 <= length(s)) { out = out sprintf("%c", hv(substr(s, i + 1, 1)) * 16 + hv(substr(s, i + 2, 1))); i += 2 }
+        else out = out c }
+      print out }')
+  case $cu_v in
+    http://*|https://*)
+      case $cu_v in *[\ \"\'\<\>\\]*) return 1 ;; esac
+      printf '%s\n' "$cu_v" ;;
+    *)
+      printf '%s\n' "$cu_v" | grep -q -E '^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$' || return 1
+      printf 'https://%s\n' "$cu_v" ;;
+  esac
 }
 
 cmd_start() {
   [ "${REQUEST_METHOD:-GET}" = POST ] || reply 405 '{"error":"method"}'
+  if [ "${MST_DIAG_ACTION:-}" = check ]; then
+    MST_DIAG_ONE=$(check_url) || reply 400 '{"error":"url","message":"Введите домен (example.com) или адрес, начинающийся с http:// или https://"}'
+    export MST_DIAG_ONE
+    set_paths
+  fi
   if [ -n "${LOCK:-}" ] && pid_alive "$(cat "$LOCK/pid" 2>/dev/null)"; then
     reply 409 '{"error":"speedtest_running","message":"Сейчас идёт прогон замеров. Запустите диагностику после него."}'
   fi
@@ -153,8 +195,9 @@ cmd_start() {
   # pid сразу: status без pid считает, что запуск ещё идёт
   echo $$ > "$RUN/lock/pid"
   id=$(date +%s)-$$
-  rm -f "$RUN/cancel" "$RUN/services.tsv" "$RUN/state.json" "$RUN/meta"
-  : > "$RUN/services.tsv"; : > "$RUN/meta"
+  rm -f "$RUN/cancel" "$D_SVC" "$D_STATE" "$D_META"
+  [ -z "${MST_DIAG_ONE:-}" ] || meta_set one 1
+  : > "$D_SVC"; : > "$D_META"
   meta_set id "$id"; meta_set running 1; meta_set stage phase1
   meta_set started "$(date +%s)"; meta_set current "Готовлю проверку"
   diag_write_state
@@ -296,7 +339,7 @@ phase2() {
     p2_name=$(sed -n "${p2_i}p" "$RUN/targets.tsv" | cut -f1)
     p2_url=$(sed -n "${p2_i}p" "$RUN/targets.tsv" | cut -f2 | cut -d' ' -f1)
     p2_i=$((p2_i + 1))
-    p2_row=$(DN=$p2_name awk -F'\t' '$1 == ENVIRON["DN"] { print $4 "\t" $3; exit }' "$RUN/services.tsv")
+    p2_row=$(DN=$p2_name awk -F'\t' '$1 == ENVIRON["DN"] { print $4 "\t" $3; exit }' "$D_SVC")
     p2_verdict=${p2_row%%"$TAB"*}; p2_node=${p2_row#*"$TAB"}
     case $p2_verdict in blocked|suspect|lb) ;; *) continue ;; esac
     [ "$p2_url" != - ] && [ -n "$p2_url" ] || continue
@@ -342,21 +385,21 @@ run_fail() {
 }
 
 finish() {
-  [ "$(awk -F'\t' '$1 == "stage" { print $2 }' "$RUN/meta")" = error ] || {
+  [ "$(awk -F'\t' '$1 == "stage" { print $2 }' "$D_META")" = error ] || {
     if diag_cancelled; then meta_set stage cancelled; else meta_set stage done; fi
   }
   # Что не успели: непроверенные сервисы и не начатые поиски замены.
   awk -F'\t' -v OFS='\t' '
     $4 == "pending" { $4 = "skipped"; $6 = "Не проверено: проверку остановили" }
     ($4 == "blocked" || $4 == "suspect" || $4 == "lb") && ($9 == "" || $9 == "none") { $9 = "skipped" }
-    { print }' "$RUN/services.tsv" > "$RUN/services.tmp" 2>/dev/null && mv -f "$RUN/services.tmp" "$RUN/services.tsv"
+    { print }' "$D_SVC" > "$D_SVC.tmp" 2>/dev/null && mv -f "$D_SVC.tmp" "$D_SVC"
   meta_set running 0; meta_set current ""; meta_set finished "$(date +%s)"
   diag_write_state
-  if cp "$RUN/state.json" "$DIAG_LAST.tmp.$$" 2>/dev/null; then
+  if [ -z "${MST_DIAG_ONE:-}" ] && cp "$D_STATE" "$DIAG_LAST.tmp.$$" 2>/dev/null; then
     mv -f "$DIAG_LAST.tmp.$$" "$DIAG_LAST" || rm -f "$DIAG_LAST.tmp.$$"
   fi
   rm -rf "$RUN/cands" "$RUN/order" "$RUN/work" "$RUN/proxies.json" "$RUN/group.json" "$RUN/one.groups" "$RUN/one.res" \
-    "$RUN/targets.tsv" "$RUN/groups" "$RUN/resolved.tsv" "$RUN/body" "$RUN/cancel" "$RUN/lock"
+    "$RUN/targets.tsv" "$RUN/groups" "$RUN/resolved.tsv" "$RUN/cancel" "$RUN/lock"
   exit 0
 }
 
@@ -374,16 +417,31 @@ cmd_runner() {
     CONTROL_URL=$cu; break
   done
   [ -n "$CONTROL_URL" ] || CONTROL_URL=${DIAG_CONTROL_URLS##* }
-  overlay=
-  [ -f "$CONFIG_STATE_DIR/services.tsv" ] && overlay=$CONFIG_STATE_DIR/services.tsv
-  dawk -v mode=targets -v overlay_file="$overlay" "$SERVICES_DEFAULT" > "$RUN/targets.tsv" \
-    || run_fail "Не удалось прочитать список сервисов ($SERVICES_DEFAULT)"
-  cut -f1 "$RUN/targets.tsv" > "$RUN/groups"
-  dawk -v mode=resolve -v groups_file="$RUN/groups" "$RUN/proxies.json" > "$RUN/resolved.tsv" \
+  # targets.tsv: имя строки<TAB>адреса<TAB>группа ядра
+  if [ -n "${MST_DIAG_ONE:-}" ]; then
+    one_host=${MST_DIAG_ONE#*://}; one_host=${one_host%%/*}
+    printf '%s\t%s\t%s\n' "$one_host" "$MST_DIAG_ONE" "$DIAG_ONE_GROUP" > "$RUN/targets.tsv"
+  else
+    overlay=
+    [ -f "$CONFIG_STATE_DIR/services.tsv" ] && overlay=$CONFIG_STATE_DIR/services.tsv
+    dawk -v mode=targets -v overlay_file="$overlay" "$SERVICES_DEFAULT" > "$RUN/targets.tmp" \
+      || run_fail "Не удалось прочитать список сервисов ($SERVICES_DEFAULT)"
+    awk -F'\t' -v OFS='\t' '{ print $1, $2, $1 }' "$RUN/targets.tmp" > "$RUN/targets.tsv"
+    rm -f "$RUN/targets.tmp"
+  fi
+  cut -f3 "$RUN/targets.tsv" > "$RUN/groups"
+  dawk -v mode=resolve -v groups_file="$RUN/groups" "$RUN/proxies.json" > "$RUN/resolved.tmp" \
     || run_fail "Не удалось разобрать ответ API ядра"
+  # первое поле - имя строки (у проверки домена - домен, а не группа)
+  awk -F'\t' -v OFS='\t' 'NR == FNR { n[FNR] = $1; next } { $1 = n[FNR]; print }' \
+    "$RUN/targets.tsv" "$RUN/resolved.tmp" > "$RUN/resolved.tsv"
+  rm -f "$RUN/resolved.tmp"
+  if [ -n "${MST_DIAG_ONE:-}" ] && [ "$(cut -f4 "$RUN/resolved.tsv")" = missing ]; then
+    run_fail "Группы $DIAG_ONE_GROUP нет в работающем конфиге - домен проверить не через что"
+  fi
   # Строки сервисов сразу - вкладка показывает весь список «проверяется».
   awk -F'\t' -v OFS='\t' '{ print $1, $2, $3, "pending", "", "", "", "", "none", 0, 0, "" }' \
-    "$RUN/resolved.tsv" > "$RUN/services.tsv"
+    "$RUN/resolved.tsv" > "$D_SVC"
   total=$(wc -l < "$RUN/targets.tsv" | tr -d ' ')
   meta_set total "$total"; meta_set done 0
   diag_write_state
@@ -392,6 +450,7 @@ cmd_runner() {
     diag_cancelled && break
     name=$(sed -n "${i}p" "$RUN/targets.tsv" | cut -f1)
     urls=$(sed -n "${i}p" "$RUN/targets.tsv" | cut -f2)
+    group=$(sed -n "${i}p" "$RUN/targets.tsv" | cut -f3)
     chain=$(sed -n "${i}p" "$RUN/resolved.tsv" | cut -f2)
     end=$(sed -n "${i}p" "$RUN/resolved.tsv" | cut -f3)
     kind=$(sed -n "${i}p" "$RUN/resolved.tsv" | cut -f4)
@@ -401,7 +460,7 @@ cmd_runner() {
     if [ "$kind" = node ] && ! diag_cancelled && ! chain_same "$chain"; then
       # Выбор группы сменился во время проверки - один раз через новую ноду.
       if main_curl -f -s -m 10 -o "$RUN/proxies.json" "http://$API_MAIN/proxies" 2>/dev/null; then
-        resolve_one "$name"
+        resolve_one "$group"
         diag_set_field "$name" control_ms ""
         check_service "$name" "$urls" "$R_KIND" "$R_END" "$R_CHAIN"
       fi
@@ -416,7 +475,8 @@ cmd_runner() {
 
 case ${MST_DIAG_ACTION:-status} in
   status) cmd_status ;;
-  start) cmd_start ;;
+  one) set_paths one; cmd_status ;;
+  start|check) cmd_start ;;
   cancel) cmd_cancel ;;
   runner) cmd_runner ;;
   *) reply 400 '{"error":"action"}' ;;
