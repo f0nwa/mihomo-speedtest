@@ -341,7 +341,11 @@ export function createModules(data) {
   var filterErr = '';
   var present = { subs: data.subscriptions != null, proxies: data.proxies != null };
 
-  function subNames() { return subs.map(function (s) { return s.name; }); }
+  // Убранная подписка, как и нода, остаётся в списке (красной) до применения:
+  // в конфиг не идёт, но имя за ней держится, чтобы её можно было вернуть.
+  function activeSubs() { return subs.filter(function (s) { return !s.removed; }); }
+  function subNames() { return activeSubs().map(function (s) { return s.name; }); }
+  function reservedSubNames() { return subs.map(function (s) { return s.name; }); }
   function activeProxies() { return proxies.filter(function (p) { return !p.removed; }); }
   function proxyNames() { return activeProxies().map(function (p) { return p.name; }); }
   function reservedProxyNames() { return proxies.map(function (p) { return p.name; }); }
@@ -351,25 +355,33 @@ export function createModules(data) {
     // Исходный фильтр взят из BLOCK спидтеста, а не из конструктора/шаблона.
     fromBlock: function () { return fromBlock; },
     // ----- подписки -----
-    subs: function () { return subs.map(function (s) { return { url: s.url, ua: s.ua, name: s.name }; }); },
+    subs: function () { return activeSubs().map(function (s) { return { url: s.url, ua: s.ua, name: s.name }; }); },
+    subRows: function () { return subs.map(function (s) { return { url: s.url, ua: s.ua, name: s.name, removed: !!s.removed }; }); },
     addSub: function (url, ua, name) {
       url = String(url || '').trim(); ua = String(ua || '').trim();
       checkSubUrl(url); checkUa(ua);
-      name = String(name || '').trim() || suggestSubName(url, subNames());
-      checkSubName(name, subNames());
+      name = String(name || '').trim() || suggestSubName(url, reservedSubNames());
+      checkSubName(name, reservedSubNames());
       subs.push({ url: url, ua: ua, name: name });
       return name;
     },
     editSub: function (name, patch) {
-      var s = subs.filter(function (x) { return x.name === name; })[0];
+      var s = activeSubs().filter(function (x) { return x.name === name; })[0];
       if (!s) { throw new Error('Нет подписки ' + name); }
       var n = Object.assign({}, s, patch);
       n.url = String(n.url).trim(); n.ua = String(n.ua || '').trim(); n.name = String(n.name).trim();
       checkSubUrl(n.url); checkUa(n.ua);
-      if (n.name !== name) { checkSubName(n.name, subNames()); }
+      if (n.name !== name) { checkSubName(n.name, reservedSubNames()); }
       s.url = n.url; s.ua = n.ua; s.name = n.name;
     },
-    removeSub: function (name) { subs = subs.filter(function (s) { return s.name !== name; }); },
+    removeSub: function (name) {
+      var s = subs.filter(function (x) { return x.name === name; })[0];
+      if (s) { s.removed = true; }
+    },
+    restoreSub: function (name) {
+      var s = subs.filter(function (x) { return x.name === name; })[0];
+      if (s) { s.removed = false; }
+    },
     // ----- свои прокси -----
     proxies: function () {
       return activeProxies().map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port }; });
@@ -443,7 +455,7 @@ export function createModules(data) {
     // Что не даст применить: нет ни подписок, ни своих нод.
     problems: function () {
       var out = [];
-      if (present.subs && present.proxies && !subs.length && !activeProxies().length) {
+      if (present.subs && present.proxies && !activeSubs().length && !activeProxies().length) {
         out.push('Нужна хотя бы одна подписка или своя нода');
       }
       if (filterErr) { out.push('Исключения нод: ' + filterErr); }
@@ -451,7 +463,7 @@ export function createModules(data) {
     },
     serialize: function () {
       return {
-        subscriptions: present.subs ? serializeSubs(subs) : null,
+        subscriptions: present.subs ? serializeSubs(activeSubs()) : null,
         proxies: present.proxies ? serializeProxies(activeProxies()) : null,
         geofilter: words && !model.isDefaultWords() ? words.join('\n') + '\n' : ''
       };
@@ -471,7 +483,7 @@ export function createModules(data) {
       var res = [];
       var s0 = parseSubs(initial.subscriptions), p0 = parseProxies(initial.proxies);
       var n0 = s0.map(function (s) { return s.name; });
-      subs.forEach(function (s) {
+      activeSubs().forEach(function (s) {
         var old = s0.filter(function (x) { return x.name === s.name; })[0];
         if (!old) { res.push('+ подписка ' + s.name); }
         else if (old.url !== s.url) { res.push('Подписка ' + s.name + ': новый адрес'); }

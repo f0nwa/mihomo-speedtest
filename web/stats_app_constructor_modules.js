@@ -549,11 +549,12 @@ export function createModuleCards(ctx) {
 
   function subRow(s) {
     if (editingSub === s.name) { return subEditor(s); }
-    var r = el('div', 'xk-row cx-row');
+    var r = el('div', 'xk-row cx-row' + (s.removed ? ' cx-sub-removed' : ''));
     // Имя правится прямо в строке, как у нод в «Прокси»: «Сохранить имя»
     // появляется, только когда имя изменено (Enter - сохранить, Esc - вернуть).
     // Адрес и User-Agent - по кнопке «Изменить».
     var nm = el('input', 'cx-name'); nm.type = 'text'; nm.value = s.name; nm.spellcheck = false;
+    nm.disabled = s.removed;
     nm.setAttribute('aria-label', 'Имя подписки ' + s.name);
     var save = button('Сохранить имя', 'small'); save.hidden = true;
     nm.addEventListener('input', function () { save.hidden = nm.value.trim() === s.name; });
@@ -564,11 +565,19 @@ export function createModuleCards(ctx) {
     save.addEventListener('click', function () { ctx.edit(function () { mods.editSub(s.name, { name: nm.value }); }); });
     r.appendChild(nm); r.appendChild(save);
     r.appendChild(el('span', 'geo-code', hostOf(s.url) + (s.ua ? ' · ' + s.ua : '')));
-    var ed = button('Изменить', 'small muted');
-    ed.addEventListener('click', function () { editingSub = s.name; render(); });
-    var rm = button('Убрать', 'small muted');
-    rm.addEventListener('click', function () { ctx.edit(function () { mods.removeSub(s.name); }); });
-    r.appendChild(ed); r.appendChild(rm);
+    // Убранная подписка остаётся в списке красной до применения, как нода
+    // в «Прокси»: её можно вернуть, но не править.
+    if (s.removed) {
+      r.appendChild(el('span', 'cx-sub-removed-note', 'Убрана'));
+    } else {
+      var ed = button('Изменить', 'small muted');
+      ed.addEventListener('click', function () { editingSub = s.name; render(); });
+      r.appendChild(ed);
+    }
+    var rm = button(s.removed ? 'Вернуть' : 'Убрать', 'small muted');
+    rm.setAttribute('aria-label', (s.removed ? 'Вернуть ' : 'Убрать ') + s.name);
+    rm.addEventListener('click', function () { ctx.edit(function () { if (s.removed) { mods.restoreSub(s.name); } else { mods.removeSub(s.name); } }); });
+    r.appendChild(rm);
     return r;
   }
 
@@ -592,7 +601,7 @@ export function createModuleCards(ctx) {
   function renderSubs() {
     clear(subsHost);
     var rows = el('div', 'xk-rows');
-    var list = mods.subs();
+    var list = mods.subRows();
     list.forEach(function (s) { rows.appendChild(subRow(s)); });
     if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Подписок нет.')); }
     subsHost.appendChild(rows);
