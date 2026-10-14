@@ -946,7 +946,7 @@ XKEEN_DIR="$WORKP/nope" seed_port_proxying 2>/dev/null || { echo "FAIL: ports: �
 mkdir "$WORKP/xk"
 XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
 assert_eq "$(cat "$WORKP/xk/port_proxying.lst" 2>/dev/null)" "$(default_port_proxying)" "ports: нет файла - записан список по умолчанию"
-assert_eq "$(grep -v '^#' "$WORKP/xk/port_proxying.lst" | grep -v '^$' | tr '\n' ' ')" "80 443 596:599 1400 3478:3497 5222 50000:50030 " "ports: состав списка"
+assert_eq "$(grep -v '^#' "$WORKP/xk/port_proxying.lst" | grep -v '^$' | tr '\n' ' ')" "80 443 596:599 1400 3478:3497 5222 4244 5242 50000:50030 " "ports: состав списка"
 printf '#80\n#443\n\n# (Раскомментируйте/добавьте по образцу)\n' > "$WORKP/xk/port_proxying.lst"
 XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
 assert_eq "$(cat "$WORKP/xk/port_proxying.lst")" "$(default_port_proxying)" "ports: только комментарии - заменён"

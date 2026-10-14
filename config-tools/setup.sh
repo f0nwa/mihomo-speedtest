@@ -384,6 +384,9 @@ default_port_proxying() {
 3478:3497
 # XMPP: WhatsApp, запасной порт Telegram
 5222
+# WhatsApp: дополнительные порты сообщений и медиа
+4244
+5242
 # Голосовые каналы Discord
 50000:50030
 

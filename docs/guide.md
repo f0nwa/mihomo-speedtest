@@ -898,7 +898,7 @@ setup.sh в списке показываются и доступны для о�
 При установке с нуля (`setup.sh`) пустой `port_proxying.lst` (нет ни
 одной включённой записи) заполняется списком по умолчанию: 80 (HTTP), 443
 (HTTPS и QUIC), 596:599 и 1400 (звонки Telegram), 3478:3497 (STUN/TURN -
-звонки WhatsApp, Telegram, FaceTime), 5222 (XMPP - WhatsApp, Telegram),
+звонки WhatsApp, Telegram, FaceTime), 5222 (XMPP - WhatsApp, Telegram), 4244 и 5242 (WhatsApp),
 50000:50030 (голос Discord). Свой список и заполненный `port_exclude.lst`
 не трогаются.
 
