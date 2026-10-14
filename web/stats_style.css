@@ -608,3 +608,4 @@ button.geo-chip:hover{border-color:var(--accent)}
 .table-scroll td.diag-detail{white-space:normal;min-width:240px}
 .table-scroll td.diag-alt{white-space:normal;min-width:160px}
 .diag-one-error{color:var(--danger);margin:8px 0 0}
+.diag-list{width:100%;box-sizing:border-box;margin:8px 0;font:inherit;font-size:13px;background:var(--bg);color:var(--text);border:1px solid var(--card-border);padding:8px 10px;resize:vertical}

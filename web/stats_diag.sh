@@ -15,7 +15,12 @@
 #                                    одного домена через группу other (с
 #                                    поиском рабочих нод), итог не пишется на
 #                                    флешку
-#   one     GET  /api/diag/one     - состояние ручной проверки домена
+#           POST /api/diag/check?list=1 - то же для всех строк своего списка
+#   one     GET  /api/diag/one     - состояние ручной проверки домена/списка
+#   domains GET  /api/diag/domains - свой список доменов: {"text":...}
+#   domains-save POST /api/diag/domains/save - сохранить список (тело -
+#                                    текст; неверная строка или больше
+#                                    DIAG_LIST_MAX доменов - 400)
 #   cancel  POST /api/diag/cancel  - остановить (частичный итог сохраняется)
 #   runner  - внутреннее: сама проверка (не маршрутизируется)
 #
@@ -68,6 +73,10 @@ RUN=$TMPROOT/mst-diag
 # ручная проверка домена (MST_DIAG_ONE - адрес) - свои, чтобы не затирать
 # итог полной. Блокировка и cancel - общие: обе сразу не идут.
 DIAG_ONE_GROUP=${DIAG_ONE_GROUP:-other}
+# Свой список доменов (вкладка «Диагностика», «Свои домены»): по строке,
+# # - комментарий; пишется только при сохранении.
+DIAG_DOMAINS=${DIAG_DOMAINS:-$DIR/diag_domains.txt}
+DIAG_LIST_MAX=${DIAG_LIST_MAX:-50}
 set_paths() {
   if [ -n "${MST_DIAG_ONE:-}" ] || [ "$1" = one ]; then
     D_SVC=$RUN/check.tsv D_META=$RUN/check.meta D_STATE=$RUN/one.json
@@ -163,19 +172,84 @@ check_url() {
         if (c == "%" && i + 2 <= length(s)) { out = out sprintf("%c", hv(substr(s, i + 1, 1)) * 16 + hv(substr(s, i + 2, 1))); i += 2 }
         else out = out c }
       print out }')
-  case $cu_v in
+  url_of "$cu_v"
+}
+
+# url_of СТРОКА - адрес для проверки: http(s)-адрес как есть, домен ->
+# https://домен; иначе код 1.
+url_of() {
+  case $1 in
     http://*|https://*)
-      case $cu_v in *[\ \"\'\<\>\\]*) return 1 ;; esac
-      printf '%s\n' "$cu_v" ;;
+      case $1 in *[\ \"\'\<\>\\]*) return 1 ;; esac
+      printf '%s\n' "$1" ;;
     *)
-      printf '%s\n' "$cu_v" | grep -q -E '^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$' || return 1
-      printf 'https://%s\n' "$cu_v" ;;
+      printf '%s\n' "$1" | grep -q -E '^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$' || return 1
+      printf 'https://%s\n' "$1" ;;
   esac
+}
+
+# list_targets ФАЙЛ - строки targets.tsv (как записано<TAB>адрес<TAB>группа)
+# из списка доменов: без пустых строк, комментариев, неверных строк и
+# повторов адреса. Код 1 - ошибка в строке: в LT_ERR её текст.
+list_targets() {
+  lt_n=0 lt_seen=" " LT_ERR=
+  while IFS= read -r lt_l || [ -n "$lt_l" ]; do
+    lt_n=$((lt_n + 1))
+    lt_l=$(printf '%s' "$lt_l" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    case $lt_l in ''|'#'*) continue ;; esac
+    if ! lt_u=$(url_of "$lt_l"); then LT_ERR="Строка $lt_n: «$lt_l» - не домен и не адрес http(s)://"; return 1; fi
+    case $lt_seen in *" $lt_u "*) continue ;; esac
+    lt_seen="$lt_seen$lt_u "
+    printf '%s\t%s\t%s\n' "$lt_l" "$lt_u" "$DIAG_ONE_GROUP"
+  done < "$1"
+}
+
+json_text() {
+  # файл -> JSON-строка в кавычках
+  awk 'BEGIN { printf "\"" }
+    { gsub(/\r/, ""); gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t")
+      if (NR > 1) printf "\\n"; printf "%s", $0 }
+    END { printf "\"" }' "$1"
+}
+
+cmd_domains() {
+  if [ -f "$DIAG_DOMAINS" ]; then reply 200 "{\"text\":$(json_text "$DIAG_DOMAINS")}"; fi
+  reply 200 '{"text":""}'
+}
+
+cmd_domains_save() {
+  [ "${REQUEST_METHOD:-GET}" = POST ] || reply 405 '{"error":"method"}'
+  mkdir -p "$RUN" || reply 500 '{"error":"run_dir"}'
+  head -c "${CONTENT_LENGTH:-0}" > "$RUN/domains.new"
+  if ! list_targets "$RUN/domains.new" > "$RUN/domains.tsv"; then
+    rm -f "$RUN/domains.new" "$RUN/domains.tsv"
+    reply 400 "{\"error\":\"line\",\"message\":$(printf '%s\n' "$LT_ERR" > "$RUN/err"; json_text "$RUN/err")}"
+  fi
+  n=$(wc -l < "$RUN/domains.tsv" | tr -d ' ')
+  rm -f "$RUN/domains.tsv" "$RUN/err"
+  if [ "$n" -gt "$DIAG_LIST_MAX" ]; then
+    rm -f "$RUN/domains.new"
+    reply 400 "{\"error\":\"too_many\",\"message\":\"В списке $n доменов, можно не больше $DIAG_LIST_MAX\"}"
+  fi
+  if cp "$RUN/domains.new" "$DIAG_DOMAINS.tmp.$$" 2>/dev/null && mv -f "$DIAG_DOMAINS.tmp.$$" "$DIAG_DOMAINS"; then
+    rm -f "$RUN/domains.new"
+    reply 200 "{\"saved\":true,\"count\":$n}"
+  fi
+  rm -f "$RUN/domains.new" "$DIAG_DOMAINS.tmp.$$"
+  reply 500 '{"error":"write","message":"Не удалось записать список доменов"}'
 }
 
 cmd_start() {
   [ "${REQUEST_METHOD:-GET}" = POST ] || reply 405 '{"error":"method"}'
-  if [ "${MST_DIAG_ACTION:-}" = check ]; then
+  if [ "${MST_DIAG_ACTION:-}" = check ] && printf '%s' "${QUERY_STRING:-}" | tr '&' '\n' | grep -q '^list=1$'; then
+    mkdir -p "$RUN" || reply 500 '{"error":"run_dir"}'
+    if [ ! -f "$DIAG_DOMAINS" ] || ! list_targets "$DIAG_DOMAINS" > "$RUN/list.check" || [ ! -s "$RUN/list.check" ]; then
+      rm -f "$RUN/list.check"
+      reply 400 '{"error":"empty","message":"Список доменов пуст или в нём ошибка - сохраните список"}'
+    fi
+    rm -f "$RUN/list.check"
+    MST_DIAG_ONE=@list; export MST_DIAG_ONE; set_paths
+  elif [ "${MST_DIAG_ACTION:-}" = check ]; then
     MST_DIAG_ONE=$(check_url) || reply 400 '{"error":"url","message":"Введите домен (example.com) или адрес, начинающийся с http:// или https://"}'
     export MST_DIAG_ONE
     set_paths
@@ -418,7 +492,9 @@ cmd_runner() {
   done
   [ -n "$CONTROL_URL" ] || CONTROL_URL=${DIAG_CONTROL_URLS##* }
   # targets.tsv: имя строки<TAB>адреса<TAB>группа ядра
-  if [ -n "${MST_DIAG_ONE:-}" ]; then
+  if [ "${MST_DIAG_ONE:-}" = @list ]; then
+    list_targets "$DIAG_DOMAINS" > "$RUN/targets.tsv" || run_fail "Ошибка в списке доменов: $LT_ERR"
+  elif [ -n "${MST_DIAG_ONE:-}" ]; then
     one_host=${MST_DIAG_ONE#*://}; one_host=${one_host%%/*}
     printf '%s\t%s\t%s\n' "$one_host" "$MST_DIAG_ONE" "$DIAG_ONE_GROUP" > "$RUN/targets.tsv"
   else
@@ -436,7 +512,7 @@ cmd_runner() {
   awk -F'\t' -v OFS='\t' 'NR == FNR { n[FNR] = $1; next } { $1 = n[FNR]; print }' \
     "$RUN/targets.tsv" "$RUN/resolved.tmp" > "$RUN/resolved.tsv"
   rm -f "$RUN/resolved.tmp"
-  if [ -n "${MST_DIAG_ONE:-}" ] && [ "$(cut -f4 "$RUN/resolved.tsv")" = missing ]; then
+  if [ -n "${MST_DIAG_ONE:-}" ] && [ "$(head -n 1 "$RUN/resolved.tsv" | cut -f4)" = missing ]; then
     run_fail "Группы $DIAG_ONE_GROUP нет в работающем конфиге - домен проверить не через что"
   fi
   # Строки сервисов сразу - вкладка показывает весь список «проверяется».
@@ -476,6 +552,8 @@ cmd_runner() {
 case ${MST_DIAG_ACTION:-status} in
   status) cmd_status ;;
   one) set_paths one; cmd_status ;;
+  domains) cmd_domains ;;
+  domains-save) cmd_domains_save ;;
   start|check) cmd_start ;;
   cancel) cmd_cancel ;;
   runner) cmd_runner ;;

@@ -21,6 +21,9 @@ grep -q '\.v\.blocked' "$ROOT/web/stats_style.css" || fail "нет стилей 
 grep -q 'Проверить домен' "$JS" || fail "нет ручной проверки домена"
 grep -q "/api/diag/check" "$JS" || fail "проверка домена не вызывает /api/diag/check"
 grep -q "/api/diag/one" "$JS" || fail "результат проверки домена не опрашивается"
+grep -q "/api/diag/domains/save" "$JS" || fail "список доменов не сохраняется"
+grep -q "Проверить список" "$JS" || fail "нет кнопки «Проверить список»"
+grep -q "list=1" "$JS" || fail "проверка списка не вызывается"
 
 command -v node >/dev/null 2>&1 || { echo "SKIP test_stats_diag_ui (функции): нет node"; echo "OK test_stats_diag_ui"; exit 0; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

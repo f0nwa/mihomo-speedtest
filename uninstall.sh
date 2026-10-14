@@ -374,7 +374,7 @@ purge_data() {
   # OUT/LAST в его шапке), не только журналы - раньше не удалялись, найдено
   # при реальном тесте полного сноса (после revert_config() config.yaml уже
   # не ссылается на fast.yaml, но сам файл оставался).
-  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$DIR/diag_last.json" "$MIHOMO_DIR/fast.yaml" "$DIR/speedtest_last.txt"
+  rm -f "$DIR/speedtest.log" "$DIR/speedtest_runs.tsv" "$DIR/speedtest_history.tsv" "$DIR/node_stability.tsv" "$DIR/diag_last.json" "$DIR/diag_domains.txt" "$MIHOMO_DIR/fast.yaml" "$DIR/speedtest_last.txt"
   rm -rf "$STATS_HTTP_DIR"
   rm -rf "$DIR/.stats-auth"
   ui_ok "Журналы, история замеров, веб-статика и учётные данные (PURGE_DATA=1)"

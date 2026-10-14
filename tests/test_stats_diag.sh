@@ -129,7 +129,7 @@ chmod +x "$W/bin/curl"
 cgi() {
   # $1 - действие, $2 - метод, $3 - QUERY_STRING
   DIAG_ALT_MAX_SEC=${DIAG_ALT_MAX_SEC:-60} DIAG_TOTAL_MAX_SEC=${DIAG_TOTAL_MAX_SEC:-300} DIR=$W TMPROOT=$W/tmp LOCK=$W/tmp/mst.lock MIHOMO_DIR=$W/mihomo PATH="$W/bin:$PATH" \
-    CONFIG_STATE_DIR=$W/config-state REQUEST_METHOD=$2 QUERY_STRING=${3:-} MST_DIAG_ACTION=$1 \
+    CONFIG_STATE_DIR=$W/config-state REQUEST_METHOD=$2 QUERY_STRING=${3:-} MST_DIAG_ACTION=$1 CONTENT_LENGTH=${BODY_LEN:-0} \
     DIAG_STATE_POLL=0 "$W/stats_diag.sh"
 }
 body() { sed '1,/^\r\{0,1\}$/d'; }
@@ -426,6 +426,40 @@ assert_contains 'other' "$(one error)" "текст называет группу
 cp "$TEST_ROOT/p2.bak" "$SC/proxies.json"
 grep -q '"api/diag/check": ("stats_diag.sh"' "$ROOT/web/stats_httpd.py" || fail "нет маршрута api/diag/check"
 grep -q '"api/diag/one": ("stats_diag.sh"' "$ROOT/web/stats_httpd.py" || fail "нет маршрута api/diag/one"
+
+# ----- свой список доменов: хранение и проверка списком -----
+r=$(cgi domains GET | body); assert_contains '"text":""' "$r" "список пуст до первого сохранения"
+LIST=$(printf '# трекеры\nrutracker.org\n\nhttps://nnmclub.to/forum/\nrutracker.org\n')
+r=$(printf '%s' "$LIST" | BODY_LEN=$(printf '%s' "$LIST" | wc -c) cgi domains-save POST | body)
+assert_contains '"saved":true' "$r" "список сохранён"
+[ -f "$W/diag_domains.txt" ] || fail "нет diag_domains.txt"
+assert_eq "$(cat "$W/diag_domains.txt")" "$LIST" "список хранится как ввели (с комментариями)"
+r=$(cgi domains GET | body); assert_contains 'nnmclub.to' "$r" "список читается"
+BAD=$(printf 'ok.ru\nплохой домен\n')
+r=$(printf '%s' "$BAD" | BODY_LEN=$(printf '%s' "$BAD" | wc -c) cgi domains-save POST)
+assert_contains 'Status: 400' "$r" "неверная строка - 400"
+assert_contains 'Строка 2' "$r" "ошибка называет строку"; printf '%s' "$r" | sed '1,/^\r\{0,1\}$/d' | python3 -m json.tool > /dev/null || fail "ответ с ошибкой - не JSON"
+assert_eq "$(cat "$W/diag_domains.txt")" "$LIST" "при ошибке список не меняется"
+BIG=$(i=0; while [ $i -lt 51 ]; do echo "d$i.example.com"; i=$((i + 1)); done)
+r=$(printf '%s\n' "$BIG" | BODY_LEN=$(printf '%s\n' "$BIG" | wc -c) cgi domains-save POST)
+assert_contains 'Status: 400' "$r" "больше 50 доменов - 400"
+reset_sc; site https://rutracker.org 0 403; echo 50 > "$SC/delay-$(enc DE-01)"; alt FI-02 40
+site https://nnmclub.to/forum/ 0 200
+r=$(cgi check POST 'list=1' | body); assert_contains '"started":true' "$r" "проверка списка запущена"
+one stage > /dev/null
+python3 - "$W/tmp/mst-diag/one.json" > "$TEST_ROOT/listres" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d['stage'], d['total'], ';'.join('%s=%s/%s' % (s['name'], s['verdict'], '|'.join(s['alt']['found'])) for s in d['services']))
+PY
+assert_eq "$(cat "$TEST_ROOT/listres")" "done 2 rutracker.org=blocked/FI-02;https://nnmclub.to/forum/=ok/" "список: каждая строка (без повторов и комментариев) через other"
+mv "$W/diag_domains.txt" "$TEST_ROOT/dl.bak"
+r=$(cgi check POST 'list=1'); assert_contains 'Status: 400' "$r" "пустой список - 400"
+mv "$TEST_ROOT/dl.bak" "$W/diag_domains.txt"
+grep -q 'diag_domains.txt' "$ROOT/uninstall.sh" || fail "uninstall.sh не удаляет diag_domains.txt"
+for rt in '"api/diag/domains": ("stats_diag.sh"' '"api/diag/domains/save": ("stats_diag.sh"'; do
+  grep -qF "$rt" "$ROOT/web/stats_httpd.py" || fail "нет маршрута $rt"
+done
 
 # ----- маршруты и списки файлов установки -----
 for r in '"api/diag": ("stats_diag.sh"' '"api/diag/start": ("stats_diag.sh"' '"api/diag/cancel": ("stats_diag.sh"'; do

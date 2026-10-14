@@ -249,15 +249,27 @@ export function renderDiag() {
   }
 
   // ----- ручная проверка домена через группу other -----
-  var oneCard = card('Проверить домен');
-  oneCard.appendChild(el('p', 'hint', 'Домен или адрес, которого нет в группах сервисов: он проверяется через группу other - ' +
-    'сначала через её текущую ноду, а если не открылся, перебираются другие ноды other.'));
+  var oneCard = card('Свои домены');
+  oneCard.appendChild(el('p', 'hint', 'Домены и адреса, которых нет в группах сервисов, проверяются через группу other - ' +
+    'сначала через её текущую ноду, а если не открылись, перебираются другие ноды other. Проверить домен:'));
   var oneRow = el('div', 'xk-add');
   var oneInp = el('input'); oneInp.type = 'text'; oneInp.placeholder = 'rutracker.org или https://example.com/page';
   oneInp.setAttribute('aria-label', 'Домен или адрес');
   var oneBtn = el('button', 'submit', 'Проверить'); oneBtn.type = 'button';
   oneRow.appendChild(oneInp); oneRow.appendChild(oneBtn);
   oneCard.appendChild(oneRow);
+  // Сохранённый список: по строке, # - комментарий.
+  oneCard.appendChild(el('p', 'hint', 'Список для проверки: по одному домену или адресу на строку, строки с # - комментарии, не больше 50.'));
+  var listTa = el('textarea', 'diag-list');
+  listTa.rows = 6; listTa.spellcheck = false;
+  listTa.placeholder = '# трекеры\nrutracker.org\nhttps://nnmclub.to/forum/';
+  listTa.setAttribute('aria-label', 'Список доменов');
+  oneCard.appendChild(listTa);
+  var listRow = el('div', 'btn-row');
+  var saveBtn = el('button', 'submit secondary', 'Сохранить'); saveBtn.type = 'button';
+  var listBtn = el('button', 'submit', 'Проверить список'); listBtn.type = 'button';
+  listRow.appendChild(saveBtn); listRow.appendChild(listBtn);
+  oneCard.appendChild(listRow);
   var oneMsg = el('p', 'hint'); oneMsg.hidden = true;
   oneCard.appendChild(oneMsg);
   var oneRes = el('div');
@@ -266,7 +278,7 @@ export function renderDiag() {
 
   function drawOne(d) {
     while (oneRes.firstChild) { oneRes.removeChild(oneRes.firstChild); }
-    oneBtn.disabled = !!d.running;
+    oneBtn.disabled = !!d.running; listBtn.disabled = !!d.running;
     if (d.stage === 'none') { return; }
     if (d.running) {
       var st = el('div', 'run-bar-row');
@@ -299,6 +311,39 @@ export function renderDiag() {
       oneMsg.hidden = false;
     });
   });
+  var savedText = '';
+  function saveList() {
+    oneMsg.hidden = true;
+    return fetchJson('/api/diag/domains/save', { method: 'POST', body: listTa.value }).then(function (r) {
+      savedText = listTa.value;
+      oneMsg.textContent = 'Список сохранён: доменов ' + r.count + '.';
+      oneMsg.hidden = false;
+    })['catch'](function (e) {
+      oneMsg.textContent = (e.data && e.data.message) || ('Не удалось сохранить список: ' + e.message);
+      oneMsg.hidden = false;
+      throw e;
+    });
+  }
+  saveBtn.addEventListener('click', function () { saveList()['catch'](function () {}); });
+  listBtn.addEventListener('click', function () {
+    listBtn.disabled = true;
+    // несохранённые правки сначала сохраняются - проверяется то, что видно
+    var pre = listTa.value !== savedText ? saveList() : Promise.resolve();
+    pre.then(function () {
+      return fetchJson('/api/diag/check?list=1', { method: 'POST' }).then(function () { oneMsg.hidden = true; loadOne(); });
+    })['catch'](function (e) {
+      listBtn.disabled = false;
+      if (e && e.data && e.data.error && e.data.error !== 'line' && e.data.error !== 'too_many') {
+        oneMsg.textContent = e.data.message || ('Не удалось запустить проверку: ' + e.message);
+        oneMsg.hidden = false;
+      }
+    });
+  });
+  fetchJson('/api/diag/domains').then(function (r) {
+    if (!alive()) { return; }
+    listTa.value = r.text || ''; savedText = listTa.value;
+  })['catch'](function () { /* список - необязательная часть вкладки */ });
+
   oneInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { oneBtn.click(); } });
 
   load();

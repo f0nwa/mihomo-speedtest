@@ -557,6 +557,8 @@ API_ROUTES = {
     "api/diag/cancel": ("stats_diag.sh", {"MST_DIAG_ACTION": "cancel"}),
     "api/diag/check": ("stats_diag.sh", {"MST_DIAG_ACTION": "check"}),
     "api/diag/one": ("stats_diag.sh", {"MST_DIAG_ACTION": "one"}),
+    "api/diag/domains": ("stats_diag.sh", {"MST_DIAG_ACTION": "domains"}),
+    "api/diag/domains/save": ("stats_diag.sh", {"MST_DIAG_ACTION": "domains-save"}),
 }
 
 
