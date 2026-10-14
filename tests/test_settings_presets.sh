@@ -1,6 +1,6 @@
 #!/bin/sh
 # Настройки: на виду - выбор «Насколько строго отбирать» (Мягко / Обычно /
-# Строго) и число нод в пуле; точные пороги, Uptime, объёмы проверки и история
+# Строго), минимальная скорость ноды и число нод в пуле; точные пороги, Uptime, объёмы проверки и история
 # - в свёрнутом блоке «Дополнительно». Логика пресетов (PRESETS-LOGIC) -
 # чистые функции, проверяются в node.
 set -eu
@@ -11,7 +11,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 grep -q 'PRESETS-LOGIC-BEGIN' "$FILE" || fail "нет метки PRESETS-LOGIC-BEGIN"
 grep -q 'PRESETS-LOGIC-END' "$FILE" || fail "нет метки PRESETS-LOGIC-END"
 # на виду: только пресет и topn
-grep -q "title: 'Быстрый пул', preset: true, fields: \['topn'\]" "$FILE" || fail "основная карточка: пресет и topn"
+grep -q "title: 'Быстрый пул', preset: true, fields: \['fixed_min_speed_mb', 'topn'\]" "$FILE" || fail "основная карточка: пресет, минимальная скорость и topn"
 # остальное - в свёрнутом блоке, все прежние поля на месте
 MAIN=$(awk '/^var CARDS = \[/{on=1} on{print} /^\];/{on=0}' "$FILE")
 for f in min_ratio min_floor_mb min_winners stable_min_uptime stable_lookback max_tested enough keep_runs keep_days node_cap extype size_mb dl_timeout min_speed_mb stability_window stability_drop_after stable_min_runs; do

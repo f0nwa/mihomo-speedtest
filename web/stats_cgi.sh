@@ -294,6 +294,9 @@ validate_settings_fields() {
   if ! is_decimal_in_range "$min_ratio" 0 excl 1; then
     _add_err min_ratio "«Доля от скорости канала» должна быть числом больше 0 и не больше 1 (например 0.25)."
   fi
+  if ! is_decimal_in_range "$fixed_min_speed_mb" 0 incl 10000; then
+    _add_err fixed_min_speed_mb "«Минимальная скорость ноды» должна быть числом от 0 до 10000 Мбит/с (0 = авто)."
+  fi
   if ! is_decimal_in_range "$min_floor_mb" 0 incl ""; then
     _add_err min_floor_mb "«Порог скорости: не ниже» должен быть числом от 0 Мбит/с (0 = без границы)."
   fi
@@ -370,6 +373,7 @@ print_settings_json() {
       -v size_mb="$(bytes_to_mb "$SIZE")" -v dl_timeout="$DL_TIMEOUT" \
       -v min_speed_mb="$(bytes_to_mbit "$MIN_SPEED")" -v min_ratio="$MIN_RATIO" \
       -v min_floor_mb="$(bytes_to_mbit "$MIN_FLOOR")" -v topn="$TOPN" -v enough="$ENOUGH" \
+      -v fixed_min_speed_mb="$(bytes_to_mbit "${FIXED_MIN_SPEED:-0}")" \
       -v min_winners="$MIN_WINNERS" -v stability_window="$STABILITY_WINDOW" \
       -v stability_drop_after="$STABILITY_DROP_AFTER" \
       -v stable_min_uptime="$STABLE_MIN_UPTIME" -v stable_lookback="$STABLE_LOOKBACK" \
@@ -386,6 +390,7 @@ print_settings_json() {
       printf "\"geo_filter\":\"%s\",\"extype\":\"%s\",", esc(geo_filter), esc(extype)
       printf "\"size_mb\":%s,\"dl_timeout\":%d,", size_mb + 0, dl_timeout + 0
       printf "\"min_speed_mb\":%s,\"min_ratio\":%s,\"min_floor_mb\":%s,", min_speed_mb + 0, min_ratio + 0, min_floor_mb + 0
+      printf "\"fixed_min_speed_mb\":%s,", fixed_min_speed_mb + 0
       printf "\"topn\":%d,\"enough\":%d,\"min_winners\":%d,", topn + 0, enough + 0, min_winners + 0
       printf "\"stability_window\":%d,\"stability_drop_after\":%d,", stability_window + 0, stability_drop_after + 0
       printf "\"stable_min_uptime\":%d,\"stable_lookback\":%d,\"stable_min_runs\":%d,", stable_min_uptime + 0, stable_lookback + 0, stable_min_runs + 0
@@ -415,6 +420,7 @@ if [ "$method" = "POST" ]; then
   RAW_min_floor_mb=""; RAW_topn=""; RAW_enough=""; RAW_min_winners=""
   RAW_stability_window=""; RAW_stability_drop_after=""
   RAW_max_tested="$MAX_TESTED"
+  RAW_fixed_min_speed_mb="$(bytes_to_mbit "${FIXED_MIN_SPEED:-0}")"
   RAW_stable_min_uptime="$STABLE_MIN_UPTIME"
   RAW_stable_lookback="$STABLE_LOOKBACK"
   RAW_stable_min_runs="$STABLE_MIN_RUNS"
@@ -450,6 +456,7 @@ if [ "$method" = "POST" ]; then
   min_speed_mb=$(urldecode "$RAW_min_speed_mb")
   min_ratio=$(urldecode "$RAW_min_ratio")
   min_floor_mb=$(urldecode "$RAW_min_floor_mb")
+  fixed_min_speed_mb=$(urldecode "$RAW_fixed_min_speed_mb")
   topn=$(urldecode "$RAW_topn")
   enough=$(urldecode "$RAW_enough")
   min_winners=$(urldecode "$RAW_min_winners")
@@ -474,6 +481,7 @@ if [ "$method" = "POST" ]; then
     set_env_var MIN_SPEED "$(mbit_to_bytes "$min_speed_mb")"
     set_env_var MIN_RATIO "$min_ratio"
     set_env_var MIN_FLOOR "$(mbit_to_bytes "$min_floor_mb")"
+    set_env_var FIXED_MIN_SPEED "$(mbit_to_bytes "$fixed_min_speed_mb")"
     set_env_var TOPN "$topn"
     set_env_var ENOUGH "$enough"
     set_env_var MIN_WINNERS "$min_winners"

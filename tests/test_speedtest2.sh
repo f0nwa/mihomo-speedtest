@@ -313,6 +313,23 @@ grep -q 'n0001' "$TEST_ROOT/win-mw4.txt" || fail "MIN_WINNERS+TOPN: самая �
 grep -q 'n0002' "$TEST_ROOT/win-mw4.txt" || fail "MIN_WINNERS+TOPN: вторая по скорости нода потеряна"
 grep -q 'n0003' "$TEST_ROOT/win-mw4.txt" && fail "MIN_WINNERS+TOPN: добор превысил TOPN"
 
+# --- Фиксированный порог (FIXED_MIN_SPEED > 0): в пул идут только ноды не
+#     медленнее порога; медленные добираются лишь до MIN_WINNERS, не до TOPN.
+printf '1200 n0001\n1100 n0002\n900 n0003\n800 n0004\n700 n0005\n' > "$TEST_ROOT/results-fx.txt"
+printf 'n0001\tA\nn0002\tB\nn0003\tC\nn0004\tD\nn0005\tE\n' > "$TEST_ROOT/map-fx.txt"
+FIXED_MIN_SPEED=1000
+select_winners "$TEST_ROOT/results-fx.txt" "$TEST_ROOT/map-fx.txt" "$TEST_ROOT/win-fx1.txt" 1000 15 3
+assert_eq "$(cat "$TEST_ROOT/win-fx1.txt")" "$(printf '1200 n0001\n1100 n0002\n900 n0003')"
+assert_eq "$(cat "$TEST_ROOT/win-fx1.txt.below")" 1
+select_winners "$TEST_ROOT/results-fx.txt" "$TEST_ROOT/map-fx.txt" "$TEST_ROOT/win-fx2.txt" 1000 15 0
+assert_eq "$(cat "$TEST_ROOT/win-fx2.txt")" "$(printf '1200 n0001\n1100 n0002')"
+select_winners "$TEST_ROOT/results-fx.txt" "$TEST_ROOT/map-fx.txt" "$TEST_ROOT/win-fx3.txt" 700 15 0
+assert_eq "$(wc -l < "$TEST_ROOT/win-fx3.txt" | tr -d ' ')" 5
+FIXED_MIN_SPEED=0
+# авто-режим как раньше: добор медленными до TOPN
+select_winners "$TEST_ROOT/results-fx.txt" "$TEST_ROOT/map-fx.txt" "$TEST_ROOT/win-fx4.txt" 1000 15 0
+assert_eq "$(wc -l < "$TEST_ROOT/win-fx4.txt" | tr -d ' ')" 5
+
 # --- Стабильность: нода с накопленной статистикой и uptime ниже
 #     STABLE_MIN_UPTIME за STABLE_LOOKBACK прогонов в пул не идёт, даже
 #     если быстрая; ноды без статистики проходят; нестабильные - последний

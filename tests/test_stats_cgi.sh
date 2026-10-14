@@ -109,6 +109,7 @@ assert_contains '"min_speed_mb":8.39' "$OUT_GET" "GET default min_speed_mb (1048
 assert_contains '"min_ratio":0.25' "$OUT_GET" "GET default min_ratio"
 assert_contains '"min_floor_mb":4.19' "$OUT_GET" "GET default min_floor_mb (524288 baytes = 4.19 Mbit/s)"
 assert_contains '"topn":15' "$OUT_GET" "GET default topn"
+assert_contains '"fixed_min_speed_mb":0' "$OUT_GET" "GET default fixed_min_speed_mb (0 = авто)"
 assert_contains '"enough":20' "$OUT_GET" "GET default enough"
 assert_not_contains '"max_ping_ms"' "$OUT_GET" "GET has no misleading ping limit"
 assert_contains '"max_tested":40' "$OUT_GET" "GET default candidate limit"
@@ -140,6 +141,7 @@ grep -qF "DL_TIMEOUT='30'" "$W/speedtest2.env" || fail "DL_TIMEOUT not saved"
 grep -qF "MIN_SPEED='250000'" "$W/speedtest2.env" || fail "min_speed_mb (MIN_SPEED) not converted/saved"
 grep -qF "MIN_RATIO='0.3'" "$W/speedtest2.env" || fail "MIN_RATIO not saved"
 grep -qF "MIN_FLOOR='125000'" "$W/speedtest2.env" || fail "min_floor_mb (MIN_FLOOR) not converted/saved"
+grep -qF "FIXED_MIN_SPEED='0'" "$W/speedtest2.env" || fail "форма без fixed_min_speed_mb должна сохранить прежнее значение (0)"
 grep -qF "TOPN='15'" "$W/speedtest2.env" || fail "TOPN not saved"
 grep -qF "ENOUGH='18'" "$W/speedtest2.env" || fail "ENOUGH not saved"
 grep -qF "MIN_WINNERS='2'" "$W/speedtest2.env" || fail "MIN_WINNERS not saved"
@@ -161,6 +163,18 @@ assert_contains '"geo_filter":"ru-block"' "$OUT_GET2" "GET reflects saved geo_fi
 assert_contains '"size_mb":20' "$OUT_GET2" "GET reflects saved size_mb"
 assert_contains '"min_floor_mb":1' "$OUT_GET2" "GET reflects saved min_floor_mb"
 assert_contains '"stability_window":100' "$OUT_GET2" "GET reflects saved stability_window"
+
+# --- Фиксированный порог: Мбит/с в форме -> байт/с в env, GET отдаёт обратно ---
+OUT_FIXED=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=ru-block&$OK_TUNING&fixed_min_speed_mb=40")
+assert_contains '{"ok":true}' "$OUT_FIXED" "POST fixed_min_speed_mb"
+grep -qF "FIXED_MIN_SPEED='5000000'" "$W/speedtest2.env" || fail "fixed_min_speed_mb (FIXED_MIN_SPEED) not converted/saved"
+assert_contains '"fixed_min_speed_mb":40' "$(run_cgi GET)" "GET reflects saved fixed_min_speed_mb"
+ENV_FX=$(cat "$W/speedtest2.env")
+OUT_FIXED_BAD=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=ru-block&$OK_TUNING&fixed_min_speed_mb=-1")
+assert_contains 'Минимальная скорость ноды' "$OUT_FIXED_BAD" "invalid fixed_min_speed_mb rejected"
+[ "$(cat "$W/speedtest2.env")" = "$ENV_FX" ] || fail "invalid fixed_min_speed_mb changed settings"
+OUT_FIXED0=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=ru-block&$OK_TUNING&fixed_min_speed_mb=0")
+grep -qF "FIXED_MIN_SPEED='0'" "$W/speedtest2.env" || fail "fixed_min_speed_mb=0 (авто) not saved"
 
 # --- POST невалидные значения не должны менять speedtest2.env ---
 ENV_BEFORE=$(cat "$W/speedtest2.env")

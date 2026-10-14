@@ -61,6 +61,8 @@ DL_TIMEOUT=15         # потолок на одну закачку, секун�
 MIN_SPEED=1048576     # запасной порог для досрочной остановки, байт/с
 MIN_RATIO=0.25         # динамический порог = доля от прямого канала
 MIN_FLOOR=524288       # абсолютный минимум порога, байт/с (0.5 МиБ/с)
+FIXED_MIN_SPEED=0     # байт/с; >0 = простой режим: порог фиксированный (без доли от канала),
+                      # в пул идут только ноды не медленнее него, медленные - лишь до MIN_WINNERS
 TOPN=15               # сколько нод держать в быстром пуле суммарно, включая WG
 ENOUGH=20             # набрали столько выше порога - дальше не меряем
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
@@ -300,6 +302,8 @@ select_winners() {
   # если min_winners не набрать ни прошедшими порог, ни медленными
   # стабильными. Ноды без накопленной статистики проходят как раньше.
   # Отсеянные (и не добранные) пишутся в "$output.unstable": "uptime% имя".
+  # FIXED_MIN_SPEED > 0 (фиксированный порог): медленные ноды добираются
+  # только до min_winners, а не до top - в пуле только ноды не ниже порога.
   results=$1
   mapfile=$2
   output=$3
@@ -314,7 +318,7 @@ select_winners() {
   sort -rn "$results" | awk -F ' ' -v mapfile="$mapfile" -v minimum="$minimum" -v top="$top" -v min_winners="$min_winners" \
       -v stabfile="$stabfile" -v min_uptime="${STABLE_MIN_UPTIME:-0}" -v lookback="${STABLE_LOOKBACK:-24}" \
       -v min_runs="${STABLE_MIN_RUNS:-8}" -v exclfile="$output.unstable" -v belowfile="$output.below" \
-      -v wgfile="$wgfile" -v wgout="$wgoutput" '
+      -v wgfile="$wgfile" -v wgout="$wgoutput" -v fixed="${FIXED_MIN_SPEED:-0}" '
     function emit(sp, idx, name,   wireguard) {
       wireguard = (idx in wg)
       if (wireguard) print name > wgout
@@ -376,7 +380,9 @@ select_winners() {
       }
     }
     END {
-      for (i = 0; i < bn && count < top; i++) {
+      fill = top
+      if (fixed + 0 > 0 && min_winners < top) fill = min_winners
+      for (i = 0; i < bn && count < fill; i++) {
         if (seen[backlog_name[i]]) continue
         emit(backlog_sp[i], backlog_idx[i], backlog_name[i])
       }
@@ -1184,7 +1190,15 @@ if [ "$CANDIDATES" -lt 1 ]; then
   exit 0
 fi
 CHANNEL=$(measure_direct)
-if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
+if [ "${FIXED_MIN_SPEED:-0}" -gt 0 ] 2>/dev/null; then
+  # Простой режим: порог задан напрямую, канал меряется только для журнала/истории.
+  EFFECTIVE_MIN=$FIXED_MIN_SPEED
+  if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
+    say "Канал: $(format_mbit "$CHANNEL") Мбит/с, порог (фиксированный): $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
+  else
+    say "Прямой замер канала не удался, порог (фиксированный): $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
+  fi
+elif [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
   EFFECTIVE_MIN=$(compute_threshold "$CHANNEL")
   say "Канал: $(format_mbit "$CHANNEL") Мбит/с, порог: $(format_mbit "$EFFECTIVE_MIN") Мбит/с"
 else
@@ -1251,7 +1265,13 @@ WG_WIN=$(wc -l < "$WORK/win-wg.txt")
 POOL_WIN=$((WIN + WG_WIN))
 BELOW_MIN=$(cat "$WORK/win.txt.below")
 below_note=""
-[ "$BELOW_MIN" -eq 0 ] || below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - заполнено до лимита $TOPN)"
+if [ "$BELOW_MIN" -ne 0 ]; then
+  if [ "${FIXED_MIN_SPEED:-0}" -gt 0 ] 2>/dev/null; then
+    below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - добрано до минимума $MIN_WINNERS)"
+  else
+    below_note=" (всего $POOL_WIN в быстром пуле, из них $BELOW_MIN ниже порога скорости - заполнено до лимита $TOPN)"
+  fi
+fi
 if [ "$WIN" -lt 1 ]; then
   if [ "$WG_WIN" -gt 0 ]; then
     say "WG: Отобрано $WG_WIN нод для быстрого пула (обычных победителей нет, прежний fast.yaml сохранён)$below_note"

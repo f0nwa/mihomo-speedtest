@@ -1481,7 +1481,7 @@ write_env() {
     # сбрасываем к умолчаниям: пишем прежнюю строку, если она была. Список
     # явный, чтобы удалённые из проекта настройки (например MAX_PING_MS)
     # по-прежнему вычищались переустановкой.
-    for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR STABILITY_WINDOW STABILITY_DROP_AFTER \
+    for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR FIXED_MIN_SPEED STABILITY_WINDOW STABILITY_DROP_AFTER \
         HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS; do
       sed -n "/^$keep_key=/p" "$dst" 2>/dev/null | tail -1
     done
