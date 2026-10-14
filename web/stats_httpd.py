@@ -549,6 +549,11 @@ API_ROUTES = {
     "api/xkeen/backups": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "backups"}),
     "api/xkeen/restore": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "restore", "MST_CGI_TIMEOUT": "150"}),
     "api/xkeen/log": ("stats_xkeen.sh", {"MST_XKEEN_ACTION": "log"}),
+    # Диагностика сервисов: start только запускает фоновую проверку и
+    # отвечает сразу, вкладка опрашивает api/diag.
+    "api/diag": ("stats_diag.sh", {"MST_DIAG_ACTION": "status"}),
+    "api/diag/start": ("stats_diag.sh", {"MST_DIAG_ACTION": "start"}),
+    "api/diag/cancel": ("stats_diag.sh", {"MST_DIAG_ACTION": "cancel"}),
 }
 
 

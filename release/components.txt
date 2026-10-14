@@ -37,6 +37,8 @@ FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
 FILE|web|web/stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|0755|sh
 FILE|web|web/stats_xkeen.sh|/opt/etc/mihomo-speedtest/stats_xkeen.sh|0755|sh
+FILE|web|web/stats_diag.sh|/opt/etc/mihomo-speedtest/stats_diag.sh|0755|sh
+FILE|web|web/diag.awk|/opt/etc/mihomo-speedtest/diag.awk|0644|awk
 FILE|web|web/stats_components.sh|/opt/etc/mihomo-speedtest/stats_components.sh|0755|sh
 FILE|web|web/stats_constructor.sh|/opt/etc/mihomo-speedtest/stats_constructor.sh|0755|sh
 FILE|web|web/stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|0644|py

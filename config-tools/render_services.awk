@@ -27,6 +27,11 @@
 #                                        прошлого релиза (при сборке не нужна,
 #                                        config_to_state.awk не считает его
 #                                        убранным пользователем)
+#   check<TAB>id<TAB>url                 адрес проверки сервиса для вкладки
+#                                        «Диагностика» (stats_diag.sh,
+#                                        web/diag.awk mode=targets); строк
+#                                        может быть несколько, первая -
+#                                        основная. В сборке не участвует
 #   gone<TAB>id|-<TAB>текст правила      бывшее встроенное правило (заменено
 #                                        или убрано): при сборке не нужно,
 #                                        config_to_state.awk не переносит его
@@ -46,6 +51,9 @@
 #                                        имя@kind (kind domain|ipcidr|
 #                                        classical) и RULE-SET на группу
 #   dom<TAB>id<TAB>тип<TAB>домен         свой домен (тип suffix|full|keyword)
+#   check<TAB>id<TAB>url                 свой адрес проверки сервиса для
+#                                        вкладки «Диагностика»; в сборке не
+#                                        участвует
 #   prov<TAB>-<TAB>строка provider       provider для своих правил
 #   bset<TAB>группа<TAB>ключ<TAB>знач.   базовая группа шаблона: interval
 #                                        (10..86400 с), tolerance (0..10000 мс),
@@ -224,10 +232,10 @@ function read_defaults(  rc, n, f, kind, id) {
       need(n, 3, kind); known(id, kind)
       nrule++; rule_owner[nrule] = id; rule_text[nrule] = f[3]
       default_rule[id SUBSEP f[3]] = 1
-    } else if (kind == "fresh" || kind == "gone") {
+    } else if (kind == "fresh" || kind == "gone" || kind == "check") {
       need(n, 3, kind); known(id, kind)
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov, rule, fresh или gone)")
+      err(at() "неизвестный вид строки " kind " (ожидается section, svc, icon, gkey, prov, rule, check, fresh или gone)")
     }
   }
   if (rc < 0) err("не удалось прочитать " services_file)
@@ -338,8 +346,10 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       if (f[3] == "" || f[3] ~ /[\r]/) err(at() "bfirst: пустое значение")
       if (id in bfirst) err(at() "bfirst для " id " задан повторно")
       bfirst[id] = f[3]
+    } else if (kind == "check") {
+      need(n, 3, kind)
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, prov, bset, bmembers, bfirst или ownscope)")
+      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, check, prov, bset, bmembers, bfirst или ownscope)")
     }
   }
   if (rc < 0) err("не удалось прочитать " overlay_file)

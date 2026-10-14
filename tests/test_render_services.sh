@@ -479,5 +479,16 @@ awk -v LIST="$WORK/wglist" -v REPORT="$WORK/wgrep" -f "$ROOT/config-tools/wg_imp
 grep -q GROUP_MISSING "$WORK/wgrep" && fail "edit: wg_import не нашёл группы: $(cat "$WORK/wgrep")"
 [ "$(grep -c '^GROUP|' "$WORK/wgrep")" = 3 ] || fail "edit: wg_import дописал не в 3 группы: $(cat "$WORK/wgrep")"
 
+# check - адрес проверки для вкладки «Диагностика»: в YAML не попадает ни из
+# таблицы, ни из overlay.
+grep -v '^check	' "$DEFS" > "$WORK/nocheck.tsv"
+{ cat "$WORK/nocheck.tsv"; printf 'check\tyoutube\thttps://www.youtube.com\n'; } > "$WORK/withcheck.tsv"
+awk -v services_file="$WORK/nocheck.tsv" -f "$SCRIPT" "$ROOT/config-tools/config.example.yaml" > "$WORK/c0.yaml" || fail "check: сборка без check"
+awk -v services_file="$WORK/withcheck.tsv" -f "$SCRIPT" "$ROOT/config-tools/config.example.yaml" > "$WORK/c1.yaml" 2> "$WORK/c1.err" || fail "check: строка check в таблице не принята: $(cat "$WORK/c1.err")"
+cmp -s "$WORK/c0.yaml" "$WORK/c1.yaml" || fail "check в таблице изменил YAML"
+: > "$WORK/o0.tsv"; printf 'check\tyoutube\thttps://www.youtube.com/feed\n' > "$WORK/o1.tsv"
+awk -v services_file="$WORK/nocheck.tsv" -v overlay_file="$WORK/o1.tsv" -f "$SCRIPT" "$ROOT/config-tools/config.example.yaml" > "$WORK/c2.yaml" 2> "$WORK/c2.err" || fail "check: строка check в overlay не принята: $(cat "$WORK/c2.err")"
+cmp -s "$WORK/c0.yaml" "$WORK/c2.yaml" || fail "check в overlay изменил YAML"
+
 [ "$FAILED" = 0 ] && echo "OK test_render_services"
 exit "$FAILED"

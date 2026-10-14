@@ -11,41 +11,61 @@ section	infra	Инфраструктура и диагностика
 section	other	Прочее
 svc	youtube	YouTube	media
 icon	youtube	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+check	youtube	https://www.youtube.com
 svc	twitch	Twitch	media
 icon	twitch	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png
+check	twitch	https://www.twitch.tv
 svc	tmdb	TMDB	media
+check	tmdb	https://www.themoviedb.org
 svc	spotify	Spotify	media
 icon	spotify	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png
+check	spotify	https://open.spotify.com
 svc	kinopub	KinoPub	media
+check	kinopub	https://api.srvkp.com
 icon	kinopub	https://d5l07j6ktywkt.cloudfront.net/sdpreview/0/3af9d99e/1440378196-55da6d54e3d54/preview.png
 svc	adult	18+	media
 icon	adult	https://www.svgrepo.com/show/530357/peach.svg
 svc	torrents	Torrents	media
 icon	torrents	https://www.svgrepo.com/show/443524/brand-utorrent.svg
+check	torrents	https://rutracker.org
 svc	discord	Discord	social
 icon	discord	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+check	discord	https://discord.com
 svc	telegram	Telegram	social
 icon	telegram	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+check	telegram	https://web.telegram.org
 svc	reddit	Reddit	social
 icon	reddit	https://www.redditstatic.com/shreddit/assets/favicon/192x192.png
+check	reddit	https://www.reddit.com
 svc	twitter	Twitter	social
 icon	twitter	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png
+check	twitter	https://x.com
 svc	meta	Meta	social
 icon	meta	https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
+check	meta	https://www.instagram.com
 svc	ai	AI	platforms
 icon	ai	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+check	ai	https://chatgpt.com
+check	ai	https://claude.ai
+check	ai	https://gemini.google.com
 svc	apple	Apple	platforms
 icon	apple	https://www.svgrepo.com/show/494227/apple-rounded-border.svg
+check	apple	https://www.apple.com
 svc	google	Google	platforms
 icon	google	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png
+check	google	https://www.google.com
 svc	microsoft	Microsoft	platforms
 icon	microsoft	https://www.svgrepo.com/show/452062/microsoft.svg
+check	microsoft	https://www.microsoft.com
 svc	steam	Steam	platforms
 icon	steam	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png
+check	steam	https://store.steampowered.com
 svc	zoom	Zoom	platforms
 icon	zoom	https://www.svgrepo.com/show/452140/zoom.svg
+check	zoom	https://zoom.us
 svc	playstation	PlayStation	games
 icon	playstation	https://www.svgrepo.com/show/452087/playstation.svg
+check	playstation	https://www.playstation.com
 svc	bambulab	BambuLab	games
 icon	bambulab	https://www.svgrepo.com/show/487246/cube.svg
 svc	dell	Dell	games
@@ -57,8 +77,10 @@ icon	cdn	https://www.svgrepo.com/show/396567/globe-with-meridians.svg
 svc	speedtest	Speedtest	infra
 icon	speedtest	https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png
 gkey	speedtest	include-all: true
+check	speedtest	https://speed.cloudflare.com
 svc	ipdetect	IP Detect	infra
 icon	ipdetect	https://www.svgrepo.com/show/502437/educate.svg
+check	ipdetect	https://ifconfig.me
 svc	other	other	other
 icon	other	https://www.svgrepo.com/show/12922/growth.svg
 prov	-	adlist@domain: { <<: *domain, url: "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs" }
