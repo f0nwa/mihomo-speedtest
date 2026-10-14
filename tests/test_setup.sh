@@ -939,6 +939,27 @@ check_stub9 "заготовка, подписка не прошла"
 rm -rf "$CURLFAIL9"
 rm -rf "$FAKEBIN9" "$WORK9" "$MARK9"
 
+# seed_port_proxying: порты проксирования XKeen при установке с нуля.
+WORKP=$(mktemp -d)
+XKEEN_DIR="$WORKP/nope" seed_port_proxying 2>/dev/null || { echo "FAIL: ports: нет каталога XKeen - не ошибка" >&2; FAILED=1; }
+[ ! -e "$WORKP/nope" ] || { echo "FAIL: ports: каталог XKeen не должен создаваться" >&2; FAILED=1; }
+mkdir "$WORKP/xk"
+XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
+assert_eq "$(cat "$WORKP/xk/port_proxying.lst" 2>/dev/null)" "$(default_port_proxying)" "ports: нет файла - записан список по умолчанию"
+assert_eq "$(grep -v '^#' "$WORKP/xk/port_proxying.lst" | grep -v '^$' | tr '\n' ' ')" "80 443 596:599 1400 3478:3497 5222 50000:50030 " "ports: состав списка"
+printf '#80\n#443\n\n# (Раскомментируйте/добавьте по образцу)\n' > "$WORKP/xk/port_proxying.lst"
+XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
+assert_eq "$(cat "$WORKP/xk/port_proxying.lst")" "$(default_port_proxying)" "ports: только комментарии - заменён"
+printf '# свой\n22\n' > "$WORKP/xk/port_proxying.lst"
+XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
+assert_eq "$(cat "$WORKP/xk/port_proxying.lst")" "$(printf '# свой\n22')" "ports: свой список не трогаем"
+rm -f "$WORKP/xk/port_proxying.lst"
+printf '123\n' > "$WORKP/xk/port_exclude.lst"
+XKEEN_DIR="$WORKP/xk" seed_port_proxying 2>/dev/null
+[ ! -e "$WORKP/xk/port_proxying.lst" ] || { echo "FAIL: ports: при заполненном port_exclude.lst ничего не пишем" >&2; FAILED=1; }
+assert_eq "$(ls -A "$WORKP/xk" | tr '\n' ' ')" "port_exclude.lst " "ports: без временных файлов в каталоге XKeen"
+rm -rf "$WORKP"
+
 if [ "$FAILED" = 1 ]; then
   echo "test_setup.sh: FAILED" >&2
   exit 1

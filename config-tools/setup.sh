@@ -368,6 +368,68 @@ EOF
   esac
 }
 
+# Порты проксирования XKeen по умолчанию для установки с нуля. Подписи -
+# строками-заголовками над записью (XKeen и редактор вкладки «XKeen» не
+# поддерживают комментарий в строке с портом).
+default_port_proxying() {
+  cat <<'EOF'
+# HTTP
+80
+# HTTPS и QUIC (HTTP/3)
+443
+# Звонки Telegram
+596:599
+1400
+# STUN/TURN: звонки WhatsApp, Telegram, FaceTime и др.
+3478:3497
+# XMPP: WhatsApp, запасной порт Telegram
+5222
+# Голосовые каналы Discord
+50000:50030
+
+# (Раскомментируйте/добавьте по образцу) единичные порты и диапазоны для проксирования
+EOF
+}
+
+# Есть ли в списке XKeen хоть одна включённая запись (не пустая строка и
+# не строка с #).
+xkeen_list_has_entries() {
+  [ -f "$1" ] && awk '/^[ \t]*[^# \t\r]/ { f = 1; exit } END { exit !f }' "$1"
+}
+
+# Установка с нуля: пустой (только комментарии) или отсутствующий
+# port_proxying.lst заполняется списком default_port_proxying. Свои записи
+# не трогаем; при заполненном port_exclude.lst тоже ничего не пишем - XKeen
+# использует только один из двух режимов. Файл готовится во временном
+# каталоге и ставится одной заменой (бережём флешку /opt).
+seed_port_proxying() {
+  xk_dir=${XKEEN_DIR:-/opt/etc/xkeen}
+  xk_file=$xk_dir/port_proxying.lst
+  if [ ! -d "$xk_dir" ]; then
+    ui_warn "Каталог XKeen $xk_dir не найден - порты проксирования не заданы"
+    return 0
+  fi
+  if xkeen_list_has_entries "$xk_file"; then
+    ui_ok "Порты проксирования: свой список port_proxying.lst сохранён"
+    return 0
+  fi
+  if xkeen_list_has_entries "$xk_dir/port_exclude.lst"; then
+    ui_ok "Порты проксирования не заданы: используется port_exclude.lst"
+    return 0
+  fi
+  xk_tmp=$(mktemp "${TMPDIR:-/tmp}/setup_ports.XXXXXX") || {
+    ui_warn "Не удалось подготовить port_proxying.lst"
+    return 0
+  }
+  if default_port_proxying > "$xk_tmp" && atomic_install "$xk_tmp" "$xk_file"; then
+    ui_ok "Порты проксирования записаны в $xk_file"
+  else
+    ui_warn "Не удалось записать $xk_file - задайте порты во вкладке «XKeen»"
+  fi
+  rm -f "$xk_tmp"
+  return 0
+}
+
 # Перезапуск ядра и ожидание API - одной функцией под ui_run: вывод xkeen
 # уходит в журнал, на экране только спиннер. stdin ui_run закрывает сам.
 restart_core() {
@@ -547,6 +609,8 @@ main() {
     rm -f "$rendered"
     return 1
   }
+
+  seed_port_proxying
 
   if [ "$no_nodes" = 1 ]; then
     ui_ok "Конфиг записан без нод, ядро не запускалось, запускаю install.sh"
