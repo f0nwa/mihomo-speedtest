@@ -54,6 +54,14 @@
 #   check<TAB>id<TAB>url                 свой адрес проверки сервиса для
 #                                        вкладки «Диагностика»; в сборке не
 #                                        участвует
+#   noquic<TAB>id                        блокировать QUIC (UDP/443) сервиса:
+#                                        в блок «Блокировка QUIC» после своих
+#                                        правил идёт AND,((NETWORK,UDP),
+#                                        (DST-PORT,443),(OR,(...))),REJECT
+#                                        # QUIC: Имя - по его доменам, наборам
+#                                        и простым правилам (RULE-SET, DOMAIN*,
+#                                        IP-CIDR*, IP-ASN, GEOIP); сервис без
+#                                        таких правил - без строки
 #   prov<TAB>-<TAB>строка provider       provider для своих правил
 #   bset<TAB>группа<TAB>ключ<TAB>знач.   базовая группа шаблона: interval
 #                                        (10..86400 с), tolerance (0..10000 мс),
@@ -101,8 +109,8 @@
 # обрезаются, спецсимволы регулярки экранируются - слово ищется как есть).
 # user_rules_file: свои правила по одному в строке (без "- ").
 #
-# Порядок блока правил: свои правила, свои домены, наборы своих сервисов,
-# встроенные. Перед серией правил одного сервиса - "# --- Имя ---"; перед
+# Порядок блока правил: свои правила, блокировка QUIC, свои домены, наборы
+# своих сервисов, встроенные. Перед серией правил одного сервиса - "# --- Имя ---"; перед
 # серией правил без сервиса после правил сервиса - "# --- Особые правила ---".
 #
 # Ошибка - сообщение в stderr, код 2, stdout пуст (вывод копится и
@@ -121,7 +129,7 @@ function need(n, want, kind) {
   if (n < want) err(at() "в строке " kind " не хватает полей (нужно " want ")")
 }
 function known(id, kind) {
-  if (id == "-" && (kind == "prov" || kind == "rule")) return
+  if (id == "-" && (kind == "prov" || kind == "rule" || kind == "fresh" || kind == "gone")) return
   if (!(id in svc_name) || (id in deleted)) err(at() kind " ссылается на сервис " id ", который не объявлен строкой svc выше (или убран del)")
 }
 function yname(s, t) {
@@ -266,7 +274,7 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       if (alive(id)) deleted[id] = 1
       for (j = 1; j <= nsvc; j++) if (!svc_user[svc_id[j]] && svc_name[svc_id[j]] == f[3]) deleted[svc_id[j]] = 1
       add_svc("u." id, f[3], f[4], 1)
-    } else if (kind == "icon" || kind == "gkey" || kind == "src" || kind == "dom") {
+    } else if (kind == "icon" || kind == "gkey" || kind == "src" || kind == "dom" || kind == "noquic") {
       # Ссылка на сервис, которого больше нет (убран из шаблона или del), -
       # пропуск: устаревшее состояние не должно ломать сборку.
       id = ref(id)
@@ -306,7 +314,10 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
       else if (f[3] == "keyword") typ = "DOMAIN-KEYWORD"
       else err(at() "тип домена " f[3] ": ожидается suffix, full или keyword")
       if (f[4] !~ /^[A-Za-z0-9*._-]+$/) err(at() "домен " f[4] ": только латиница, цифры и . - _ *")
-      ndom++; dom_text[ndom] = typ "," f[4] "," svc_name[id]
+      ndom++; dom_text[ndom] = typ "," f[4] "," svc_name[id]; dom_owner[ndom] = id
+    } else if (kind == "noquic") {
+      need(n, 2, kind)
+      noquic[id] = 1
     } else if (kind == "prov") {
       need(n, 3, kind)
       if (id != "-") err(at() "в отличиях prov бывает только с владельцем -")
@@ -349,7 +360,7 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
     } else if (kind == "check") {
       need(n, 3, kind)
     } else {
-      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, check, prov, bset, bmembers, bfirst или ownscope)")
+      err(at() "неизвестный вид строки " kind " (ожидается del, unrule, svc, icon, src, dom, check, noquic, prov, bset, bmembers, bfirst или ownscope)")
     }
   }
   if (rc < 0) err("не удалось прочитать " overlay_file)
@@ -428,12 +439,54 @@ function gen_providers(  out, i) {
   for (i = 1; i <= nuprov; i++) out = out "  " uprov_text[i] "\n"
   return out
 }
-function gen_rules(  out, i, prev) {
+# Условие правила для блокировки QUIC: "ТИП,значение" простого правила
+# сервиса (без цели и параметров); логические правила, регулярки и прочее -
+# пусто (не входят).
+function quic_cond(t,  n, f) {
+  sub(/[ \t]+#.*$/, "", t)
+  if (t ~ /[()]/) return ""
+  n = split(t, f, ",")
+  if (n < 3 || f[2] == "") return ""
+  if (f[1] !~ /^(RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|DOMAIN-WILDCARD|IP-CIDR|IP-CIDR6|IP-ASN|GEOIP)$/) return ""
+  return f[1] "," f[2]
+}
+function quic_add(c) {
+  if (c == "" || (c in QSEEN)) return
+  QSEEN[c] = 1
+  QCOND = QCOND (QCNT ? "," : "") "(" c ")"
+  QCNT++
+}
+# Блок «Блокировка QUIC»: по строке на сервис с noquic, в порядке сервисов.
+function gen_quic(  out, j, id, i, r) {
+  out = ""
+  for (j = 1; j <= nsvc; j++) {
+    id = svc_id[j]
+    if ((id in deleted) || !(id in noquic)) continue
+    delete QSEEN; QCOND = ""; QCNT = 0
+    for (i = 1; i <= ndom; i++) if (dom_owner[i] == id) quic_add(quic_cond(dom_text[i]))
+    for (i = 1; i <= nsrc; i++) if (src_owner[i] == id) quic_add(quic_cond(src_text[i]))
+    for (i = 1; i <= nrule; i++) {
+      if (rule_owner[i] != id || ((id SUBSEP rule_text[i]) in unruled)) continue
+      quic_add(quic_cond(rule_text[i]))
+    }
+    if (!QCNT) continue
+    if (QCNT == 1) r = "AND,((NETWORK,UDP),(DST-PORT,443)," QCOND "),REJECT"
+    else r = "AND,((NETWORK,UDP),(DST-PORT,443),(OR,(" QCOND "))),REJECT"
+    out = out "  - " r " # QUIC: " svc_name[id] "\n"
+  }
+  return out
+}
+function gen_rules(  out, i, prev, q) {
   out = ""; prev = ""
   if (nuser) {
     out = out "\n  # --- Свои правила ---\n"
     for (i = 1; i <= nuser; i++) out = out "  - " user_rule[i] "\n"
     prev = "#user"
+  }
+  q = gen_quic()
+  if (q != "") {
+    out = out "\n  # --- Блокировка QUIC ---\n" q
+    prev = "#quic"
   }
   if (ndom) {
     out = out "\n  # --- Свои домены ---\n"

@@ -57,7 +57,8 @@ printf '%s\n' \
   'rule	spotify	RULE-SET,spotify@domain,Spotify' \
   'rule	ipdetect	DOMAIN-SUFFIX,2ip.io,IP Detect' \
   'gone	kinopub	DOMAIN-SUFFIX,kino.old,KinoPub' \
-  'gone	ipdetect	GEOSITE,old-detect,IP Detect' > "$D"
+  'gone	ipdetect	GEOSITE,old-detect,IP Detect' \
+  'gone	-	RULE-SET,quic@inline,REJECT' > "$D"
 
 build() {
   # $1 - отличия (файл или пусто), $2 - фильтр, $3 - свои правила, вывод - config
@@ -101,6 +102,28 @@ sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,kino.old,KinoPub\
 import "$WORK/c1g.yaml" || fail "импорт с бывшими правилами с ошибкой"
 assert_eq "$(cat "$WORK/st/services.tsv")" "" "бывшие правила не уходят в dom"
 [ ! -s "$WORK/st/user-rules.txt" ] || fail "бывшие правила попали в свои: $(cat "$WORK/st/user-rules.txt")"
+
+# test_import_gone_quic_dropped: глобальная блокировка QUIC старого конфига
+# (правило без сервиса и его inline-provider) не переносится в свои
+sed 's/^  - MATCH,DIRECT$/  - RULE-SET,quic@inline,REJECT # Блокировка QUIC\
+  - MATCH,DIRECT/; s/^  user@classical:$/  quic@inline: { <<: *inline, payload: ['"'"'AND,((DST-PORT,443),(NETWORK,UDP))'"'"'] }\
+  user@classical:/' "$WORK/c0.yaml" > "$WORK/c1q.yaml"
+grep -q 'quic@inline: {' "$WORK/c1q.yaml" || fail "quic: фикстура не собрана"
+import "$WORK/c1q.yaml" || fail "импорт с QUIC с ошибкой"
+assert_eq "$(cat "$WORK/st/services.tsv")" "" "QUIC не уходит в отличия"
+[ ! -s "$WORK/st/user-rules.txt" ] || fail "QUIC попал в свои правила: $(cat "$WORK/st/user-rules.txt")"
+
+# test_import_noquic: блокировка QUIC, собранная конструктором, -> noquic
+# (и обратно); такое же правило без пометки или с чужим именем - своё
+printf 'noquic\tyoutube\n' > "$WORK/nq.tsv"
+build "$WORK/nq.tsv" '' '' > "$WORK/cq.yaml" || fail "noquic: сборка"
+grep -q '# QUIC: YouTube$' "$WORK/cq.yaml" || fail "noquic: нет правила в сборке"
+import "$WORK/cq.yaml" || fail "noquic: импорт"
+assert_eq "$(cat "$WORK/st/services.tsv")" "$(printf 'noquic\tyoutube')" "noquic: импорт в отметку"
+[ ! -s "$WORK/st/user-rules.txt" ] || fail "noquic: правило попало в свои"
+sed 's/ # QUIC: YouTube$/ # QUIC: Nosuch/' "$WORK/cq.yaml" > "$WORK/cq2.yaml"
+import "$WORK/cq2.yaml" || fail "noquic: импорт чужого имени"
+grep -q '^AND,((NETWORK,UDP),(DST-PORT,443),(RULE-SET,youtube@domain)),REJECT$' "$WORK/st/user-rules.txt" || fail "noquic: чужое имя - своё правило: $(cat "$WORK/st/user-rules.txt" 2>/dev/null)"
 
 # test_import_dom_on_default + user rules + prov
 sed 's/^  - MATCH,DIRECT$/  - DOMAIN-SUFFIX,kino.pub,KinoPub\

@@ -5,7 +5,7 @@
 // config-state/services.tsv, свои правила - config-state/user-rules.txt.
 // Форматы - в шапке config-tools/render_services.awk; порядок сериализации
 // отличий тот же, что у config-tools/config_to_state.awk: del, unrule,
-// svc (+icon, gkey), src, dom, prov. Проверки имени группы и домена - те
+// svc (+icon, gkey), src, dom, noquic, prov. Проверки имени группы и домена - те
 // же, что в render_services.awk, чтобы ошибка была видна до отправки.
 // См. docs/superpowers/specs/2026-10-05-config-constructor-design.md.
 
@@ -150,6 +150,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var bmembers = {};         // группа -> [групповые токены] (состав)
   var ownScope = false;      // прокси и во всех сервисных группах (ownscope all)
   var checks = {};           // id -> свой адрес проверки (вкладка «Диагностика»)
+  var quic = {};             // id -> true: блокировать QUIC сервиса (noquic)
 
   lines(servicesText).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
@@ -167,6 +168,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
     else if (f[0] === 'bfirst') { bfirsts.push({ group: f[1], value: f.slice(2).join(TAB) }); }
     else if (f[0] === 'ownscope') { ownScope = true; }
     else if (f[0] === 'check') { checks[f[1]] = f[2] || ''; }
+    else if (f[0] === 'noquic') { quic[f[1]] = true; }
     else { provLines.push(line); }
   });
   lines(userRulesText).forEach(function (l) { l = l.trim(); if (l) { userRules.push(l); } });
@@ -373,6 +375,14 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       doms = doms.filter(function (x) { return x.owner !== id; });
       srcLines = srcLines.filter(function (l) { return l.split(TAB)[1] !== id; });
       delete checks[id];
+      delete quic[id];
+    },
+    // Блокировка QUIC (UDP/443) сервиса: render_services.awk собирает
+    // правило REJECT по его доменам и наборам (строка noquic).
+    blockQuic: function (id) { return !!quic[id]; },
+    setBlockQuic: function (id, on) {
+      needService(id);
+      if (on) { quic[id] = true; } else { delete quic[id]; }
     },
     // Адрес проверки сервиса для вкладки «Диагностика»: свой (строка check
     // overlay) и адреса по умолчанию из services.default.tsv.
@@ -522,6 +532,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       // пропускает) - «Вернуть» сервис возвращает и их
       doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
       Object.keys(checks).forEach(function (id) { out.push(['check', id, checks[id]].join(TAB)); });
+      Object.keys(quic).forEach(function (id) { out.push('noquic' + TAB + id); });
       provLines.forEach(function (l) { out.push(l); });
       bsets.forEach(function (x) { out.push(['bset', x.group, x.key, x.value].join(TAB)); });
       tb.order.concat(Object.keys(bmembers).filter(function (k) { return !tb.groups[k]; })).forEach(function (k) {
@@ -573,6 +584,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         }
         if (f[0] === 'svc') { return (added ? 'Новый сервис ' : 'Удалить свой сервис ') + f[2]; }
         if (f[0] === 'dom') { return added ? '+ домен ' + f[3] + ' → ' + nameOf(f[1]) : 'Убрать домен ' + f[3] + ' (' + nameOf(f[1]) + ')'; }
+        if (f[0] === 'noquic') { return (added ? 'Блокировать QUIC: ' : 'Не блокировать QUIC: ') + nameOf(f[1]); }
         if (f[0] === 'check') { return added ? '+ адрес проверки ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать адрес проверки (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'src') { return added ? '+ набор ' + f[2] + ' → ' + nameOf(f[1]) : 'Убрать набор ' + f[2] + ' (' + nameOf(f[1]) + ')'; }
         if (f[0] === 'bset') { return added ? 'Группа ' + f[1] + ': ' + f[2] + ' = ' + f[3] : 'Группа ' + f[1] + ': ' + f[2] + ' как в шаблоне'; }
@@ -587,10 +599,10 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         if (f[0] === 'icon') { return (added ? 'Иконка: ' : 'Убрана иконка: ') + nameOf(f[1]); }
         return (added ? 'Добавлено: ' : 'Убрано: ') + f.join(' ');
       }
-      ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'bset', 'bmembers', 'bfirst', ''].forEach(function (kind) {
+      ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'noquic', 'bset', 'bmembers', 'bfirst', ''].forEach(function (kind) {
         function mine(l) {
           var k = l.split(TAB)[0];
-          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'bset', 'bmembers', 'bfirst'].indexOf(k) < 0;
+          return kind ? k === kind : ['del', 'unrule', 'svc', 'src', 'dom', 'check', 'noquic', 'bset', 'bmembers', 'bfirst'].indexOf(k) < 0;
         }
         // изменённое значение базовой группы - одна строка («стало»), без «было»
         function replaced(l) {

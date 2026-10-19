@@ -30,6 +30,10 @@ sed "s/'Заблок[.] сервисы', '🚀 Авто по пингу'/'Заб
 # CDN теперь наследует список якоря без собственного proxies: с PASS.
 grep -v -F "    proxies: [DIRECT, 'Заблок. сервисы', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual', PASS]" \
   "$WORK/before-with-fallback.txt" > "$WORK/before-current.txt"
+# Глобальная блокировка QUIC убрана, сниффер распознаёт QUIC.
+grep -v -e '^  quic@inline: ' -e '^  - RULE-SET,quic@inline,REJECT' "$WORK/before-current.txt" |
+  sed 's/TLS: { ports: \[443, 8443\] } },/TLS: { ports: [443, 8443] }, QUIC: { ports: [443, 8443] } },/' > "$WORK/before-noquic.txt"
+mv "$WORK/before-noquic.txt" "$WORK/before-current.txt"
 # правила с пометкой fresh добавлены после фикстуры - в сравнении их нет,
 # как и providers наборов, на которые ссылаются только они
 awk -F'\t' '$1 == "fresh" { print "  - " $3 }' "$TOOLS/services.default.tsv" > "$WORK/fresh.txt"

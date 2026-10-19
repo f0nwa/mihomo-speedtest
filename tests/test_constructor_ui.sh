@@ -136,4 +136,8 @@ fi
 grep -q 'Адрес для проверки' "$ROOT/web/stats_app_constructor.js" || fail "нет поля «Адрес для проверки» в редакторе сервиса"
 grep -q 'model.setCheckUrl(' "$ROOT/web/stats_app_constructor.js" || fail "поле адреса проверки не сохраняет в модель"
 grep -q 'model.defaultCheckUrls(' "$ROOT/web/stats_app_constructor.js" || fail "подсказка не показывает адрес по умолчанию"
+# Галочка «Блокировать QUIC» в раскрытом сервисе и пометка в строке сервиса.
+grep -q 'Блокировать QUIC (UDP/443)' "$ROOT/web/stats_app_constructor.js" || fail "нет галочки «Блокировать QUIC» в редакторе сервиса"
+grep -q 'model.setBlockQuic(id, cb.checked)' "$ROOT/web/stats_app_constructor.js" || fail "галочка QUIC не сохраняет в модель"
+grep -q "model.blockQuic(s.id) ? ' · QUIC заблокирован'" "$ROOT/web/stats_app_constructor.js" || fail "строка сервиса не показывает блокировку QUIC"
 echo "OK test_constructor_ui"

@@ -327,6 +327,22 @@ mc.setCheckUrl(nid, 'https://my.example');
 mc.removeUserService(nid);
 eq(mc.serialize().services.indexOf('my.example'), -1, 'check: удаляется вместе со своим сервисом');
 
+// ----- блокировка QUIC сервиса (строка noquic) -----
+const mq = M.createModel(D, ['noquic', 'kinopub'].join(T) + '\n', '');
+eq(mq.serialize().services, ['noquic', 'kinopub'].join(T) + '\n', 'noquic: roundtrip без правок');
+eq([mq.blockQuic('kinopub'), mq.blockQuic('youtube')], [true, false], 'noquic: чтение');
+const iq = mq.serialize();
+mq.setBlockQuic('youtube', true);
+mq.setBlockQuic('kinopub', false);
+eq(mq.serialize().services, ['noquic', 'youtube'].join(T) + '\n', 'noquic: включение и выключение');
+eq(mq.summary(iq), ['Не блокировать QUIC: KinoPub', 'Блокировать QUIC: YouTube'], 'noquic: сводка');
+eq(mq.changes(iq).services, true, 'noquic: блок сервисов изменён');
+throws(() => mq.setBlockQuic('nosuch', true), 'noquic: нет сервиса');
+const qid = mq.addService('Мой2', 'other');
+mq.setBlockQuic(qid, true);
+mq.removeUserService(qid);
+eq(mq.serialize().services, ['noquic', 'youtube'].join(T) + '\n', 'noquic: удаляется вместе со своим сервисом');
+
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
 JS

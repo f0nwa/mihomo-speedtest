@@ -303,13 +303,28 @@ export function renderConstructor(modeBar, opts) {
       return wrap;
     }
 
+    // Блокировка QUIC сервиса (строка noquic в services.tsv).
+    function quicRow(id) {
+      var wrap = el('div');
+      var lw = el('label', 'cx-num');
+      var cb = el('input'); cb.type = 'checkbox'; cb.checked = model.blockQuic(id);
+      cb.setAttribute('aria-label', 'Блокировать QUIC');
+      cb.addEventListener('change', function () { edit(function () { model.setBlockQuic(id, cb.checked); }); });
+      lw.appendChild(cb); lw.appendChild(el('span', null, 'Блокировать QUIC (UDP/443)'));
+      wrap.appendChild(lw);
+      wrap.appendChild(el('div', 'hint', 'Приложения сервиса перейдут на обычный HTTPS (TCP). Включайте, если сервис не открывается или ' +
+        'работает плохо через QUIC (например, ChatGPT через прокси). Нужен QUIC в sniffer: конфига.'));
+      return wrap;
+    }
+
     function serviceRow(s) {
       var box = el('div');
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
       var doms = model.domains(s.id).filter(function (d) { return !d.removed; }).length;
       var rules = model.sources(s.id).length + (s.user ? 0 : model.rules(s.id).filter(function (x) { return !x.removed; }).length);
       r.appendChild(el('span', 'xk-val', s.name));
-      r.appendChild(el('span', 'geo-code', (s.user ? 'свой · ' : '') + 'доменов: ' + doms + ', наборов и правил: ' + rules));
+      r.appendChild(el('span', 'geo-code', (s.user ? 'свой · ' : '') + 'доменов: ' + doms + ', наборов и правил: ' + rules +
+        (model.blockQuic(s.id) ? ' · QUIC заблокирован' : '')));
       if (!s.deleted) {
         var t = button(expanded[s.id] ? 'Свернуть' : 'Домены и правила', 'small muted');
         t.setAttribute('aria-expanded', expanded[s.id] ? 'true' : 'false');
@@ -352,6 +367,7 @@ export function renderConstructor(modeBar, opts) {
           chips.appendChild(c);
         });
         if (chips.firstChild) { p.appendChild(chips); }
+        p.appendChild(quicRow(s.id));
         p.appendChild(checkUrlRow(s.id));
         box.appendChild(p);
       }

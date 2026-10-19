@@ -490,5 +490,32 @@ cmp -s "$WORK/c0.yaml" "$WORK/c1.yaml" || fail "check в таблице изме
 awk -v services_file="$WORK/nocheck.tsv" -v overlay_file="$WORK/o1.tsv" -f "$SCRIPT" "$ROOT/config-tools/config.example.yaml" > "$WORK/c2.yaml" 2> "$WORK/c2.err" || fail "check: строка check в overlay не принята: $(cat "$WORK/c2.err")"
 cmp -s "$WORK/c0.yaml" "$WORK/c2.yaml" || fail "check в overlay изменил YAML"
 
+# test_noquic: блок «Блокировка QUIC» после своих правил - по доменам,
+# наборам и простым правилам сервиса (логические и убранные - мимо); у
+# сервиса с одним условием - без OR; убранный сервис и чужой id - без строки
+printf '%s\n' \
+  'section	m	M' \
+  'svc	ai	AI	m' \
+  'svc	tg	Telegram	m' \
+  'svc	gone	Gone	m' \
+  'rule	ai	RULE-SET,ai@domain,AI' \
+  'rule	ai	OR,((DOMAIN,x.ai)),AI' \
+  'rule	ai	DOMAIN-REGEX,^a(b|c)$,AI' \
+  'rule	ai	DOMAIN-SUFFIX,old.ai,AI' \
+  'rule	ai	IP-ASN,714,AI,no-resolve # комм' \
+  'rule	tg	RULE-SET,tg@ipcidr,Telegram,no-resolve' \
+  'rule	gone	DOMAIN,g.example,Gone' > "$WORK/q.tsv"
+printf '%s\n' \
+  'noquic	ai' 'noquic	tg' 'noquic	gone' 'noquic	nosuch' 'del	gone' \
+  'dom	ai	suffix	chatgpt.com' \
+  'unrule	ai	DOMAIN-SUFFIX,old.ai,AI' > "$WORK/qo.tsv"
+printf 'DOMAIN,u.example,DIRECT\n' > "$WORK/qu.txt"
+OUT=$(awk -v services_file="$WORK/q.tsv" -v overlay_file="$WORK/qo.tsv" -v user_rules_file="$WORK/qu.txt" -f "$SCRIPT" "$T") || fail "noquic: сборка с ошибкой"
+assert_contains "  # --- Свои правила ---${NL}  - DOMAIN,u.example,DIRECT${NL}${NL}  # --- Блокировка QUIC ---${NL}  - AND,((NETWORK,UDP),(DST-PORT,443),(OR,((DOMAIN-SUFFIX,chatgpt.com),(RULE-SET,ai@domain),(IP-ASN,714)))),REJECT # QUIC: AI${NL}  - AND,((NETWORK,UDP),(DST-PORT,443),(RULE-SET,tg@ipcidr)),REJECT # QUIC: Telegram${NL}${NL}  # --- Свои домены ---" "$OUT" "noquic: блок и порядок"
+assert_not_contains "QUIC: Gone" "$OUT" "noquic: убранный сервис"
+assert_not_contains "(OR,((DOMAIN,x.ai)))" "$OUT" "noquic: логическое правило не входит"
+OUT=$(render "$S" "$T")
+assert_not_contains "Блокировка QUIC" "$OUT" "noquic: без отметок блока нет"
+
 [ "$FAILED" = 0 ] && echo "OK test_render_services"
 exit "$FAILED"

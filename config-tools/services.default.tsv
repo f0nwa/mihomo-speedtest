@@ -131,7 +131,6 @@ prov	cdn	vodafone@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip
 prov	cdn	vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
 prov	youtube	youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
 prov	zoom	zoom@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zoom.mrs" }
-prov	-	quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
 rule	kinopub	RULE-SET,kinopub@domain,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebase-settings.crashlytics.com,KinoPub
 rule	kinopub	DOMAIN-SUFFIX,firebaseinstallations.googleapis.com,KinoPub
@@ -273,3 +272,6 @@ gone	ipdetect	DOMAIN-SUFFIX,dnsleaktest.com,IP Detect
 gone	ipdetect	DOMAIN-SUFFIX,ipwho.is,IP Detect
 gone	ipdetect	DOMAIN-SUFFIX,test-ipv6.com,IP Detect
 gone	torrents	GEOSITE,rutracker,Torrents
+# Глобальная блокировка QUIC убрана из шаблона (QUIC блокируется точечно
+# своим правилом, см. docs/guide.md): правило старого конфига не переносится.
+gone	-	RULE-SET,quic@inline,REJECT

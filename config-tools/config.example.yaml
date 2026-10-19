@@ -8,7 +8,7 @@ external-controller: 0.0.0.0:9090
 external-ui: ./zash
 external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
 profile: { store-selected: true }
-sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] } }, skip-dst-address: ['rule-set:telegram@ipcidr'] }
+sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] }, QUIC: { ports: [443, 8443] } }, skip-dst-address: ['rule-set:telegram@ipcidr'] }
 routing-mark: 255
 # --- STATIC_DNS:BEGIN --- (при обновлении/переустановке сюда переносится блок dns: из старого config.yaml, если он был; по умолчанию пусто - используется поведение mihomo без своего dns:)
 # --- STATIC_DNS:END ---
@@ -357,7 +357,6 @@ rule-providers:
   vultr@ipcidr: { <<: *ipcidr, url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs" }
   youtube@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs" }
   zoom@domain: { <<: *domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zoom.mrs" }
-  quic@inline: { <<: *inline, payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
   # --- SERVICE_PROVIDERS:END ---
   user@classical:
     type: inline
@@ -367,7 +366,6 @@ rule-providers:
 # --- Правила ---
 rules:
   - RULE-SET,adlist@domain,REJECT # Блокировка рекламы
-  - RULE-SET,quic@inline,REJECT # Блокировка QUIC
   # --- SERVICE_RULES:BEGIN --- (собирается из services.default.tsv)
 
   # --- KinoPub ---

@@ -250,7 +250,7 @@ BEGIN {
     else if (!(nm in tmpl_prov)) rep("REVIEW", "multiline-provider|" nm)
   } else if (sect == "rules" && line ~ /^  - /) {
     v = line; sub(/^  - /, "", v)
-    nrules++; cfg_rule[nrules] = body(v)
+    nrules++; cfg_rule[nrules] = body(v); cfg_rule_raw[nrules] = v
   }
 }
 END {
@@ -258,7 +258,7 @@ END {
   flush_sub()
   printf "%s", prox_out > (out_dir "/proxies.yaml"); close(out_dir "/proxies.yaml")
   if (subs_out != "") { printf "%s", subs_out > (out_dir "/subscriptions.tsv"); close(out_dir "/subscriptions.tsv") }
-  svc_out = ""; src_out = ""; dom_out = ""; prov_out = ""; user_out = ""
+  svc_out = ""; src_out = ""; dom_out = ""; quic_out = ""; prov_out = ""; user_out = ""
   # Встроенные сервисы, которых нет в config.yaml -> del.
   for (i = 1; i <= nds; i++) {
     if (!(ds_name[ds_id[i]] in cfg_group)) { out_line("del\t" ds_id[i]); deleted[ds_id[i]] = 1; rep("IMPORTED", "del|" ds_id[i]) }
@@ -306,6 +306,18 @@ END {
     if (b in dr_index) { seen_rule[dr_index[b]] = 1; continue }
     # Бывшее встроенное правило (в шаблоне заменено) - не своё правило.
     if (b in gone_rule) continue
+    # Блокировка QUIC сервиса, собранная конструктором ("# QUIC: Имя"), -
+    # отметка noquic, а не своё правило.
+    if (b ~ /^AND,\(\(NETWORK,UDP\),\(DST-PORT,443\),/ && b ~ /,REJECT$/ && match(cfg_rule_raw[i], /[ \t]#[ ]*QUIC:[ ]*[^ ].*$/)) {
+      qn = substr(cfg_rule_raw[i], RSTART); sub(/^[ \t]#[ ]*QUIC:[ ]*/, "", qn); qn = trim(qn)
+      qid = ""
+      if (qn in custom_id) qid = custom_id[qn]
+      else if ((qn in name_to_id) && !(name_to_id[qn] in deleted)) qid = name_to_id[qn]
+      if (qid != "") {
+        if (!(qid in quic_done)) { quic_done[qid] = 1; quic_out = quic_out "noquic\t" qid "\n"; rep("IMPORTED", "noquic|" qid) }
+        continue
+      }
+    }
     tg = target(b)
     id = ""
     if (tg in custom_id) id = custom_id[tg]
@@ -420,7 +432,7 @@ END {
   # Свои ноды в якоре сервисных групп: «свои прокси во всех сервисных группах».
   own_out = ""
   for (i = 1; i <= sd_n; i++) if (sd_tok[i] in prox_name) { own_out = "ownscope\tall\n"; rep("IMPORTED", "ownscope|-"); break }
-  printf "%s%s%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, prov_out, base_out, own_out > (out_dir "/services.tsv")
+  printf "%s%s%s%s%s%s%s%s", svc_out, cust_out, src_out, dom_out, quic_out, prov_out, base_out, own_out > (out_dir "/services.tsv")
   close(out_dir "/services.tsv")
   if (user_out != "") { printf "%s", user_out > (out_dir "/user-rules.txt"); close(out_dir "/user-rules.txt") }
   if (cfg_geo != "" && cfg_geo != tmpl_geo) {
