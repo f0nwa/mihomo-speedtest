@@ -625,7 +625,9 @@ export function createModuleCards(ctx) {
   // ----- прокси (ноды, добавленные вручную, не из подписок) -----
   var proxBlk = ctx.layout.add(2, 'Прокси'), proxCard = proxBlk.body;
   proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
-    'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются.'));
+    'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются. ' +
+    'Поле справа от имени - провайдер ноды в статистике (пусто - по имени до первого «_»); сохраняется сразу, без «Применить». ' +
+    'Нескольким нодам сразу - отметьте их галочками и задайте провайдера в строке над списком.'));
   var proxHost = el('div');
   proxCard.appendChild(proxHost);
 
@@ -641,9 +643,9 @@ export function createModuleCards(ctx) {
       var got = mods.addProxyYaml(t);
       var ren = [];
       got.forEach(function (n, i) { if (n !== orig[i]) { ren.push(orig[i] + ' → ' + n); } });
-      return { added: got.length, errs: [], rest: [], renamed: ren };
+      return { added: got.length, errs: [], rest: [], renamed: ren, names: got };
     }
-    var res = { added: 0, errs: [], rest: [], renamed: [] };
+    var res = { added: 0, errs: [], rest: [], renamed: [], names: [] };
     t.split(/\r?\n/).forEach(function (l, i) {
       var line = l.trim();
       if (!line) { return; }
@@ -651,6 +653,7 @@ export function createModuleCards(ctx) {
         var want = linkToProxy(line).name;
         var got2 = mods.addProxyLink(line);
         res.added++;
+        res.names.push(got2);
         if (got2 !== want) { res.renamed.push(want + ' → ' + got2); }
       } catch (e) { res.errs.push('строка ' + (i + 1) + ': ' + e.message); res.rest.push(line); }
     });
@@ -659,12 +662,53 @@ export function createModuleCards(ctx) {
 
   var proxDraft = '';
 
+  // ----- провайдеры своих нод (подписи в статистике) -----
+  // В config.yaml провайдера у нод из proxies: нет: по умолчанию он берётся из
+  // имени (до первого "_"), ручное имя хранится отдельно (node_providers.json)
+  // и сохраняется сразу, без «Применить» - конфиг оно не меняет.
+  var provManual = {};
+  var provSel = {};
+  var provDraft = '';
+  fetchJson('/api/node-providers').then(function (r) {
+    provManual = (r && r.manual) || {};
+    renderProxies();
+  }, function () {});
+  function provGuess(name) {
+    var i = name.indexOf('_');
+    return i > 0 ? name.slice(0, i).trim() || 'Без провайдера' : 'Без провайдера';
+  }
+  function saveProviders(names, provider, note) {
+    names = names.filter(function (n) { return n; });
+    if (!names.length) { return Promise.resolve(); }
+    return fetchJson('/api/node-providers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: names, provider: provider })
+    }).then(function (r) {
+      provManual = (r && r.manual) || {};
+      renderProxies();
+      if (note) { ctx.msg(note, 'ok'); }
+    }, function (e) { ctx.msg('Провайдер не сохранён: ' + errText(e), 'err'); });
+  }
+
   function renderProxies() {
     clear(proxHost);
     var rows = el('div', 'xk-rows');
     var list = mods.proxyRows();
+    var active = list.filter(function (p) { return !p.removed; });
+    Object.keys(provSel).forEach(function (n) {
+      if (!active.some(function (p) { return p.name === n; })) { delete provSel[n]; }
+    });
+    if (active.length) { proxHost.appendChild(buildProviderBar(active)); }
     list.forEach(function (p) {
       var r = el('div', 'xk-row cx-row' + (p.removed ? ' cx-proxy-removed' : ''));
+      var pick = el('input'); pick.type = 'checkbox'; pick.disabled = p.removed;
+      pick.checked = !!provSel[p.name];
+      pick.setAttribute('aria-label', 'Отметить ' + p.name);
+      pick.addEventListener('change', function () {
+        if (pick.checked) { provSel[p.name] = true; } else { delete provSel[p.name]; }
+        renderProxies();
+      });
+      r.appendChild(pick);
       // Имя правится прямо в строке; «Сохранить имя» появляется, только когда
       // имя изменено (Enter - сохранить, Esc - вернуть как было).
       var nm = el('input', 'cx-name'); nm.type = 'text'; nm.value = p.name; nm.spellcheck = false;
@@ -676,8 +720,29 @@ export function createModuleCards(ctx) {
         if (e.key === 'Enter' && !save.hidden) { e.preventDefault(); save.click(); }
         if (e.key === 'Escape') { nm.value = p.name; save.hidden = true; }
       });
-      save.addEventListener('click', function () { ctx.edit(function () { mods.renameProxy(p.name, nm.value); }); });
+      save.addEventListener('click', function () {
+        var was = provManual[p.name];
+        ctx.edit(function () { mods.renameProxy(p.name, nm.value); });
+        // ручной провайдер переезжает вместе с именем (старое имя остаётся,
+        // пока изменения не применены)
+        var to = nm.value.trim();
+        if (was && to && to !== p.name && mods.proxyRows().some(function (x) { return x.name === to; })) { saveProviders([to], was); }
+      });
       r.appendChild(nm); r.appendChild(save);
+      var prov = el('input', 'cx-provider'); prov.type = 'text'; prov.maxLength = 60; prov.spellcheck = false;
+      prov.disabled = p.removed;
+      prov.value = provManual[p.name] || '';
+      prov.placeholder = provGuess(p.name);
+      prov.title = 'Провайдер в статистике. Пусто - по имени ноды: ' + provGuess(p.name);
+      prov.setAttribute('aria-label', 'Провайдер ноды ' + p.name);
+      prov.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); prov.blur(); }
+        if (e.key === 'Escape') { prov.value = provManual[p.name] || ''; prov.blur(); }
+      });
+      prov.addEventListener('change', function () {
+        if (prov.value.trim() !== (provManual[p.name] || '')) { saveProviders([p.name], prov.value.trim()); }
+      });
+      r.appendChild(prov);
       r.appendChild(el('span', 'geo-code', (p.type || '?') + (p.server ? ' · ' + p.server + (p.port ? ':' + p.port : '') : '')));
       if (p.removed) { r.appendChild(el('span', 'cx-proxy-removed-note', 'Убрана')); }
       var rm = button(p.removed ? 'Вернуть' : 'Убрать', 'small muted');
@@ -719,6 +784,7 @@ export function createModuleCards(ctx) {
       try { res = addPasted(area.value); } catch (e) { ctx.msg(e.message, 'err'); return; }
       proxDraft = res.rest.join('\n');
       ctx.redraw();
+      if (provDraft.trim()) { saveProviders(res.names, provDraft.trim()); }
       var renNote = res.renamed.length ? '. Имя было занято, переименованы: ' + res.renamed.join('; ') : '';
       if (res.errs.length) { ctx.msg((res.added ? 'Добавлено нод: ' + res.added + renNote + '. ' : '') + 'Не добавлено - ' + res.errs.join('; '), 'err'); }
       else { ctx.msg('Добавлено нод: ' + res.added + renNote, 'ok'); }
@@ -735,6 +801,15 @@ export function createModuleCards(ctx) {
     });
     // Два отдельных способа: вставка ссылок/YAML (кнопка справа от поля) и
     // файл WireGuard/AmneziaWG - чтобы не гадать, какую кнопку нажимать.
+    var newProv = el('div', 'xk-add cx-provider-new');
+    newProv.appendChild(el('span', 'hint', 'Провайдер для добавляемых нод:'));
+    var newProvIn = el('input', 'cx-provider'); newProvIn.type = 'text'; newProvIn.maxLength = 60;
+    newProvIn.placeholder = 'пусто - по имени ноды'; newProvIn.value = provDraft;
+    newProvIn.setAttribute('aria-label', 'Провайдер для добавляемых нод');
+    newProvIn.addEventListener('input', function () { provDraft = newProvIn.value; });
+    newProv.appendChild(newProvIn);
+    newProv.appendChild(el('span', 'hint xk-grow', 'присвоится всем нодам, добавленным ниже ссылкой, YAML или .conf'));
+    proxHost.appendChild(newProv);
     proxHost.appendChild(el('div', 'geo-group-title', 'Добавить по ссылке или YAML'));
     var paste = el('div', 'cx-paste');
     paste.appendChild(area); paste.appendChild(add);
@@ -746,22 +821,55 @@ export function createModuleCards(ctx) {
     proxHost.appendChild(conf);
   }
 
+  // Массовое назначение: галочки в строках + общее поле над списком.
+  function buildProviderBar(active) {
+    var bar = el('div', 'xk-add cx-provider-bar');
+    var picked = active.filter(function (p) { return provSel[p.name]; }).map(function (p) { return p.name; });
+    var all = el('input'); all.type = 'checkbox';
+    all.checked = picked.length === active.length;
+    all.indeterminate = picked.length > 0 && picked.length < active.length;
+    all.setAttribute('aria-label', 'Отметить все ноды');
+    all.addEventListener('change', function () {
+      active.forEach(function (p) { if (all.checked) { provSel[p.name] = true; } else { delete provSel[p.name]; } });
+      renderProxies();
+    });
+    var lab = el('label', 'cx-provider-all');
+    lab.appendChild(all); lab.appendChild(document.createTextNode(' все'));
+    bar.appendChild(lab);
+    var inp = el('input', 'cx-provider'); inp.type = 'text'; inp.maxLength = 60;
+    inp.placeholder = 'Провайдер для отмеченных';
+    inp.setAttribute('aria-label', 'Провайдер для отмеченных нод');
+    var set = button('Задать', 'small'); set.disabled = !picked.length;
+    var reset = button('По имени', 'small muted'); reset.disabled = !picked.length;
+    reset.title = 'Убрать ручное имя - провайдер снова берётся из имени ноды';
+    set.addEventListener('click', function () {
+      if (!inp.value.trim()) { ctx.msg('Впишите имя провайдера', 'err'); return; }
+      saveProviders(picked, inp.value.trim(), 'Провайдер «' + inp.value.trim() + '»: ' + plural(picked.length, 'нода', 'ноды', 'нод'));
+    });
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !set.disabled) { e.preventDefault(); set.click(); } });
+    reset.addEventListener('click', function () { saveProviders(picked, '', 'Провайдер по имени: ' + plural(picked.length, 'нода', 'ноды', 'нод')); });
+    bar.appendChild(inp); bar.appendChild(set); bar.appendChild(reset);
+    bar.appendChild(el('span', 'hint xk-grow', picked.length ? 'отмечено: ' + picked.length : 'отметьте ноды галочками'));
+    return bar;
+  }
+
   // .conf файлы -> ноды (перевод на роутере: wg_import.awk), по одному запросу.
   function importConf(files) {
     if (!files.length) { return; }
-    var done = [], errs = [];
+    var done = [], errs = [], added = [];
     var chain = Promise.resolve();
     files.forEach(function (f) {
       chain = chain.then(function () { return f.text(); }).then(function (text) {
         var name = f.name.replace(/\.conf$/i, '');
         return fetchJson('/api/constructor/wgconf', { method: 'POST', body: '### MST-WG ' + name + '\n' + text,
           headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (r) {
-          try { mods.addProxyYaml(r.yaml || '', true); done.push(name); } catch (e) { errs.push(f.name + ': ' + e.message); }
+          try { added = added.concat(mods.addProxyYaml(r.yaml || '', true)); done.push(name); } catch (e) { errs.push(f.name + ': ' + e.message); }
         }, function (e) { errs.push(f.name + ': ' + errText(e)); });
       });
     });
     chain.then(function () {
       render(); ctx.changed();
+      if (provDraft.trim()) { saveProviders(added, provDraft.trim()); }
       if (errs.length) { ctx.msg((done.length ? 'Добавлено: ' + done.join(', ') + '. ' : '') + 'Не добавлено - ' + errs.join('; '), 'err'); }
       else { ctx.msg('Добавлено: ' + done.join(', '), 'ok'); }
     });

@@ -228,11 +228,11 @@ code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PO
 
 # Метаданные нод используют ту же сессию; отсутствие конфига/yq не ломает API.
 OUT=$(curl -s -m 2 -w ' %{http_code}' "http://127.0.0.1:$PORT2/api/node-providers")
-[ "$OUT" = '{"providers": {}, "sources": {}, "editable": {}} 200' ] || fail "/api/node-providers без конфига: [$OUT]"
+[ "$OUT" = '{"providers": {}, "sources": {}, "manual": {}} 200' ] || fail "/api/node-providers без конфига: [$OUT]"
 code=$(curl -s -I -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/node-providers")
 [ "$code" = "200" ] || fail "HEAD /api/node-providers: ожидался 200, получено $code"
-code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"name":"nope","provider":"X"}' "http://127.0.0.1:$PORT2/api/node-providers")
-[ "$code" = "404" ] || fail "POST /api/node-providers для ноды не из proxies: ожидался 404, получено $code"
+code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST -d '{"names":"x","provider":"X"}' "http://127.0.0.1:$PORT2/api/node-providers")
+[ "$code" = "400" ] || fail "POST /api/node-providers: names не список - ожидался 400, получено $code"
 code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST -d '{"name":1}' "http://127.0.0.1:$PORT2/api/node-providers")
 [ "$code" = "400" ] || fail "POST /api/node-providers с кривым телом: ожидался 400, получено $code"
 code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X PUT "http://127.0.0.1:$PORT2/api/node-providers")

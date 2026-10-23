@@ -104,12 +104,13 @@ proxies:
         store = str(self.root / 'node_providers.json')
         stats_httpd.save_node_provider_override('solo', 'My VPN', store)
         stats_httpd.save_node_provider_override('Blanc_PL_1', 'Blanc Ltd', store)
-        static = []
         overrides = stats_httpd.load_node_provider_overrides(store)
-        result = stats_httpd.node_provider_labels(str(self.config), overrides=overrides, static_names=static)
+        result = stats_httpd.node_provider_labels(str(self.config), overrides=overrides)
         self.assertEqual(result, {'Blanc_PL_1': ['Blanc Ltd · WireGuard'], 'solo': ['My VPN · VLESS']})
-        self.assertEqual(static, ['Blanc_PL_1', 'solo'])
-        stats_httpd.save_node_provider_override('Blanc_PL_1', '', store)
+        stats_httpd.save_node_provider_override(['Blanc_PL_1', 'pending_new'], 'Bulk', store)
+        self.assertEqual(stats_httpd.load_node_provider_overrides(store),
+                         {'solo': 'My VPN', 'Blanc_PL_1': 'Bulk', 'pending_new': 'Bulk'})
+        stats_httpd.save_node_provider_override(['Blanc_PL_1', 'pending_new'], '', store)
         overrides = stats_httpd.load_node_provider_overrides(store)
         self.assertEqual(overrides, {'solo': 'My VPN'})
         self.assertEqual(stats_httpd.node_provider_labels(str(self.config), overrides=overrides)['Blanc_PL_1'],
