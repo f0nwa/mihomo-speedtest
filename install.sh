@@ -1543,6 +1543,66 @@ format_mbit() {
   LC_ALL=C awk -v speed="$1" 'BEGIN { printf "%.1f", speed / 125000 }'
 }
 
+select_web_port() {
+  # Выбираем порт до записи speedtest2.env: на USB уходит один готовый файл,
+  # а ссылка для первичной настройки сразу содержит фактический порт.
+  envfile=$1
+  saved_port=$(sed -n 's/^STATS_HTTP_PORT=//p' "$envfile" 2>/dev/null | tail -1 | tr -d "'\"")
+  port=${STATS_HTTP_PORT:-${saved_port:-8899}}
+  case $port in
+    ''|*[!0-9]*) ui_fail "Некорректный порт веб-интерфейса: $port"; return 1 ;;
+  esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    ui_fail "Порт веб-интерфейса вне диапазона 1-65535: $port"
+    return 1
+  fi
+  saved_enable=$(sed -n 's/^STATS_HTTP_ENABLE=//p' "$envfile" 2>/dev/null | tail -1 | tr -d "'\"")
+  if [ "$saved_enable" = 0 ]; then
+    STATS_HTTP_PORT=$port
+    return 0
+  fi
+
+  # Свой уже работающий HTTP-сервер занимает порт при переустановке.
+  # Не переселяем его только из-за собственного слушающего сокета.
+  pidfile=${STATS_HTTP_PIDFILE:-${STATS_SERVICE_RUNTIME_DIR:-/tmp/mihomo-speedtest-stats}/httpd.pid}
+  if [ -f "$envfile" ] && [ -f "$pidfile" ]; then
+    own_pid=$(cat "$pidfile" 2>/dev/null) || own_pid=
+    case $own_pid in
+      ''|*[!0-9]*) ;;
+      *) if kill -0 "$own_pid" 2>/dev/null; then STATS_HTTP_PORT=$port; return 0; fi ;;
+    esac
+  fi
+
+  if ! command -v netstat >/dev/null 2>&1; then
+    ui_fail "Не найден netstat - невозможно проверить порт веб-интерфейса"
+    return 1
+  fi
+  listeners=$(netstat -ltn 2>/dev/null) || {
+    ui_fail "Не удалось проверить занятые TCP-порты через netstat"
+    return 1
+  }
+  chosen=$(printf '%s\n' "$listeners" | awk -v start="$port" '
+    $NF == "LISTEN" {
+      addr = $4
+      sub(/^.*[:.]/, "", addr)
+      if (addr ~ /^[0-9]+$/) busy[addr] = 1
+    }
+    END {
+      for (p = start; p <= 65535; p++) {
+        if (!(p in busy)) { print p; exit }
+      }
+      exit 1
+    }
+  ') || {
+    ui_fail "Нет свободного TCP-порта для веб-интерфейса от $port до 65535"
+    return 1
+  }
+  if [ "$chosen" != "$port" ]; then
+    ui_warn "Порт $port занят - веб-интерфейс будет использовать порт $chosen"
+  fi
+  STATS_HTTP_PORT=$chosen
+}
+
 write_env() {
   dst=$1
   dstdir=${dst%/*}
@@ -1607,6 +1667,7 @@ write_env() {
     else
       printf "STATS_HTTP_ENABLE=1\n"
     fi
+    printf "STATS_HTTP_PORT='%s'\n" "${STATS_HTTP_PORT:-8899}"
   } > "$tmp" && mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
 }
 
@@ -2505,6 +2566,7 @@ main() {
   fi
 
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Установка файлов и служб"
+  select_web_port "$DIR/speedtest2.env" || return 1
   write_env "$DIR/speedtest2.env" || {
     ui_fail "Не удалось записать speedtest2.env"
     return 1
