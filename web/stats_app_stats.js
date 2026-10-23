@@ -11,6 +11,105 @@ import { refreshUpdatesBadge } from './app-updates.js';
 // прогон, updateProgressCard() пишет сюда состояние замеров скорости и
 // двигает полосу прогресса под панелью (см. runBar ниже).
 
+// Source labels are display metadata; node identities and test history stay unchanged.
+var nodeProviders = {};
+var nodeSources = {};
+var nodeSelection = { provider: '', protocol: '' };
+var nodeBreakdownBy = 'provider';
+function providerLabel(name) {
+  var sources = Object.prototype.hasOwnProperty.call(nodeProviders, name) ? nodeProviders[name] : null;
+  return Array.isArray(sources) && sources.length ? sources.join(' / ') : 'Провайдер неизвестен';
+}
+function nodeLabel(name) { return String(name || '') + ' · ' + providerLabel(name); }
+function nodeCell(name) {
+  var cell = el('td', 'node-cell');
+  cell.appendChild(el('div', 'node-name', name));
+  cell.appendChild(el('small', 'node-provider', providerLabel(name)));
+  return cell;
+}
+
+function sourcesForNode(name) {
+  var sources = Object.prototype.hasOwnProperty.call(nodeSources, name) ? nodeSources[name] : null;
+  return Array.isArray(sources) && sources.length ? sources : [{ provider: 'Провайдер неизвестен', protocol: 'Протокол неизвестен' }];
+}
+function sourceSelected(source) {
+  return (!nodeSelection.provider || source.provider === nodeSelection.provider) &&
+    (!nodeSelection.protocol || source.protocol === nodeSelection.protocol);
+}
+function nodeSelected(name) { return sourcesForNode(name).some(sourceSelected); }
+function filteredNodeRows(rows) {
+  return rows.filter(function (r) {
+    return nodeSelected(r.name) && stabilityRowVisible(stabilityGroup(r.status), nodeLabel(r.name));
+  });
+}
+function summarizeNodes(rows, dimension) {
+  var groups = Object.create(null);
+  rows.forEach(function (r) {
+    var seen = Object.create(null);
+    sourcesForNode(r.name).filter(sourceSelected).forEach(function (source) {
+      var key = source[dimension];
+      if (seen[key]) { return; }
+      seen[key] = true;
+      var g = groups[key] || (groups[key] = { name: key, total: 0, alive: 0, skipped: 0,
+        measured: 0, speedSum: 0, bestSpeed: null, pingCount: 0, pingSum: 0 });
+      g.total++;
+      if (r.status === 'alive') { g.alive++; }
+      if (r.status !== 'alive' && r.status !== 'down') { g.skipped++; }
+      if (typeof r.last_speed_bytes === 'number' && isFinite(r.last_speed_bytes) && r.last_speed_bytes >= 0) {
+        g.measured++; g.speedSum += r.last_speed_bytes;
+        g.bestSpeed = g.bestSpeed === null ? r.last_speed_bytes : Math.max(g.bestSpeed, r.last_speed_bytes);
+      }
+      if (typeof r.avg_delay_ms === 'number' && isFinite(r.avg_delay_ms) && r.avg_delay_ms >= 0) {
+        g.pingCount++; g.pingSum += r.avg_delay_ms;
+      }
+    });
+  });
+  return Object.keys(groups).sort(function (a, b) { return a.localeCompare(b); }).map(function (key) {
+    var g = groups[key];
+    g.avgSpeed = g.measured ? g.speedSum / g.measured : null;
+    g.avgPing = g.pingCount ? g.pingSum / g.pingCount : null;
+    return g;
+  });
+}
+function buildNodeBreakdown() {
+  var wrap = el('div', 'node-breakdown');
+  var bar = el('div', 'node-breakdown-bar');
+  var label = el('label', 'node-select', 'Сводка');
+  var select = el('select');
+  select.setAttribute('aria-label', 'Группировать статистику');
+  [['provider', 'По провайдерам'], ['protocol', 'По протоколам']].forEach(function (item) {
+    var option = el('option', null, item[1]); option.value = item[0]; select.appendChild(option);
+  });
+  select.value = nodeBreakdownBy;
+  label.appendChild(select); bar.appendChild(label); wrap.appendChild(bar);
+  var box = el('div', 'table-scroll'); wrap.appendChild(box);
+  wrap.appendChild(el('p', 'hint', 'Сводка по выбранным нодам. Скорость - среднее последних сохранённых замеров; ноды без замера не учитываются. Пинг - по нодам с данными.'));
+  var currentRows = [];
+  function update(rows) {
+    currentRows = rows;
+    while (box.firstChild) { box.removeChild(box.firstChild); }
+    var summary = summarizeNodes(rows, nodeBreakdownBy);
+    if (!summary.length) { box.appendChild(el('p', 'hint', 'Нет нод с выбранными фильтрами.')); return; }
+    var table = el('table', 'node-summary-table');
+    var head = el('thead'); var tr = el('tr');
+    [nodeBreakdownBy === 'provider' ? 'Провайдер' : 'Протокол', 'Нод', 'Доступны', 'Не проверены',
+      'Измерено', 'Средняя скорость, Мбит/с', 'Лучшая скорость, Мбит/с', 'Средний пинг, мс'].forEach(function (title) { tr.appendChild(el('th', null, title)); });
+    head.appendChild(tr); table.appendChild(head);
+    var body = el('tbody');
+    summary.forEach(function (g) {
+      var row = el('tr');
+      [g.name, String(g.total), g.alive + '/' + g.total, String(g.skipped), String(g.measured),
+        fmtMbit(g.avgSpeed), fmtMbit(g.bestSpeed), g.avgPing === null ? '-' : String(Math.round(g.avgPing))].forEach(function (text) {
+        row.appendChild(el('td', null, text));
+      });
+      body.appendChild(row);
+    });
+    table.appendChild(body); box.appendChild(table);
+  }
+  select.addEventListener('change', function () { nodeBreakdownBy = select.value; update(currentRows); });
+  return { element: wrap, update: update };
+}
+
 var runBar = null;
 
 function renderRunBar(container, onRunning, lastRun, runsCount) {
@@ -136,7 +235,7 @@ function buildProgressTable(results) {
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
     var tr = el('tr');
-    tr.appendChild(el('td', null, r.name));
+    tr.appendChild(nodeCell(r.name));
     tr.appendChild(el('td', null, fmtMbit(r.speed_bytes)));
     var ok = r.status === 'ok';
     tr.appendChild(el('td', ok ? 'status-alive' : 'status-absent', ok ? 'выше порога' : 'ниже порога'));
@@ -388,7 +487,7 @@ function buildUptimeTimeline(nodes, runsSeries, cap) {
       });
       canvas.addEventListener('mouseleave', function () { setHover(null, -1); });
     });
-    if (!list.length) { rowsBox.appendChild(el('p', 'hint', 'Нет нод по запросу.')); }
+    if (!list.length) { rowsBox.appendChild(el('p', 'hint', nodes.length ? 'Нет нод по запросу.' : 'Нет нод с выбранными фильтрами.')); }
     counter.textContent = 'показано ' + list.length + ' из ' + nodes.length;
     toggle.textContent = uptimeState.all ? 'Топ-' + Math.min(cap, nodes.length) : 'Все (' + nodes.length + ')';
     toggle.disabled = !!uptimeState.query || nodes.length <= cap;
@@ -417,6 +516,7 @@ function buildUptimeTimeline(nodes, runsSeries, cap) {
   };
   window.addEventListener('resize', onResize);
 
+  wrap.updateNodes = function (nextNodes) { nodes = nextNodes; search.value = uptimeState.query; rebuild(); };
   buildAxis();
   rebuild();
   // canvas получает ширину только после вставки в документ
@@ -467,16 +567,23 @@ function svgIcon(size, shapes) {
   return svg;
 }
 
-function buildStabilityFilter(rows, table, emptyHint) {
+function buildStabilityFilter(rows, table, emptyHint, onChange) {
   var wrap = el('div', 'stability-filter');
   var counts = { alive: 0, down: 0, other: 0 };
   rows.forEach(function (r) { counts[stabilityGroup(r.status)]++; });
   var counter = el('span', 'hint stability-filter-count');
+  var statusLabels = {};
   function apply() {
+    Object.keys(counts).forEach(function (key) { counts[key] = 0; });
+    var query = stabilityQuery.trim().toLowerCase();
+    rows.forEach(function (r) {
+      if (nodeSelected(r.name) && (!query || nodeLabel(r.name).toLowerCase().indexOf(query) >= 0)) { counts[stabilityGroup(r.status)]++; }
+    });
+    STABILITY_GROUPS.forEach(function (g) { if (statusLabels[g.key]) { statusLabels[g.key].textContent = g.label + ' (' + counts[g.key] + ')'; } });
     var trs = table.tBodies[0].rows;
     var shown = 0;
     for (var i = 0; i < trs.length; i++) {
-      var visible = stabilityRowVisible(trs[i].getAttribute('data-group'), trs[i].getAttribute('data-name'));
+      var visible = nodeSelected(trs[i].getAttribute('data-node')) && stabilityRowVisible(trs[i].getAttribute('data-group'), trs[i].getAttribute('data-name'));
       trs[i].hidden = !visible;
       if (visible) { shown++; }
     }
@@ -484,8 +591,9 @@ function buildStabilityFilter(rows, table, emptyHint) {
     emptyHint.hidden = shown !== 0;
     emptyHint.textContent = stabilityQuery.trim()
       ? 'Нет нод по запросу «' + stabilityQuery.trim() + '».'
-      : 'Нет нод с выбранными статусами.';
+      : 'Нет нод с выбранными фильтрами.';
     counter.textContent = 'показано ' + shown + ' из ' + rows.length;
+    if (onChange) { onChange(filteredNodeRows(rows)); }
   }
 
   // --- поиск по имени ---
@@ -520,6 +628,33 @@ function buildStabilityFilter(rows, table, emptyHint) {
   box.appendChild(clear);
   wrap.appendChild(box);
 
+  function dimensionSelect(key, title, allTitle) {
+    var options = Object.create(null);
+    rows.forEach(function (r) { sourcesForNode(r.name).forEach(function (source) { options[source[key]] = true; }); });
+    if (nodeSelection[key] && !options[nodeSelection[key]]) { nodeSelection[key] = ''; }
+    var label = el('label', 'node-select', title);
+    var select = el('select'); select.setAttribute('aria-label', title);
+    var all = el('option', null, allTitle); all.value = ''; select.appendChild(all);
+    Object.keys(options).sort(function (a, b) { return a.localeCompare(b); }).forEach(function (name) {
+      var option = el('option', null, name); option.value = name; select.appendChild(option);
+    });
+    select.value = nodeSelection[key];
+    select.addEventListener('change', function () { nodeSelection[key] = select.value; apply(); });
+    label.appendChild(select); wrap.appendChild(label);
+    return select;
+  }
+  var providerSelect = dimensionSelect('provider', 'Провайдер', 'Все провайдеры');
+  var protocolSelect = dimensionSelect('protocol', 'Протокол', 'Все протоколы');
+  var reset = el('button', 'theme-btn', 'Сбросить фильтры'); reset.type = 'button';
+  reset.addEventListener('click', function () {
+    nodeSelection.provider = ''; nodeSelection.protocol = ''; stabilityQuery = ''; search.value = ''; uptimeState.query = '';
+    providerSelect.value = ''; protocolSelect.value = '';
+    Object.keys(stabilityFilter).forEach(function (key) { stabilityFilter[key] = true; });
+    groups.querySelectorAll('input').forEach(function (cb) { cb.checked = true; });
+    syncClear(); apply();
+  });
+  wrap.appendChild(reset);
+
   // --- статусы ---
   var groups = el('div', 'stability-filter-groups');
   STABILITY_GROUPS.forEach(function (g) {
@@ -534,7 +669,9 @@ function buildStabilityFilter(rows, table, emptyHint) {
     });
     label.appendChild(cb);
     label.appendChild(el('span', 'sw ' + g.sw));
-    label.appendChild(document.createTextNode(g.label + ' (' + counts[g.key] + ')'));
+    var statusText = document.createTextNode(g.label + ' (' + counts[g.key] + ')');
+    statusLabels[g.key] = statusText;
+    label.appendChild(statusText);
     groups.appendChild(label);
   });
   wrap.appendChild(groups);
@@ -609,13 +746,14 @@ function buildStabilityTable(rows) {
       var tr = el('tr');
       var group = stabilityGroup(r.status);
       tr.setAttribute('data-group', group);
-      tr.setAttribute('data-name', r.name || '');
-      tr.hidden = !stabilityRowVisible(group, r.name);
+      tr.setAttribute('data-node', r.name);
+      tr.setAttribute('data-name', nodeLabel(r.name));
+      tr.hidden = !nodeSelected(r.name) || !stabilityRowVisible(group, nodeLabel(r.name));
       var st = statusLabel(r.status);
       var swTd = el('td');
       swTd.appendChild(el('span', 'sw ' + st.sw));
       tr.appendChild(swTd);
-      tr.appendChild(el('td', null, r.name));
+      tr.appendChild(nodeCell(r.name));
       tr.appendChild(el('td', st.cls, st.text));
       tr.appendChild(el('td', null, fmtLastSeen(r.last_seen)));
       tr.appendChild(el('td', null, r.uptime_pct === null ? '-' : r.uptime_pct + '%'));
@@ -653,8 +791,14 @@ export function renderStats() {
   stopProgressPolling();
   setLoading();
   var alive = viewGuard();
-  fetchJson('/api/stats').then(function (data) {
+  Promise.all([
+    fetchJson('/api/stats'),
+    fetchJson('/api/node-providers')['catch'](function () { return {}; })
+  ]).then(function (responses) {
     if (!alive()) { return; }
+    var data = responses[0];
+    nodeProviders = responses[1].providers || {};
+    nodeSources = responses[1].sources || {};
     clearApp();
 
     // {} - stats.json ещё нет - трактуем как "прогонов ещё не было", а не
@@ -668,33 +812,36 @@ export function renderStats() {
     renderRunBar(app, function () { startProgressPolling(app, mainRow); }, data.last_run || null, runsCount);
 
     app.appendChild(buildKpiRow(runsCount, data.last_run));
+    app.appendChild(el('p', 'hint node-pool-hint', 'Карточки выше - последний прогон по всему пулу. Фильтры ниже меняют сводку, список нод и ленту доступности.'));
     refreshUpdatesBadge();
 
     // Таблица доступности - первой, лента по прогонам - за ней: на
     // широком экране рядом, на узком - друг под другом.
     app.appendChild(mainRow);
 
-    var stabilityCard = card('Статистика доступности нод');
-    if (data.node_stability && data.node_stability.length) {
-      var stabilityTable = buildStabilityTable(data.node_stability);
-      var stabilityEmpty = el('p', 'hint', 'Нет нод с выбранными статусами.');
-      stabilityCard.appendChild(buildStabilityFilter(data.node_stability, stabilityTable, stabilityEmpty));
-      var tableBox = el('div', 'table-scroll');
-      tableBox.appendChild(stabilityTable);
-      stabilityCard.appendChild(tableBox);
-      stabilityCard.appendChild(stabilityEmpty);
+    var rows = data.node_stability || [];
+    var stabilityCard = card('Статистика нод');
+    var chartCard = card('Доступность нод по прогонам');
+    if (rows.length) {
+      var stabilityTable = buildStabilityTable(rows);
+      var stabilityEmpty = el('p', 'hint', 'Нет нод с выбранными фильтрами.');
+      var breakdown = buildNodeBreakdown();
+      var cap = (data.node_history && data.node_history.cap) || 8;
+      var timeline = buildUptimeTimeline(rows, (data.runs && data.runs.series) || [], cap);
+      stabilityCard.appendChild(buildStabilityFilter(rows, stabilityTable, stabilityEmpty, function (filtered) {
+        breakdown.update(filtered);
+        if (timeline.updateNodes) { timeline.updateNodes(filtered); }
+      }));
+      stabilityCard.appendChild(breakdown.element);
+      stabilityCard.appendChild(el('h3', 'node-list-title', 'Ноды'));
+      var tableBox = el('div', 'table-scroll'); tableBox.appendChild(stabilityTable);
+      stabilityCard.appendChild(tableBox); stabilityCard.appendChild(stabilityEmpty);
+      chartCard.appendChild(timeline);
     } else {
       stabilityCard.appendChild(el('p', 'hint', 'Данных пока нет.'));
-    }
-    mainRow.appendChild(stabilityCard);
-
-    var chartCard = card('Доступность нод по прогонам');
-    if (data.node_stability && data.node_stability.length) {
-      var cap = (data.node_history && data.node_history.cap) || 8;
-      chartCard.appendChild(buildUptimeTimeline(data.node_stability, (data.runs && data.runs.series) || [], cap));
-    } else {
       chartCard.appendChild(el('p', 'hint', 'Пока недостаточно истории для ленты.'));
     }
+    mainRow.appendChild(stabilityCard);
     mainRow.appendChild(chartCard);
   })['catch'](function (err) {
     if (!alive()) { return; }
