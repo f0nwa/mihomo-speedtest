@@ -892,7 +892,7 @@ BOOTSTRAP_MIRRORS_DEFAULT='https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest ht
 
 bootstrap_mirrors() {
   if [ "${UPDATE_MIRRORS+set}" = set ]; then printf '%s\n' "$UPDATE_MIRRORS"
-  elif [ "$UPDATE_RELEASE_BASE" = "$BOOTSTRAP_DEFAULT_BASE" ]; then printf '%s\n' "$BOOTSTRAP_MIRRORS_DEFAULT"; fi
+  elif [ "${UPDATE_RELEASE_BASE:-$BOOTSTRAP_DEFAULT_BASE}" = "$BOOTSTRAP_DEFAULT_BASE" ]; then printf '%s\n' "$BOOTSTRAP_MIRRORS_DEFAULT"; fi
 }
 
 # Тихая загрузка для перебора источников: одна попытка, без обхода через
@@ -966,6 +966,33 @@ bootstrap_from_mirrors() {
   done
   rm -f "$BOOTSTRAP_MANIFEST"
   return 1
+}
+
+# Файл релиза $1 в $2 (размер $3): закреплённый источник (с повторами),
+# затем тот же файл того же релиза из зеркал, затем прежний путь с обходом
+# через mihomo и понятной ошибкой. GitHub может отдать манифест и оборвать
+# загрузку следующего файла. Целостность проверяет вызывающий по манифесту.
+bootstrap_get_file() {
+  bgf_rc=0
+  bootstrap_fetch_retry "$BOOTSTRAP_PINNED_BASE/$1" "$2" "$3" || bgf_rc=$?
+  if [ "$bgf_rc" = 0 ]; then
+    bgf_size=$(wc -c < "$2" | tr -d ' ')
+    [ "$bgf_size" -gt 0 ] && [ "$bgf_size" -le "$3" ] && return 0
+  fi
+  bgf_tag=${BOOTSTRAP_PINNED_BASE##*/}
+  if printf '%s\n' "$bgf_tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    for bgf_m in $(bootstrap_mirrors); do
+      case $bgf_m in https://*/gh/*) ;; *) continue ;; esac
+      case ${bgf_m#https://} in *[!A-Za-z0-9._/-]*) continue ;; esac
+      [ "$bgf_m@dist-$bgf_tag/$bgf_tag" != "$BOOTSTRAP_PINNED_BASE" ] || continue
+      if bootstrap_try_fetch "$bgf_m@dist-$bgf_tag/$bgf_tag/$1" "$2" "$3"; then
+        bgf_host=${bgf_m#https://}
+        ui_log "Файл $1: основной источник не отдал файл - взят с зеркала ${bgf_host%%/*}"
+        return 0
+      fi
+    done
+  fi
+  bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$1" "$2" "$3"
 }
 
 # --- Канал обновлений при установке с нуля --------------------------------
@@ -1099,7 +1126,7 @@ bootstrap_selfinstall() {
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
     bootstrap_idx=$((bootstrap_idx + 1))
     bootstrap_prog "Файлы релиза" "$bootstrap_idx" "$bootstrap_total" "$src"
-    bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    bootstrap_get_file "$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     case $check in
       sh) sh -n "$BOOTSTRAP_WORK/$src" || { bootstrap_prog_close; ui_fail "Неверный синтаксис sh: $src"; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;

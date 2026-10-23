@@ -23,6 +23,7 @@ cat > "$TMP/fake_http.sh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$1" >> '$URLS'
 f='$W'/\${1#https://}
+[ ! -f "\$f.fail35" ] || exit 35
 [ -f "\$f" ] || exit 22
 cat "\$f"
 EOF
@@ -132,5 +133,17 @@ install_into stable 'unset UPDATE_MIRRORS'
 if grep -q jsdelivr "$URLS"; then fail 'свой источник: запрошены зеркала по умолчанию'; fi
 [ "$(UPDATE_RELEASE_BASE=$BOOTSTRAP_DEFAULT_BASE; unset UPDATE_MIRRORS; bootstrap_mirrors)" = "$BOOTSTRAP_MIRRORS_DEFAULT" ] ||
   fail 'штатный источник без настройки должен включать зеркала по умолчанию'
+
+# 8. GitHub отдал манифест, но рвёт загрузку файла - файл с зеркала.
+release "$GH/download/1.2.0" 1.2.0
+put "$GH/latest/download/manifest.txt" < "$W/gh.test/o/r/releases/download/1.2.0/manifest.txt"
+touch "$W/gh.test/o/r/releases/download/1.2.0/runner.sh.fail35"
+install_into stable
+[ "$rc" = 0 ] || fail "обрыв файла на GitHub: $(cat "$TMP/err")"
+[ "$(installed_tag)" = 1.2.0 ] || fail 'обрыв файла: не 1.2.0'
+grep -qx "$M2@dist-1.2.0/1.2.0/runner.sh" "$URLS" || fail "runner.sh не с зеркала: $(cat "$URLS")"
+grep -qx "$GH/download/1.2.0/greeting.txt" "$URLS" || fail 'greeting.txt должен идти с GitHub'
+grep -q 'взят с зеркала m2.test' "$UI_LOG" || fail 'нет записи в журнале о зеркале'
+if grep -q 'через зеркало' "$TMP/err"; then fail 'манифест должен был остаться с GitHub'; fi
 
 echo "test_install_mirrors.sh: OK"

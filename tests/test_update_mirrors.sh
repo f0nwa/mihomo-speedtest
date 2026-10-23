@@ -22,6 +22,8 @@ cat > "$TMP/fake_http.sh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$1" >> '$TMP/urls'
 f='$W'/\${1#https://}
+# Файл-метка <файл>.fail35 - обрыв TLS (код curl 35), как у GitHub с роутера.
+[ ! -f "\$f.fail35" ] || exit 35
 [ -f "\$f" ] || exit 22
 cat "\$f"
 EOF
@@ -47,7 +49,7 @@ run() {
   # shellcheck disable=SC2086
   env TMPROOT="$TMP/tmp" UPDATE_HTTP_CMD="$TMP/fake_http.sh" \
     UPDATE_RELEASE_BASE=$GH/latest/download UPDATE_RELEASES_API=https://api.gh.test/releases \
-    UPDATE_RELEASES_FALLBACK=$GH UPDATE_MIRRORS="$M1 $M2" UPDATE_NETCHECK=0 \
+    UPDATE_RELEASES_FALLBACK=$GH UPDATE_MIRRORS="$M1 $M2" UPDATE_NETCHECK=0 UPDATE_RETRY_DELAY=0 \
     UPDATE_ENV_FILE="$TMP/no-such.env" INSTALLED_MANIFEST_PATH="$TMP/no-installed" \
     "$@" sh "$SCRIPT" $args > "$TMP/out" 2> "$TMP/err" || rc=$?
 }
@@ -154,5 +156,25 @@ plan_id=$(sed -n 's/.*"plan_id":"\([0-9a-f]*\)".*/\1/p' "$TMP/out" | head -n 1)
 run --verify-plan "$plan_id" --format=json -- UPDATE_STATE_DIR="$TMP/state" UPDATE_TARGET_ROOT="$TMP/target"
 [ "$rc" = 0 ] || fail "verify-plan через зеркало: код $rc, stderr: $(cat "$TMP/err")"
 asked "$M2@dist-1.2.0/1.2.0/manifest.txt" || fail "verify-plan: манифест не из зеркала: $(cat "$TMP/urls")"
+
+# 9. GitHub отдал манифест, но рвёт загрузку файла (код 35): после
+# повторов файл берётся с зеркала того же релиза; подготовка проходит.
+manifest 7 1.2.0 | put "$GH/latest/download/manifest.txt"
+awk -F'|' '$1=="FILE" {print $3}' "$ROOT/release/components.txt" | while read -r p; do
+  put "$GH/download/1.2.0/${p##*/}" < "$ROOT/$p"
+done
+touch "$W/gh.test/o/r/releases/download/1.2.0/update_plan.awk.fail35"
+rm -rf "$TMP/state" "$TMP/tmp/mst-update-plans"
+run --prepare --components=updater --format=json -- UPDATE_STATE_DIR="$TMP/state" UPDATE_TARGET_ROOT="$TMP/target"
+[ "$rc" = 0 ] || fail "обрыв файла на GitHub: код $rc, stderr: $(cat "$TMP/err")"
+grep -Fq 'Файл update_plan.awk: основной источник не отдал файл - взят с зеркала m2.test' "$TMP/err" || fail "нет сообщения о зеркале для файла: $(cat "$TMP/err")"
+if grep -Fq 'GitHub недоступен' "$TMP/err"; then fail 'манифест должен был остаться с GitHub'; fi
+[ "$(grep -c '^https://gh.test/o/r/releases/download/1.2.0/update_plan.awk$' "$TMP/urls")" -ge 3 ] || fail "нет повторов при обрыве: $(cat "$TMP/urls")"
+asked "$GH/download/1.2.0/update.sh" || fail 'остальные файлы должны идти с GitHub'
+# Обрыв без зеркал - прежняя ошибка с адресом GitHub.
+rm -rf "$TMP/state" "$TMP/tmp/mst-update-plans"
+run --prepare --components=updater --format=json -- UPDATE_STATE_DIR="$TMP/state" UPDATE_TARGET_ROOT="$TMP/target" UPDATE_MIRRORS=
+[ "$rc" != 0 ] || fail 'обрыв без зеркал завершился успешно'
+grep -Fq 'Адрес: https://gh.test/o/r/releases/download/1.2.0/update_plan.awk' "$TMP/err" || fail "нет адреса в ошибке: $(cat "$TMP/err")"
 
 echo 'test_update_mirrors.sh: OK' >&2
