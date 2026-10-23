@@ -168,6 +168,14 @@ curl -fsSL https://raw.githubusercontent.com/f0nwa/mihomo-speedtest/main/install
 
 Канал потом меняется в веб-интерфейсе, вкладка «Обновления».
 
+Если GitHub с роутера недоступен, установщик и обновления сами берут релиз
+с зеркала jsDelivr (те же файлы с той же проверкой SHA256). Когда не
+открывается даже `raw.githubusercontent.com`, запустите установку с зеркала:
+
+```sh
+curl -fsSL https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest@dist/install.sh | sh
+```
+
 Для обновления по SSH выполните `mihomo-speedtest update`: команда сама
 проверит релиз, задаст необходимые вопросы и установит обновление.
 

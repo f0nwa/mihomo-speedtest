@@ -646,9 +646,9 @@ bootstrap_retryable() {
 }
 
 bootstrap_fetch_retry() {
-  # До INSTALL_RETRIES попыток (по умолчанию 3) с паузой INSTALL_RETRY_DELAY
-  # секунд (по умолчанию 2), растущей с номером попытки.
-  bfr_max=${INSTALL_RETRIES:-3}
+  # До INSTALL_RETRIES попыток (по умолчанию 3; $4 - своё число) с паузой
+  # INSTALL_RETRY_DELAY секунд (по умолчанию 2), растущей с номером попытки.
+  bfr_max=${4:-${INSTALL_RETRIES:-3}}
   case $bfr_max in ''|*[!0-9]*|0) bfr_max=1 ;; esac
   bfr_try=1
   while :; do
@@ -797,6 +797,7 @@ bootstrap_disable_proxy() {
 
 bootstrap_fail_hint() {
   [ -n "${BOOTSTRAP_FAIL_HINT:-}" ] || return 0
+  [ -z "${BOOTSTRAP_MIRRORS_TRIED:-}" ] || echo "Зеркала релиза (jsDelivr) тоже не ответили." >&2
   # Свежая диагностика: почему не скачалось, и что настроить (вместо голых
   # кодов curl). При отключении и подменённом транспорте (тесты) пропускается.
   if [ "${INSTALL_NETCHECK:-1}" != 0 ] && [ -z "${UPDATE_HTTP_CMD:-}" ] && command -v curl >/dev/null 2>&1; then
@@ -877,6 +878,96 @@ bootstrap_pinned_base() {
   esac
 }
 
+# --- Зеркала релиза --------------------------------------------------------
+# GitHub с роутера бывает недоступен целиком. Тогда манифест и файлы
+# берутся из ветки dist репозитория через jsDelivr (release/publish_dist.sh;
+# тот же протокол, что update.sh:select_source): тег канала - из
+# <зеркало>@dist/channels/<канал>, файлы - из <зеркало>@dist-<тег>/<тег>/.
+# Целостность та же: размер и SHA256 каждого файла по манифесту, а
+# RELEASE_TAG манифеста обязан совпасть с тегом указателя. UPDATE_MIRRORS
+# (через пробел) заменяет список, пустое значение отключает; свой
+# UPDATE_RELEASE_BASE зеркала по умолчанию не включает.
+BOOTSTRAP_DEFAULT_BASE=https://github.com/f0nwa/mihomo-speedtest/releases/latest/download
+BOOTSTRAP_MIRRORS_DEFAULT='https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://gcore.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://fastly.jsdelivr.net/gh/f0nwa/mihomo-speedtest'
+
+bootstrap_mirrors() {
+  if [ "${UPDATE_MIRRORS+set}" = set ]; then printf '%s\n' "$UPDATE_MIRRORS"
+  elif [ "$UPDATE_RELEASE_BASE" = "$BOOTSTRAP_DEFAULT_BASE" ]; then printf '%s\n' "$BOOTSTRAP_MIRRORS_DEFAULT"; fi
+}
+
+# Тихая загрузка для перебора источников: одна попытка, без обхода через
+# mihomo и без сообщений об ошибке. Код 0 - файл скачан и не пуст.
+bootstrap_try_fetch() {
+  bootstrap_fetch_retry "$1" "$2" "$3" 1 || return 1
+  btf_size=$(wc -c < "$2" | tr -d ' ')
+  [ "$btf_size" -gt 0 ] && [ "$btf_size" -le "$3" ]
+}
+
+# Наибольший тег x.y.z из "tag_name" JSON-списка релизов ($1).
+bootstrap_newest_tag() {
+  awk '
+    function newer(a, b,   x, y, i) {
+      split(a, x, "."); split(b, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 > y[i] + 0
+      return 0
+    }
+    {
+      s = $0
+      while (match(s, /"tag_name"[ \t]*:[ \t]*"[^"]*"/)) {
+        t = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+        sub(/^"tag_name"[ \t]*:[ \t]*"/, "", t); sub(/"$/, "", t)
+        if (t ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ && (best == "" || newer(t, best))) best = t
+      }
+    }
+    END { if (best != "") print best }' "$1"
+}
+
+# Манифест с GitHub тихо (без ui_fail и обхода через mihomo): код 0 -
+# манифест в BOOTSTRAP_MANIFEST, для dev выставлен BOOTSTRAP_DEV_TAG.
+bootstrap_github_quiet() {
+  bgq_url=$UPDATE_RELEASE_BASE/manifest.txt
+  if [ "${INSTALL_CHANNEL:-stable}" = dev ]; then
+    case $UPDATE_RELEASE_BASE in */releases/latest/download) ;; *) return 1 ;; esac
+    if ! bootstrap_try_fetch "${UPDATE_RELEASES_API:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases?per_page=5}" "$BOOTSTRAP_WORK/releases.json" 4194304; then
+      bootstrap_try_fetch "${UPDATE_RELEASES_FALLBACK:-https://github.com/f0nwa/mihomo-speedtest/releases}" "$BOOTSTRAP_WORK/releases.html" 4194304 || return 1
+      grep -Eo '/releases/tag/[0-9]+\.[0-9]+\.[0-9]+' "$BOOTSTRAP_WORK/releases.html" |
+        sed 's|.*/|{"tag_name":"|; s|$|"}|' > "$BOOTSTRAP_WORK/releases.json"
+    fi
+    BOOTSTRAP_DEV_TAG=$(bootstrap_newest_tag "$BOOTSTRAP_WORK/releases.json")
+    [ -n "$BOOTSTRAP_DEV_TAG" ] || return 1
+    bgq_url=${UPDATE_RELEASE_BASE%/latest/download}/download/$BOOTSTRAP_DEV_TAG/manifest.txt
+  fi
+  bootstrap_try_fetch "$bgq_url" "$BOOTSTRAP_MANIFEST" 262144
+}
+
+# Перебор зеркал ($1 - список): код 0 - манифест в BOOTSTRAP_MANIFEST,
+# BOOTSTRAP_PINNED_BASE закреплён на версии зеркала, BOOTSTRAP_MIRROR_HOST -
+# имя сервера для сообщения.
+bootstrap_from_mirrors() {
+  BOOTSTRAP_MIRRORS_TRIED=1
+  for bfm_m in $1; do
+    case $bfm_m in https://*/gh/*) ;; *) continue ;; esac
+    case ${bfm_m#https://} in *[!A-Za-z0-9._/-]*) continue ;; esac
+    # stable - channels/stable; dev - наибольший из channels/dev и
+    # channels/stable (как с GitHub: наибольший x.y.z среди всех релизов).
+    : > "$BOOTSTRAP_WORK/mirror-tags"
+    for bfm_ch in stable dev; do
+      [ "$bfm_ch" = stable ] || [ "${INSTALL_CHANNEL:-stable}" = dev ] || continue
+      bootstrap_try_fetch "$bfm_m@dist/channels/$bfm_ch" "$BOOTSTRAP_WORK/mirror-pointer" 64 || continue
+      printf '{"tag_name":"%s"}\n' "$(head -n 1 "$BOOTSTRAP_WORK/mirror-pointer" | tr -d '\r[:space:]')" >> "$BOOTSTRAP_WORK/mirror-tags"
+    done
+    bfm_tag=$(bootstrap_newest_tag "$BOOTSTRAP_WORK/mirror-tags")
+    [ -n "$bfm_tag" ] || continue
+    bootstrap_try_fetch "$bfm_m@dist-$bfm_tag/$bfm_tag/manifest.txt" "$BOOTSTRAP_MANIFEST" 262144 || continue
+    [ "$(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)" = "$bfm_tag" ] || continue
+    BOOTSTRAP_PINNED_BASE=$bfm_m@dist-$bfm_tag/$bfm_tag
+    BOOTSTRAP_MIRROR_HOST=${bfm_m#https://}; BOOTSTRAP_MIRROR_HOST=${BOOTSTRAP_MIRROR_HOST%%/*}
+    return 0
+  done
+  rm -f "$BOOTSTRAP_MANIFEST"
+  return 1
+}
+
 # --- Канал обновлений при установке с нуля --------------------------------
 # Спрашиваем только здесь, в бутстрапе: при переустановке поверх файлы уже
 # на роутере, и смена канала ничего бы не скачала (канал меняется в
@@ -935,21 +1026,7 @@ bootstrap_resolve_dev() {
       return 1
     }
   }
-  BOOTSTRAP_DEV_TAG=$(awk '
-    function newer(a, b,   x, y, i) {
-      split(a, x, "."); split(b, y, ".")
-      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 > y[i] + 0
-      return 0
-    }
-    {
-      s = $0
-      while (match(s, /"tag_name"[ \t]*:[ \t]*"[^"]*"/)) {
-        t = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-        sub(/^"tag_name"[ \t]*:[ \t]*"/, "", t); sub(/"$/, "", t)
-        if (t ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ && (best == "" || newer(t, best))) best = t
-      }
-    }
-    END { if (best != "") print best }' "$BOOTSTRAP_WORK/releases.json")
+  BOOTSTRAP_DEV_TAG=$(bootstrap_newest_tag "$BOOTSTRAP_WORK/releases.json")
   [ -n "$BOOTSTRAP_DEV_TAG" ] || {
     ui_fail "В списке релизов нет тега вида x.y.z для канала dev"
     return 1
@@ -974,19 +1051,38 @@ bootstrap_selfinstall() {
   BOOTSTRAP_DEV_TAG=
   bootstrap_manifest_url=$UPDATE_RELEASE_BASE/manifest.txt
   bootstrap_channel_note=
-  if [ "${INSTALL_CHANNEL:-stable}" = dev ]; then
-    case $UPDATE_RELEASE_BASE in
-      */releases/latest/download) ;;
-      *) echo "Для установки нужен источник вида .../releases/latest/download" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1 ;;
-    esac
-    bootstrap_resolve_dev || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
-    bootstrap_manifest_url=${UPDATE_RELEASE_BASE%/latest/download}/download/$BOOTSTRAP_DEV_TAG/manifest.txt
-    bootstrap_channel_note=" (dev)"
+  [ "${INSTALL_CHANNEL:-stable}" != dev ] || bootstrap_channel_note=" (dev)"
+  # Источник: если зеркала включены - сначала тихая попытка GitHub, затем
+  # зеркала; не вышло ни то, ни другое - прежний путь с GitHub (повторы,
+  # обход через mihomo, понятная ошибка и диагностика).
+  bootstrap_source=github-full
+  BOOTSTRAP_MIRROR_HOST=
+  bootstrap_mirror_list=$(bootstrap_mirrors)
+  if [ -n "$bootstrap_mirror_list" ]; then
+    if bootstrap_github_quiet; then bootstrap_source=github
+    elif bootstrap_from_mirrors "$bootstrap_mirror_list"; then bootstrap_source=mirror
+    else BOOTSTRAP_DEV_TAG=; fi
   fi
-  bootstrap_download_to "$bootstrap_manifest_url" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  if [ "$bootstrap_source" = github-full ]; then
+    if [ "${INSTALL_CHANNEL:-stable}" = dev ]; then
+      case $UPDATE_RELEASE_BASE in
+        */releases/latest/download) ;;
+        *) echo "Для установки нужен источник вида .../releases/latest/download" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1 ;;
+      esac
+      bootstrap_resolve_dev || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+      bootstrap_manifest_url=${UPDATE_RELEASE_BASE%/latest/download}/download/$BOOTSTRAP_DEV_TAG/manifest.txt
+    fi
+    bootstrap_download_to "$bootstrap_manifest_url" "$BOOTSTRAP_MANIFEST" 262144 || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  fi
   bootstrap_header || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
-  bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
-  ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)$bootstrap_channel_note"
+  if [ "$bootstrap_source" != mirror ]; then
+    bootstrap_pinned_base || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+  fi
+  if [ "$bootstrap_source" = mirror ]; then
+    ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)$bootstrap_channel_note - GitHub недоступен, загрузка через зеркало $BOOTSTRAP_MIRROR_HOST"
+  else
+    ui_ok "Манифест $(bootstrap_manifest_field "$BOOTSTRAP_MANIFEST" RELEASE_TAG)$bootstrap_channel_note"
+  fi
 
   mkdir -p "$DIR" || { echo "Не удалось создать $DIR" >&2; rm -rf "$BOOTSTRAP_WORK"; return 1; }
 
@@ -1485,7 +1581,7 @@ write_env() {
     # явный, чтобы удалённые из проекта настройки (например MAX_PING_MS)
     # по-прежнему вычищались переустановкой.
     for keep_key in SIZE DL_TIMEOUT MIN_RATIO MIN_FLOOR FIXED_MIN_SPEED STABILITY_WINDOW STABILITY_DROP_AFTER \
-        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS; do
+        HISTORY_KEEP_RUNS HISTORY_KEEP_DAYS STATS_NODE_CAP UPDATE_CHECK_HOURS UPDATE_MIRRORS; do
       sed -n "/^$keep_key=/p" "$dst" 2>/dev/null | tail -1
     done
     # Канал обновлений: выбранный при установке с нуля (INSTALL_CHANNEL из
