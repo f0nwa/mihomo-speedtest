@@ -80,11 +80,71 @@ FM_RATE_LIMIT = 600
 FM_RATE_WINDOW = 600
 
 
-# ----- состояние системы для футера (GET /api/system) -----
-# Раньше это делал stats_system.sh (sh + несколько awk/cat/pidof на каждый
-# опрос футера раз в 30 с); здесь - чтение трёх файлов /proc в уже
-# запущенном процессе.
+# ----- метаданные нод (GET /api/node-providers) -----
 
+def node_provider_labels(config_path=None, details=False):
+    """Read node names, providers and protocols without exposing URLs or keys."""
+    config_path = config_path or os.environ.get("CONFIG") or os.path.join(
+        os.environ.get("MIHOMO_DIR", "/opt/etc/mihomo"), "config.yaml"
+    )
+
+    def read_yaml(path):
+        try:
+            result = subprocess.run(
+                ["yq", "-o=json", ".", path], stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=5, check=True,
+            )
+            value = json.loads(result.stdout)
+            return value if isinstance(value, dict) else {}
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return {}
+
+    config = read_yaml(config_path)
+    labels = {}
+
+    protocol_names = {
+        "vless": "VLESS", "vmess": "VMess", "trojan": "Trojan",
+        "ss": "Shadowsocks", "ssr": "ShadowsocksR",
+        "hysteria": "Hysteria", "hysteria2": "Hysteria2",
+        "wireguard": "WireGuard", "tuic": "TUIC", "anytls": "AnyTLS",
+    }
+
+    def add(node, provider):
+        name = node.get("name")
+        if isinstance(name, str) and name:
+            raw_protocol = str(node.get("type") or "").strip().lower()
+            protocol = protocol_names.get(raw_protocol, raw_protocol.upper())
+            if raw_protocol == "wireguard" and node.get("amnezia-wg-option"):
+                protocol = "AmneziaWG"
+            protocol = protocol or "Протокол неизвестен"
+            label = {"provider": provider, "protocol": protocol} if details else provider + " · " + protocol
+            sources = labels.setdefault(name, [])
+            if label not in sources:
+                sources.append(label)
+
+    providers = config.get("proxy-providers") or {}
+    if not isinstance(providers, dict):
+        providers = {}
+    for provider, settings in providers.items():
+        # fast contains copies of winners; it is not their original provider.
+        if not isinstance(provider, str) or provider == "fast" or not isinstance(settings, dict):
+            continue
+        path = settings.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        if not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(config_path), path)
+        for node in read_yaml(path).get("proxies") or []:
+            if isinstance(node, dict):
+                add(node, provider)
+    for node in config.get("proxies") or []:
+        if isinstance(node, dict):
+            add(node, "Своя нода")
+    return labels
+
+
+# ----- состояние системы для футера (GET /api/system) -----
+# Чтение /proc в обработчике вместо запуска sh/awk на каждый опрос.
 def _read_text(path):
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -1131,6 +1191,16 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
 
             if rel == "api/log":
                 self._handle_live_log()
+                return
+
+            if rel == "api/node-providers":
+                if self.command not in ("GET", "HEAD"):
+                    self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
+                    return
+                sources = node_provider_labels(details=True)
+                labels = {name: [s["provider"] + " · " + s["protocol"] for s in items]
+                          for name, items in sources.items()}
+                self._send_json(200, {"providers": labels, "sources": sources})
                 return
 
             if rel == "api/system":

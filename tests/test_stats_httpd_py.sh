@@ -66,7 +66,7 @@ start_server() {
   # $1=docroot (данные) $2=порт $3=каталог приложения (скрипты и статика).
   # Печатает pid в stdout.
   dir=$1; port=$2; app=$3
-  STATS_APP_DIR=$app python3 "$SCRIPT" -f -p "127.0.0.1:$port" -h "$dir" >"$dir/../server.log" 2>&1 &
+  CONFIG=$TEST_ROOT/no-node-config.yaml STATS_APP_DIR=$app python3 "$SCRIPT" -f -p "127.0.0.1:$port" -h "$dir" >"$dir/../server.log" 2>&1 &
   echo $!
 }
 
@@ -225,6 +225,16 @@ code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PO
 [ "$code" = "405" ] || fail "POST /api/stats: ожидался 405, получено $code"
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/stats")
 [ "$code" = "401" ] || fail "/api/stats без сессии: ожидался 401, получено $code"
+
+# Метаданные нод используют ту же сессию; отсутствие конфига/yq не ломает API.
+OUT=$(curl -s -m 2 -w ' %{http_code}' "http://127.0.0.1:$PORT2/api/node-providers")
+[ "$OUT" = '{"providers": {}, "sources": {}} 200' ] || fail "/api/node-providers без конфига: [$OUT]"
+code=$(curl -s -I -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/node-providers")
+[ "$code" = "200" ] || fail "HEAD /api/node-providers: ожидался 200, получено $code"
+code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$PORT2/api/node-providers")
+[ "$code" = "405" ] || fail "POST /api/node-providers: ожидался 405, получено $code"
+code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/node-providers")
+[ "$code" = "401" ] || fail "/api/node-providers без сессии: ожидался 401, получено $code"
 
 echo "test_stats_httpd_py.sh: часть 3 (данные) OK" >&2
 

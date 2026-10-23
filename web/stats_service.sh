@@ -51,7 +51,7 @@ fi
 
 export MST_LIB_ONLY=1
 . "$SPEEDTEST_SCRIPT"
-export DIR MIHOMO_DIR ENV STATS_PROGRESS   # дочерний httpd и его
+export DIR MIHOMO_DIR CONFIG ENV STATS_PROGRESS   # дочерний httpd и его
                   # CGI (stats_cgi.sh/stats_run.sh) должны видеть тот же speedtest2.env
 export LIVE_LOG_DIR   # живой журнал: stats_httpd.py должен смотреть в тот же каталог, что и say()
 LOG_TAG=service     # метка строк службы в живом журнале (не экспортируется - дочерним прогонам своя)
