@@ -21,11 +21,61 @@ function providerLabel(name) {
   return Array.isArray(sources) && sources.length ? sources.join(' / ') : 'Провайдер неизвестен';
 }
 function nodeLabel(name) { return String(name || '') + ' · ' + providerLabel(name); }
+// Ноды из proxies: - провайдера в конфиге нет; ручное имя (пусто - по префиксу).
+var nodeEditable = {};
+var pendingScroll = null;
 function nodeCell(name) {
   var cell = el('td', 'node-cell');
   cell.appendChild(el('div', 'node-name', name));
-  cell.appendChild(el('small', 'node-provider', providerLabel(name)));
+  var line = el('div', 'node-provider-line');
+  fillProviderLine(line, name);
+  cell.appendChild(line);
   return cell;
+}
+function fillProviderLine(line, name) {
+  while (line.firstChild) { line.removeChild(line.firstChild); }
+  line.appendChild(el('small', 'node-provider', providerLabel(name)));
+  if (!Object.prototype.hasOwnProperty.call(nodeEditable, name)) { return; }
+  var edit = el('button', 'node-provider-edit', '✎');
+  edit.type = 'button';
+  edit.title = 'Задать провайдера';
+  edit.setAttribute('aria-label', 'Задать провайдера для ' + name);
+  edit.addEventListener('click', function () { editProviderLine(line, name); });
+  line.appendChild(edit);
+}
+function editProviderLine(line, name) {
+  while (line.firstChild) { line.removeChild(line.firstChild); }
+  var form = el('form', 'node-provider-form');
+  var input = el('input');
+  input.type = 'text';
+  input.maxLength = 60;
+  input.value = nodeEditable[name] || '';
+  input.placeholder = 'пусто - по имени ноды';
+  input.setAttribute('aria-label', 'Провайдер ноды ' + name);
+  var save = el('button', 'theme-btn', 'Сохранить'); save.type = 'submit';
+  var cancel = el('button', 'theme-btn', 'Отмена'); cancel.type = 'button';
+  var err = el('small', 'node-provider-error');
+  form.appendChild(input); form.appendChild(save); form.appendChild(cancel); form.appendChild(err);
+  line.appendChild(form);
+  input.focus();
+  cancel.addEventListener('click', function () { fillProviderLine(line, name); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Escape') { fillProviderLine(line, name); } });
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    save.disabled = true; err.textContent = '';
+    fetchJson('/api/node-providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, provider: input.value })
+    }).then(function () {
+      // Перерисовка целиком: фильтры, сводка и подписи берут новое имя.
+      pendingScroll = window.scrollY;
+      renderStats();
+    })['catch'](function (error) {
+      save.disabled = false;
+      err.textContent = 'Не сохранено: ' + (error && error.message ? error.message : String(error));
+    });
+  });
 }
 
 function sourcesForNode(name) {
@@ -799,6 +849,7 @@ export function renderStats() {
     var data = responses[0];
     nodeProviders = responses[1].providers || {};
     nodeSources = responses[1].sources || {};
+    nodeEditable = responses[1].editable || {};
     clearApp();
 
     // {} - stats.json ещё нет - трактуем как "прогонов ещё не было", а не
@@ -843,6 +894,7 @@ export function renderStats() {
     }
     mainRow.appendChild(stabilityCard);
     mainRow.appendChild(chartCard);
+    if (pendingScroll !== null) { window.scrollTo(0, pendingScroll); pendingScroll = null; }
   })['catch'](function (err) {
     if (!alive()) { return; }
     if (err.message === 'not_implemented') {

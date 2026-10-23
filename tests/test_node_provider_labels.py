@@ -26,11 +26,14 @@ def write(path, text):
 class NodeProviderLabelsTest(unittest.TestCase):
     def setUp(self):
         stats_httpd._YAML_CACHE.clear()
+        self._dir = patch.dict('os.environ', {'DIR': '/nonexistent-mst'})
+        self._dir.start()
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.config = self.root / 'config' / 'config.yaml'
 
     def tearDown(self):
+        self._dir.stop()
         self.tmp.cleanup()
 
     def test_sources_collisions_static_nodes_and_missing_cache(self):
@@ -43,7 +46,7 @@ proxy-providers:
   Missing cache: {{path: cache/missing.yaml}}
   fast: {{path: fast.yaml}}
 proxies:
-  - {{name: awg-pl, type: wireguard, private-key: private-key, amnezia-wg-option: {{jc: 4}}}}
+  - {{name: awg_pl, type: wireguard, private-key: private-key, amnezia-wg-option: {{jc: 4}}}}
   - {{name: hy2-de, type: hysteria2}}
 """)
         write(self.root / 'config' / 'cache' / 'a.yaml',
@@ -57,8 +60,8 @@ proxies:
             'shared': ['Provider A · VLESS', 'Provider B · Trojan'],
             '🇫🇮 Finland': ['Provider A · VMess'],
             '🇩🇪 Germany': ['Provider B · VLESS'],
-            'awg-pl': ['Своя нода · AmneziaWG'],
-            'hy2-de': ['Своя нода · Hysteria2'],
+            'awg_pl': ['awg · AmneziaWG'],
+            'hy2-de': ['Без провайдера · Hysteria2'],
         })
         self.assertNotIn('private-', json.dumps(result))
         self.assertEqual(details['shared'], [{'provider': 'Provider A', 'protocol': 'VLESS'},
@@ -89,11 +92,40 @@ proxies:
         })
         self.assertNotIn('secret', json.dumps(result))
 
+    def test_static_node_provider_from_name_prefix(self):
+        f = stats_httpd.static_node_provider
+        self.assertEqual(f('Blanc_PL_WAW_1'), 'Blanc')
+        self.assertEqual(f('🇩🇪 Hysteria2'), 'Без провайдера')
+        self.assertEqual(f('_leading'), 'Без провайдера')
+        self.assertEqual(f(None), 'Без провайдера')
+
+    def test_manual_provider_overrides_prefix(self):
+        write(self.config, "proxies:\n  - {name: Blanc_PL_1, type: wireguard}\n  - {name: solo, type: vless}\n")
+        store = str(self.root / 'node_providers.json')
+        stats_httpd.save_node_provider_override('solo', 'My VPN', store)
+        stats_httpd.save_node_provider_override('Blanc_PL_1', 'Blanc Ltd', store)
+        static = []
+        overrides = stats_httpd.load_node_provider_overrides(store)
+        result = stats_httpd.node_provider_labels(str(self.config), overrides=overrides, static_names=static)
+        self.assertEqual(result, {'Blanc_PL_1': ['Blanc Ltd · WireGuard'], 'solo': ['My VPN · VLESS']})
+        self.assertEqual(static, ['Blanc_PL_1', 'solo'])
+        stats_httpd.save_node_provider_override('Blanc_PL_1', '', store)
+        overrides = stats_httpd.load_node_provider_overrides(store)
+        self.assertEqual(overrides, {'solo': 'My VPN'})
+        self.assertEqual(stats_httpd.node_provider_labels(str(self.config), overrides=overrides)['Blanc_PL_1'],
+                         ['Blanc · WireGuard'])
+
+    def test_broken_override_file_is_ignored(self):
+        store = self.root / 'node_providers.json'
+        for text in ['not json', '[]', '{"a": 1, "b": ""}']:
+            store.write_text(text, encoding='utf-8')
+            self.assertEqual(stats_httpd.load_node_provider_overrides(str(store)), {})
+
     def test_changed_file_is_reread(self):
         write(self.config, "proxies:\n  - {name: n1, type: vless}\n")
-        self.assertEqual(stats_httpd.node_provider_labels(str(self.config)), {'n1': ['Своя нода · VLESS']})
+        self.assertEqual(stats_httpd.node_provider_labels(str(self.config)), {'n1': ['Без провайдера · VLESS']})
         write(self.config, "proxies:\n  - {name: n1, type: trojan, extra: changed}\n")
-        self.assertEqual(stats_httpd.node_provider_labels(str(self.config)), {'n1': ['Своя нода · Trojan']})
+        self.assertEqual(stats_httpd.node_provider_labels(str(self.config)), {'n1': ['Без провайдера · Trojan']})
 
     def test_invalid_documents_do_not_break_statistics(self):
         for document in ['not: [valid', '[]', '', 'proxy-providers: [invalid]', '!!python/object:os.system x']:

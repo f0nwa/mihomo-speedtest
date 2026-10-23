@@ -59,6 +59,7 @@ import signal
 import socketserver
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from http.cookies import SimpleCookie
@@ -84,6 +85,7 @@ FM_RATE_WINDOW = 600
 # Разобранные YAML по пути: (mtime_ns, size) -> dict. Конфиг и кеши подписок
 # меняются редко, поэтому вкладка «Статистика» не разбирает их на каждый запрос.
 _YAML_CACHE = {}
+_NODE_PROVIDER_LOCK = threading.Lock()
 
 _SHARE_LINK_TYPES = {"hy2": "hysteria2", "wg": "wireguard"}
 
@@ -140,7 +142,50 @@ def share_link_nodes(text):
     return nodes
 
 
-def node_provider_labels(config_path=None, details=False):
+NODE_PROVIDER_MAX = 60
+
+
+def node_provider_overrides_path():
+    return os.path.join(os.environ.get("DIR", "/opt/etc/mihomo-speedtest"), "node_providers.json")
+
+
+def load_node_provider_overrides(path=None):
+    """Заданные вручную провайдеры нод из proxies: {имя ноды: провайдер}."""
+    try:
+        with open(path or node_provider_overrides_path(), encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str) and v}
+
+
+def save_node_provider_override(name, provider, path=None):
+    """Пустой provider снимает ручное имя. Запись - временный файл + os.replace."""
+    path = path or node_provider_overrides_path()
+    overrides = load_node_provider_overrides(path)
+    if provider:
+        overrides[name] = provider
+    else:
+        overrides.pop(name, None)
+    data = json.dumps(overrides, ensure_ascii=False, indent=1, sort_keys=True).encode("utf-8") + b"\n"
+    _write_file(path, data)
+
+
+def static_node_provider(name):
+    """Провайдер ноды из proxies: - в конфиге его нет, угадываем по имени.
+
+    Blanc_PL_WAW_1 -> Blanc (часть до первого "_"); без "_" - «Без провайдера».
+    """
+    if isinstance(name, str):
+        prefix = name.split("_", 1)[0].strip()
+        if "_" in name and prefix:
+            return prefix
+    return "Без провайдера"
+
+
+def node_provider_labels(config_path=None, details=False, overrides=None, static_names=None):
     """Read node names, providers and protocols without exposing URLs or keys."""
     config_path = config_path or os.environ.get("CONFIG") or os.path.join(
         os.environ.get("MIHOMO_DIR", "/opt/etc/mihomo"), "config.yaml"
@@ -212,9 +257,14 @@ def node_provider_labels(config_path=None, details=False):
         for node in read_yaml(path).get("proxies") or []:
             if isinstance(node, dict):
                 add(node, provider)
+    if overrides is None:
+        overrides = load_node_provider_overrides()
     for node in config.get("proxies") or []:
         if isinstance(node, dict):
-            add(node, "Своя нода")
+            name = node.get("name")
+            add(node, overrides.get(name) or static_node_provider(name))
+            if static_names is not None and isinstance(name, str) and name:
+                static_names.append(name)
     return labels
 
 
@@ -1269,13 +1319,41 @@ def make_handler(docroot, state_dir=None, runtime_dir=None, app_dir=None):
                 return
 
             if rel == "api/node-providers":
-                if self.command not in ("GET", "HEAD"):
-                    self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD"),))
+                if self.command == "POST":
+                    # Ручное имя провайдера для ноды из proxies: (там его нет).
+                    body = self._read_json()
+                    if body is None:
+                        return
+                    name = body.get("name")
+                    provider = body.get("provider")
+                    if not isinstance(name, str) or not name or not isinstance(provider, str):
+                        self._send_json(400, {"error": "invalid_request"})
+                        return
+                    provider = " ".join(provider.split())
+                    if len(provider) > NODE_PROVIDER_MAX:
+                        self._send_json(400, {"error": "provider_too_long"})
+                        return
+                    static = []
+                    node_provider_labels(details=True, static_names=static)
+                    if name not in static:
+                        self._send_json(404, {"error": "node_not_in_proxies"})
+                        return
+                    try:
+                        with _NODE_PROVIDER_LOCK:
+                            save_node_provider_override(name, provider)
+                    except OSError:
+                        self._send_json(500, {"error": "write_failed"})
+                        return
+                elif self.command not in ("GET", "HEAD"):
+                    self._send_json_with_headers(405, {"error": "method_not_allowed"}, (("Allow", "GET, HEAD, POST"),))
                     return
-                sources = node_provider_labels(details=True)
+                static = []
+                sources = node_provider_labels(details=True, static_names=static)
                 labels = {name: [s["provider"] + " · " + s["protocol"] for s in items]
                           for name, items in sources.items()}
-                self._send_json(200, {"providers": labels, "sources": sources})
+                manual = load_node_provider_overrides()
+                self._send_json(200, {"providers": labels, "sources": sources,
+                                      "editable": {n: manual.get(n, "") for n in static}})
                 return
 
             if rel == "api/system":
