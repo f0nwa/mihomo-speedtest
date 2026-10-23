@@ -85,6 +85,61 @@ FM_RATE_WINDOW = 600
 # меняются редко, поэтому вкладка «Статистика» не разбирает их на каждый запрос.
 _YAML_CACHE = {}
 
+_SHARE_LINK_TYPES = {"hy2": "hysteria2", "wg": "wireguard"}
+
+
+def share_link_nodes(text):
+    """Имена и типы нод из списка ссылок scheme://...#имя (возможно, в base64).
+
+    Возвращает только {"name", "type"}: адреса и ключи из ссылок не выходят
+    за пределы функции. Имена - как у speedtest (sub_convert.awk): фрагмент
+    после # с раскодированием %XX и "+", для vless без имени - vless-хост-порт.
+    """
+    import base64
+    import re
+
+    body = text.strip()
+    if "://" not in body:
+        compact = "".join(body.split())
+        compact += "=" * (-len(compact) % 4)
+        decoded = None
+        for decode in (base64.b64decode, base64.urlsafe_b64decode):
+            try:
+                decoded = decode(compact).decode("utf-8", errors="replace")
+                break
+            except ValueError:
+                continue
+        if decoded is None:
+            return []
+        body = decoded
+    nodes = []
+    for line in body.splitlines():
+        line = line.strip()
+        m = re.match(r"([A-Za-z][A-Za-z0-9+.-]*)://", line)
+        if not m:
+            continue
+        scheme = m.group(1).lower()
+        rest = line[m.end():]
+        name = ""
+        if scheme == "vmess" and "#" not in rest:
+            try:
+                raw = rest + "=" * (-len(rest) % 4)
+                info = json.loads(base64.b64decode(raw).decode("utf-8", errors="replace"))
+                name = str(info.get("ps") or "") if isinstance(info, dict) else ""
+            except ValueError:
+                name = ""
+        elif "#" in rest:
+            name = urllib.parse.unquote_plus(rest.split("#", 1)[1])
+        elif scheme == "vless":
+            hostport = rest.split("?", 1)[0].split("/", 1)[0].rsplit("@", 1)[-1]
+            host, _, port = hostport.rpartition(":")
+            if host and port:
+                name = "vless-" + host.strip("[]") + "-" + port
+        if name:
+            nodes.append({"name": name, "type": _SHARE_LINK_TYPES.get(scheme, scheme)})
+    return nodes
+
+
 def node_provider_labels(config_path=None, details=False):
     """Read node names, providers and protocols without exposing URLs or keys."""
     config_path = config_path or os.environ.get("CONFIG") or os.path.join(
@@ -104,11 +159,18 @@ def node_provider_labels(config_path=None, details=False):
             cached = _YAML_CACHE.get(path)
             if cached and cached[0] == key:
                 return cached[1]
-            with open(path, encoding="utf-8") as f:
-                value = yaml.load(f, Loader=loader)
-        except (OSError, ValueError, yaml.YAMLError):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
             return {}
-        value = value if isinstance(value, dict) else {}
+        try:
+            value = yaml.load(text, Loader=loader)
+        except (ValueError, yaml.YAMLError):
+            value = None
+        if not isinstance(value, dict):
+            # Кеш подписки бывает не YAML, а списком ссылок vless://...#имя
+            # (как есть или в base64) - так mihomo сохраняет такие подписки.
+            value = {"proxies": share_link_nodes(text)}
         _YAML_CACHE[path] = (key, value)
         return value
 

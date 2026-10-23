@@ -65,6 +65,30 @@ proxies:
                                              {'provider': 'Provider B', 'protocol': 'Trojan'}])
         self.assertNotIn('private-', json.dumps(details))
 
+    def test_share_link_subscriptions(self):
+        import base64
+        links = "\n".join([
+            "vless://secret-uuid@de.example.com:443?security=reality&pbk=secret-key#%F0%9F%87%A9%F0%9F%87%AA+Germany",
+            "vless://secret-uuid@1.2.3.4:8443?security=tls",
+            "trojan://secret-pass@nl.example.com:443#NL%201",
+            "vmess://" + base64.b64encode(json.dumps({"ps": "VM node", "add": "x", "id": "secret-uuid"}).encode()).decode(),
+            "hy2://secret-pass@fi.example.com:443#FI",
+            "garbage line",
+        ])
+        write(self.config, "proxy-providers:\n  B64: {path: b64.txt}\n  Raw: {path: raw.txt}\n")
+        write(self.root / 'config' / 'b64.txt', base64.b64encode(links.encode()).decode() + "\n")
+        write(self.root / 'config' / 'raw.txt', "vless://secret-uuid@pl.example.com:443#PL\n")
+        result = stats_httpd.node_provider_labels(str(self.config))
+        self.assertEqual(result, {
+            '🇩🇪 Germany': ['B64 · VLESS'],
+            'vless-1.2.3.4-8443': ['B64 · VLESS'],
+            'NL 1': ['B64 · Trojan'],
+            'VM node': ['B64 · VMess'],
+            'FI': ['B64 · Hysteria2'],
+            'PL': ['Raw · VLESS'],
+        })
+        self.assertNotIn('secret', json.dumps(result))
+
     def test_changed_file_is_reread(self):
         write(self.config, "proxies:\n  - {name: n1, type: vless}\n")
         self.assertEqual(stats_httpd.node_provider_labels(str(self.config)), {'n1': ['Своя нода · VLESS']})
