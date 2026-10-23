@@ -55,6 +55,23 @@ case "$*" in
 esac
 EOF2
 chmod +x "$TMP/bin/gh" "$TMP/bin/curl" "$TMP/bin/git"
+# publish_dist.sh: аргументы -> $DIST_ARGS, текст --notes-file -> $DIST_NOTES,
+# список файлов --assets -> $DIST_FILES; $DIST_FAIL=1 - ошибка.
+cat > "$TMP/publish_dist.sh" <<'EOF2'
+#!/bin/sh
+printf '%s\n' "$*" > "$DIST_ARGS"
+while [ $# -gt 0 ]; do
+  case $1 in
+    --assets) ls "$2" > "$DIST_FILES"; shift 2 ;;
+    --notes-file) cat "$2" > "$DIST_NOTES"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ "${DIST_FAIL:-0}" != 1 ]
+EOF2
+PUBLISH_DIST_SCRIPT=$TMP/publish_dist.sh
+DIST_ARGS=$TMP/dist.args DIST_NOTES=$TMP/dist.notes DIST_FILES=$TMP/dist.files
+export PUBLISH_DIST_SCRIPT DIST_ARGS DIST_NOTES DIST_FILES
 mkdir -p "$TMP/manifests"
 GH_CREATE_ARGS=$TMP/create.args
 GH_TAGS=$TMP/tags.txt
@@ -175,6 +192,24 @@ run --channel stable >/dev/null 2>&1 || fail "stable публикация зав
 args=$(cat "$GH_CREATE_ARGS")
 case "$args" in *--prerelease*) fail "stable не должен быть --prerelease" ;; esac
 assert_contains "--target $GIT_HEAD" "$args" stable-create
+
+# После релиза файлы и текст уходят в зеркало (ветка dist).
+assert_contains "1.0.1 --assets" "$(cat "$DIST_ARGS")" dist-args
+assert_contains "--channel stable" "$(cat "$DIST_ARGS")" dist-args
+[ "$(cat "$DIST_NOTES")" = notes ] || fail "в зеркало ушёл не тот текст релиза: $(cat "$DIST_NOTES")"
+grep -qx manifest.txt "$DIST_FILES" || fail "в зеркало не передан manifest.txt"
+grep -qx SHA256SUMS "$DIST_FILES" || fail "в зеркало не передан SHA256SUMS"
+grep -qx install.sh "$DIST_FILES" || fail "в зеркало не передан install.sh"
+
+# --no-dist: зеркало не трогается.
+rm -f "$DIST_ARGS"
+run --channel dev --no-dist >/dev/null 2>"$TMP/err" || fail "--no-dist завершился с ошибкой"
+[ ! -f "$DIST_ARGS" ] || fail "--no-dist вызвал publish_dist.sh"
+grep -q 'publish_dist.sh 1.1.2' "$TMP/err" || fail "нет подсказки про publish_dist.sh: $(cat "$TMP/err")"
+
+# Сбой зеркала - ненулевой код и команда повтора.
+if DIST_FAIL=1 run --channel dev >/dev/null 2>"$TMP/err"; then fail "сбой зеркала должен давать ненулевой код"; fi
+grep -q 'зеркало jsDelivr (ветка dist) не обновлено' "$TMP/err" || fail "нет сообщения о сбое зеркала: $(cat "$TMP/err")"
 
 # HEAD не запушен -> отказ до публикации.
 rm -f "$GH_CREATE_ARGS"

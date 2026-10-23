@@ -32,6 +32,11 @@
 # Публикация (без --dry-run) требует, чтобы HEAD был запушен (совпадал с
 # upstream ветки), и создаёт тег именно на нём (gh release create --target).
 #
+# После gh release create те же файлы (+ текст --notes) выкладываются в
+# ветку dist - зеркало для jsDelivr на случай, когда GitHub с роутера
+# недоступен (release/publish_dist.sh). --no-dist пропускает этот шаг;
+# выложить релиз в зеркало позже: sh release/publish_dist.sh <тег>.
+#
 # --dry-run печатает CHANNEL/TAG/RELEASE_VERSION/MIN_UPDATER_VERSION/
 # CONFIG_SCHEMA_VERSION/CONFIG_SCHEMA_BUMPED/PRERELEASE и выходит, ничего не собирая. Ему всё
 # равно нужны gh и сеть до github.com (список тегов, манифесты), если тег
@@ -44,7 +49,7 @@ cd "$ROOT"
 REPO=${RELEASE_REPO:-f0nwa/mihomo-speedtest}
 
 usage() {
-  echo "Использование: $0 \"<текст --notes>\" [--channel stable|dev] [--promote] [--major] [--tag TAG] [--release-version N] [--min-updater N] [--config-schema N] [--dry-run]" >&2
+  echo "Использование: $0 \"<текст --notes>\" [--channel stable|dev] [--promote] [--major] [--tag TAG] [--release-version N] [--min-updater N] [--config-schema N] [--no-dist] [--dry-run]" >&2
   exit 2
 }
 
@@ -60,6 +65,7 @@ CHANNEL=""
 PROMOTE=""
 MAJOR=""
 DRY_RUN=0
+NO_DIST=0
 CONFIG_SCHEMA_BUMPED=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -75,6 +81,7 @@ while [ $# -gt 0 ]; do
     --promote) PROMOTE=--promote; shift ;;
     --major) MAJOR=--major; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --no-dist) NO_DIST=1; shift ;;
     *) echo "Неизвестный аргумент: $1" >&2; usage ;;
   esac
 done
@@ -297,3 +304,14 @@ echo "cut_release.sh: Публикую $TAG в $REPO..." >&2
 )
 
 echo "cut_release.sh: Готово. Проверка: curl -s https://github.com/$REPO/releases/download/$TAG/manifest.txt | head -6" >&2
+
+if [ "$NO_DIST" = 1 ]; then
+  echo "cut_release.sh: Зеркало jsDelivr пропущено (--no-dist); выложить позже: sh release/publish_dist.sh $TAG" >&2
+  exit 0
+fi
+printf '%s\n' "$NOTES" > "$WORK/notes.txt"
+# PUBLISH_DIST_SCRIPT - только для тестов.
+sh "${PUBLISH_DIST_SCRIPT:-$ROOT/release/publish_dist.sh}" "$TAG" --assets "$ASSETS" --notes-file "$WORK/notes.txt" --channel "$CHANNEL" || {
+  echo "cut_release.sh: Релиз $TAG на GitHub опубликован, но зеркало jsDelivr (ветка dist) не обновлено - повторите: sh release/publish_dist.sh $TAG" >&2
+  exit 1
+}
