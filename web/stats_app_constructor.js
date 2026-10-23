@@ -410,7 +410,7 @@ export function renderConstructor(modeBar, opts) {
       bodyBox.appendChild(results);
       var picked = {};   // имя@вид -> запись каталога
       var catalog = null;
-      var nameIn = null, routeSel = null;
+      var nameIn = null, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
       if (!target) {
         var cols = el('div', 'cx-cols');
         var c1 = el('div'), c2 = el('div');
@@ -426,6 +426,19 @@ export function renderConstructor(modeBar, opts) {
         c2.appendChild(routeSel);
         cols.appendChild(c1); cols.appendChild(c2);
         bodyBox.appendChild(cols);
+        iconBox = el('div', 'cx-icon-picker'); iconBox.hidden = true;
+        iconBox.appendChild(el('label', null, 'URL иконки'));
+        var iconRow = el('div', 'cx-icon-row');
+        iconIn = el('input'); iconIn.type = 'url'; iconIn.placeholder = 'https://example.org/icon.svg';
+        iconIn.setAttribute('aria-label', 'URL иконки');
+        var noIcon = button('Без иконки', 'secondary');
+        iconRow.appendChild(iconIn); iconRow.appendChild(noIcon);
+        iconBox.appendChild(iconRow);
+        iconPreview = el('div', 'cx-icon-preview'); iconBox.appendChild(iconPreview);
+        bodyBox.appendChild(iconBox);
+        iconIn.addEventListener('input', function () { clear(iconPreview); });
+        iconIn.addEventListener('change', showIconPreview);
+        noIcon.addEventListener('click', function () { iconIn.value = ''; showIconPreview(); });
       }
       var preview = el('div', 'geo-summary');
       var err = el('p', 'xk-err');
@@ -445,9 +458,31 @@ export function renderConstructor(modeBar, opts) {
       d.addEventListener('cancel', function (e) { e.preventDefault(); close(); });
 
       function keys() { return Object.keys(picked); }
+      function showIconPreview() {
+        if (!iconPreview) { return; }
+        clear(iconPreview);
+        var url = iconIn.value.trim();
+        if (!url || iconBox.hidden) { return; }
+        if (!/^https?:\/\/[^\s"'#]+$/.test(url)) {
+          iconPreview.appendChild(el('span', 'hint', 'Укажите прямой URL без пробелов, кавычек и #.'));
+          return;
+        }
+        var img = el('img'); img.alt = 'Предпросмотр иконки';
+        img.addEventListener('error', function () {
+          if (img.parentNode !== iconPreview) { return; }
+          clear(iconPreview);
+          iconPreview.appendChild(el('span', 'hint', 'Не удалось загрузить предпросмотр. URL всё ещё можно сохранить.'));
+        });
+        iconPreview.appendChild(img);
+        img.src = url;
+      }
       function updatePreview() {
         clear(preview);
         var ks = keys();
+        if (iconBox) {
+          var showIcon = ks.length > 0 && !model.findByName(nameIn.value.trim());
+          if (iconBox.hidden !== !showIcon) { iconBox.hidden = !showIcon; showIconPreview(); }
+        }
         // без набора - пустая группа, домены вписываются вручную
         ok.disabled = target ? !ks.length : !ks.length && !nameIn.value.trim();
         if (!ks.length && target) { preview.appendChild(el('span', 'hint', 'Отметьте хотя бы один набор.')); return; }
@@ -524,7 +559,10 @@ export function renderConstructor(modeBar, opts) {
             // имя занято существующей группой - подключить наборы к ней
             var existing = model.findByName(nameIn.value.trim());
             if (existing) { id = existing; note = 'Группа ' + nameIn.value.trim() + ' уже есть - наборы подключены к ней.'; }
-            else { id = model.addService(nameIn.value.trim(), 'other', routeSel.value); created = true; }
+            else {
+              id = model.addService(nameIn.value.trim(), 'other', routeSel.value); created = true;
+              if (keys().length && iconIn.value.trim()) { model.setServiceIcon(id, iconIn.value.trim()); }
+            }
           }
           // сначала проверить все отмеченные наборы, потом добавлять - без «половины»
           keys().forEach(function (k) { var e = picked[k]; model.checkSource(id, e.name, e.kind, e.url); });

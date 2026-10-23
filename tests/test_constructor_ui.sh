@@ -51,6 +51,10 @@ grep -q '^PROJECT_TOOLS=.*rule-catalog.tsv' "$ROOT/install.sh" || fail "PROJECT_
 grep -q 'перехват' "$UI" || fail "нет предупреждения о перехвате трафика встроенного сервиса"
 grep -q 'findByName' "$UI" || fail "имя существующей группы - подключение к ней, а не ошибка"
 grep -q 'checkSource' "$UI" || fail "наборы проверяются до добавления"
+grep -q 'URL иконки' "$UI" || fail "нет поля ручного URL иконки"
+grep -q 'model.setServiceIcon(id' "$UI" || fail "иконка не сохраняется при создании сервиса"
+grep -q 'ks.length > 0' "$UI" || fail "поле иконки показывается до выбора набора правил"
+grep -q 'iconBox.hidden' "$UI" || fail "поле иконки не скрывается"
 
 # Блоки порции 5: подписки, прокси, исключения нод, базовые группы
 MOD="$ROOT/web/stats_app_constructor_modules.js"

@@ -33,6 +33,30 @@ let m = M.createModel(D, S0, 'RULE-SET,my@domain,DIRECT\n');
 eq(m.serialize(), { services: S0, user_rules: 'RULE-SET,my@domain,DIRECT\n' }, 'roundtrip');
 eq(m.summary(m.serialize()), [], 'нет изменений - пустая сводка');
 
+// Иконка своего сервиса: добавить, заменить, удалить; остальные строки сохранить.
+m.setServiceIcon('nl', 'https://cdn.example/new.svg');
+eq(m.serialize().services.includes('icon' + T + 'nl' + T + 'https://cdn.example/new.svg\n'), true, 'замена иконки');
+eq(m.serialize().services.includes('icon' + T + 'nl' + T + 'https://i/n.png'), false, 'старая иконка убрана');
+eq(m.serialize().services.includes('gkey' + T + 'nl' + T + 'filter: (?i)NL\n'), true, 'ключ группы сохранён');
+m.setServiceIcon('nl', '');
+eq(m.serialize().services.includes('icon' + T + 'nl' + T), false, 'иконка удалена');
+const iconId = m.addService('Иконка', 'other');
+m.setServiceIcon(iconId, 'http://example.org/icon.png');
+eq(m.serialize().services.includes('icon' + T + iconId + T + 'http://example.org/icon.png\n'), true, 'добавление иконки');
+for (const bad of ['ftp://example.org/icon.svg', 'https://example.org/a b.svg', 'https://example.org/a#b.svg', "https://example.org/a'b.svg", 'https://example.org/a"b.svg', 'https://example.org/a\tb.svg']) {
+  const before = m.serialize();
+  let failedAsExpected = false;
+  try { m.setServiceIcon(iconId, bad); } catch (e) { failedAsExpected = true; }
+  eq(failedAsExpected, true, 'ошибка для недопустимого URL: ' + bad);
+  eq(m.serialize(), before, 'недопустимый URL не меняет состояние: ' + bad);
+}
+for (const badId of ['youtube', 'missing']) {
+  let failedAsExpected = false;
+  try { m.setServiceIcon(badId, 'https://example.org/icon.svg'); } catch (e) { failedAsExpected = true; }
+  eq(failedAsExpected, true, 'иконка запрещена для ' + badId);
+}
+m = M.createModel(D, S0, 'RULE-SET,my@domain,DIRECT\n');
+
 // test_services_list
 const list = m.services();
 eq(list.map(s => [s.id, s.name, s.section, s.user, s.deleted]),

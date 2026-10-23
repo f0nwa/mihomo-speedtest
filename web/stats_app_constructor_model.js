@@ -370,6 +370,17 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       users.push({ id: id, name: name, section: section, extra: route ? [routeLine(id, route)] : [] });
       return id;
     },
+    setServiceIcon: function (id, url) {
+      var u = findUser(id);
+      if (!u) { throw new Error('Иконку можно задать только своему сервису'); }
+      url = String(url || '');
+      if (url && !/^https?:\/\/[^\s"'#]+$/.test(url)) {
+        throw new Error('Адрес иконки должен начинаться с http(s):// и не содержать пробелов, кавычек и #');
+      }
+      var at = u.extra.findIndex(function (line) { return line.split(TAB)[0] === 'icon'; });
+      if (at >= 0) { u.extra.splice(at, 1); }
+      if (url) { u.extra.splice(at < 0 ? 0 : at, 0, ['icon', id, url].join(TAB)); }
+    },
     removeUserService: function (id) {
       users = users.filter(function (u) { return u.id !== id; });
       doms = doms.filter(function (x) { return x.owner !== id; });

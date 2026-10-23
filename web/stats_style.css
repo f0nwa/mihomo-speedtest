@@ -464,6 +464,11 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-chip.on{border-color:var(--accent);color:var(--accent)}
 .cx-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .cx-cols input,.cx-cols select{width:100%;box-sizing:border-box}
+.cx-icon-picker{display:flex;flex-direction:column;gap:5px}
+.cx-icon-picker[hidden]{display:none}
+.cx-icon-row{display:flex;gap:8px;align-items:center}
+.cx-icon-row input{min-width:0;flex:1;box-sizing:border-box}
+.cx-icon-preview img{display:block;width:36px;height:36px;object-fit:contain}
 .cx-desc{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cx-add{color:var(--accent);font-size:12.5px}
 @media (max-width:520px){.cx-cols{grid-template-columns:1fr}}
