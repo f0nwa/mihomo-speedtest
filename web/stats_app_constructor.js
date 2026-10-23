@@ -421,7 +421,7 @@ export function renderConstructor(modeBar, opts) {
       var catalog = null;
       var closed = false, iconRequested = false, iconEntries = null, iconError = '';
       var selectedIconUrl = '', iconRenderKey = '', iconButtons = [];
-      var nameIn = null, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
+      var nameIn = null, nameEdited = false, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
       var iconSearch = null, iconOptions = null;
       if (!target) {
         var cols = el('div', 'cx-cols');
@@ -478,6 +478,11 @@ export function renderConstructor(modeBar, opts) {
       d.addEventListener('cancel', function (e) { e.preventDefault(); close(); });
 
       function keys() { return Object.keys(picked); }
+      function updateSuggestedName() {
+        if (!nameIn || nameEdited) { return; }
+        var first = keys()[0];
+        nameIn.value = first ? suggestName(picked[first].title) : '';
+      }
       function suggestedIcons() {
         var queries = [], seenQueries = {};
         function addQuery(value) {
@@ -640,7 +645,7 @@ export function renderConstructor(modeBar, opts) {
             cb.addEventListener('change', function () {
               if (cb.checked) { picked[k] = e; } else { delete picked[k]; }
               lab.className = 'geo-country' + (cb.checked ? ' on' : '');
-              if (nameIn && cb.checked && !nameIn.value.trim()) { nameIn.value = suggestName(g.title); }
+              updateSuggestedName();
               updatePreview();
             });
             lab.appendChild(cb);
@@ -651,7 +656,10 @@ export function renderConstructor(modeBar, opts) {
           });
         });
       }
-      if (nameIn) { nameIn.addEventListener('input', updatePreview); routeSel.addEventListener('change', updatePreview); }
+      if (nameIn) {
+        nameIn.addEventListener('input', function () { nameEdited = true; updatePreview(); });
+        routeSel.addEventListener('change', updatePreview);
+      }
       updatePreview();
       results.appendChild(el('p', 'hint', 'Загружаю базу...'));
       loadCatalog().then(function (cat) {
