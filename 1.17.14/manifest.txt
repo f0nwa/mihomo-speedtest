@@ -1,0 +1,86 @@
+FORMAT_VERSION=2
+RELEASE_TAG=1.17.14
+RELEASE_VERSION=81
+MIN_UPDATER_VERSION=4
+CONFIG_SCHEMA_VERSION=13
+COMPONENT|updater|Обновлятор
+COMPONENT|speedtest-runtime|Ядро спидтеста
+COMPONENT|web|Веб-интерфейс статистики
+COMPONENT|installer|Установщик
+COMPONENT|config-tools|Инструменты настройки конфига
+NOTE|updater|Обновление инструмента без перезапуска служб
+NOTE|speedtest-runtime|Новые файлы используются при следующем прогоне; перезапуск Mihomo не требуется
+NOTE|web|Один перезапуск веб-службы; интерфейс временно недоступен
+NOTE|installer|Инструменты для следующей установки или удаления; не запускаются автоматически
+NOTE|config-tools|Новый шаблон и инструменты; рабочий config.yaml не изменяется
+DEPENDS|web|speedtest-runtime
+DEPENDS|config-tools|installer
+FILE|updater|update_transaction.sh|/opt/etc/mihomo-speedtest/update_transaction.sh|38328|4e60d9f40be6041f38c2d1fc4f49da79cfdf7b5185257c99c227f727b8bf062d|0755|sh
+FILE|updater|update_prepare.sh|/opt/etc/mihomo-speedtest/update_prepare.sh|29176|fc5ac2cec8be7d093c2aa9a9086e484af388452394db8df19bdd87930a089760|0755|sh
+FILE|updater|update.sh|/opt/etc/mihomo-speedtest/update.sh|47794|305c6cee057efe7db3863381320594dc8143af525b6408e285d6a4606ca796ef|0755|sh
+FILE|updater|update_plan.awk|/opt/etc/mihomo-speedtest/update_plan.awk|22055|81ab9c1d43c3d9f0ca5a6122c79e1f27112303de7980cc39b4b10c12ef387571|0644|awk
+FILE|speedtest-runtime|speedtest2.sh|/opt/etc/mihomo-speedtest/speedtest2.sh|67972|1977c329f42538b703e66093f27287b8c2d84444975138b1fdd48858adbd6683|0755|sh
+FILE|speedtest-runtime|prep.awk|/opt/etc/mihomo-speedtest/prep.awk|3595|3ab203984b0f19d62cc8b0cc56256df7f87eb19f87e7d97fab5b5c01dc956151|0644|awk
+FILE|speedtest-runtime|providers.awk|/opt/etc/mihomo-speedtest/providers.awk|5727|996bcb955db30ade2acaea60234a8cc054f5200b49f477001549f7105f6c16cc|0644|awk
+FILE|speedtest-runtime|node_stats_update.awk|/opt/etc/mihomo-speedtest/node_stats_update.awk|8290|96f7f47f039377ca95fea233666b73c1d4446729dda44ebbc781a21967d61774|0644|awk
+FILE|speedtest-runtime|sub_convert.awk|/opt/etc/mihomo-speedtest/sub_convert.awk|6280|2358d671903e2528714fa88f23af975e61878a7a9a93940c83832bb6154e1618|0644|awk
+FILE|web|render_stats.awk|/opt/etc/mihomo-speedtest/render_stats.awk|13451|a41811c5767e98f8e2ab7e6b71bde214d75c2249b8c0ed6744beca8103e7fbed|0644|awk
+FILE|web|stats_cgi.sh|/opt/etc/mihomo-speedtest/stats_cgi.sh|29798|31c41fdc0e0eb2d52523b8ddcf3e3800f4e3897c3a12c15032ac828cc8c517c7|0755|sh
+FILE|web|stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|4042|4483013f52614cbb7d013ff9b4942be478b07101cb3deda2cd7c7069a55eeaf7|0755|sh
+FILE|web|stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|37587|f8a4f4e51c27c7b510341d3f93b58a5017fe3e76061edf23f6b60c617fe93b16|0755|sh
+FILE|web|stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|38295|d5ae4be7b725074464e1386094b3019c6847f9a619e39ad25b658fc86da71237|0755|sh
+FILE|web|stats_xkeen.sh|/opt/etc/mihomo-speedtest/stats_xkeen.sh|27197|80ffbc78606b9387a20b1fbda0e35dac015ab6d576f5fe93747e4e04489d2874|0755|sh
+FILE|web|stats_diag.sh|/opt/etc/mihomo-speedtest/stats_diag.sh|28915|fc38b569da3dc0eea594ac796f1a60a3182a0e500a418347dcd46a4d9a08128c|0755|sh
+FILE|web|diag.awk|/opt/etc/mihomo-speedtest/diag.awk|15087|d035131df87a6ae155e6bbe9e8f71774603b9b4775240c7ea145d2332f184722|0644|awk
+FILE|web|stats_components.sh|/opt/etc/mihomo-speedtest/stats_components.sh|21470|759ff5eb26422154ba612a755e4db0228a92d35e6891eea2a7acbd8e6310d2ca|0755|sh
+FILE|web|stats_constructor.sh|/opt/etc/mihomo-speedtest/stats_constructor.sh|25955|b4db0ee50f6bdf0d00b529ae1152b0456163f620d7b3602dcec829d273997d9b|0755|sh
+FILE|web|stats_httpd.py|/opt/etc/mihomo-speedtest/stats_httpd.py|76730|e06dd98a746bc978417707ac35a290c2e3abc94be20a548cb0f4c959a710750f|0644|py
+FILE|web|stats_files.py|/opt/etc/mihomo-speedtest/stats_files.py|18240|2261a2a9a2e341864ad005dd04a5b11b2eadaaf098c3e77b6711307608921e7e|0644|py
+FILE|web|stats_auth.py|/opt/etc/mihomo-speedtest/stats_auth.py|20430|83d415b309072cf6768092bbb800fe0733a2fe7a9e72c5bc0e4b5e2aac191d53|0644|py
+FILE|web|stats_auth.sh|/opt/etc/mihomo-speedtest/stats_auth.sh|1374|82721fca9482f2a3bc55c51aa97566085bb8e1917cb8b1b0d8fda09674f43323|0755|sh
+FILE|web|stats_index.html|/opt/etc/mihomo-speedtest/stats_index.html|4318|443e17c773ce0ca0a1eedb35972433bc796606887a040e20f3f16032aea278d2|0644|none
+FILE|web|stats_style.css|/opt/etc/mihomo-speedtest/stats_style.css|49199|959a8ba77ce57230826e6054e3df7b6ab67a627726231ae67846c999634bd2e9|0644|none
+FILE|web|stats_app.js|/opt/etc/mihomo-speedtest/stats_app.js|12092|0e806d6c51a3dce707df8e5c4005be0664b7f40e9d0ff3810baaeaa2ddd9702c|0644|none
+FILE|web|stats_app_core.js|/opt/etc/mihomo-speedtest/stats_app_core.js|5170|fa9af2aa04a4fa3a334a021305b3c3865f28709352a189d2286361b68df1136c|0644|none
+FILE|web|stats_app_stats.js|/opt/etc/mihomo-speedtest/stats_app_stats.js|41356|3171ea79b80f22310de02c3050dd544322d2fbcb140318c8f4547905f11e3890|0644|none
+FILE|web|stats_app_settings.js|/opt/etc/mihomo-speedtest/stats_app_settings.js|46350|aa6fb584513d058bfe09cd85aaac9c2cc65754bcf8c4423d9adb8774c2128bf7|0644|none
+FILE|web|stats_app_updates.js|/opt/etc/mihomo-speedtest/stats_app_updates.js|23024|cfaf884eb75eef8f83775b5065daf0d3853d9dee979578fd8a4d59bc83878bd4|0644|none
+FILE|web|stats_app_log.js|/opt/etc/mihomo-speedtest/stats_app_log.js|4254|942efa00d3800ed33ecf2442db7d035050b08f07ef2bdd0c109ed972e083c6d4|0644|none
+FILE|web|stats_app_config.js|/opt/etc/mihomo-speedtest/stats_app_config.js|84171|174e4c62b378ae6a44c01ccd614a90c52dec39df25de906a819ee2f2c9a5dc6d|0644|none
+FILE|web|stats_app_files.js|/opt/etc/mihomo-speedtest/stats_app_files.js|30247|1eeb2609180ef0dd7fd3350c7a9ba67b82fab42223a627c8800c31a0cb001c32|0644|none
+FILE|web|stats_app_xkeen.js|/opt/etc/mihomo-speedtest/stats_app_xkeen.js|50359|688106286caef872bd338380e0e46c8684351d97483d2dada22392980581e375|0644|none
+FILE|web|stats_app_diag.js|/opt/etc/mihomo-speedtest/stats_app_diag.js|16139|8a63656c1b7d1c6f95c2ac0d87a52845e7fc87578772bad8f6c6e4ab3a5a52c0|0644|none
+FILE|web|stats_app_components.js|/opt/etc/mihomo-speedtest/stats_app_components.js|7748|0255fdbb53c630cabee769ba5b5f14db5ee5268f103d422bed6f7cbd5415a398|0644|none
+FILE|web|stats_app_constructor.js|/opt/etc/mihomo-speedtest/stats_app_constructor.js|40450|554d8f2f6bb8983686577abf71613b5422c53bc95d0b62bd4ba573f6e5bc908f|0644|none
+FILE|web|stats_app_constructor_model.js|/opt/etc/mihomo-speedtest/stats_app_constructor_model.js|39297|366100f962abcaf6500d81f4d7b0cedca6429472ffb0c26ebd04eccfb7ed3477|0644|none
+FILE|web|stats_app_constructor_modules.js|/opt/etc/mihomo-speedtest/stats_app_constructor_modules.js|62530|1cedc3c9fea17908b2e65ca1f47e849ca7d186938783bba3879e0e140123f130|0644|none
+FILE|web|stats_app_constructor_modules_model.js|/opt/etc/mihomo-speedtest/stats_app_constructor_modules_model.js|26889|99c8c1ceec18d2a7045eb155bd94c4d09d6d3349228866554d1e35bbb821208e|0644|none
+FILE|web|stats_codemirror.js|/opt/etc/mihomo-speedtest/stats_codemirror.js|173229|05f8b783a97313b1bac3ba951567e3847beec094f87c2bf4eb5b29b9f3ffae82|0644|none
+FILE|web|stats_codemirror.css|/opt/etc/mihomo-speedtest/stats_codemirror.css|6322|d66cc99e9a1cf1c55874610a4987203a115463cecc6abf523bf5ab6ba04abcec|0644|none
+FILE|web|render_progress.awk|/opt/etc/mihomo-speedtest/render_progress.awk|4391|0277d53d0fac83ac82b48ccef320a043735fa5b0a367eb58cf2d8e8bfff52eed|0644|awk
+FILE|web|stats_service.sh|/opt/etc/mihomo-speedtest/stats_service.sh|12444|14a925035fcbef15dcef242241e9ca4f0954ca393b394d47035077afc8ab92cc|0755|sh
+FILE|web|stats_init.sh|/opt/etc/init.d/S80speedtest-stats|5453|7a3b5a654efb7f50d298036acb217e765bff23ca015250ca925896d01b38266b|0755|sh
+FILE|installer|uninstall.sh|/opt/etc/mihomo-speedtest/uninstall.sh|26320|f4f9c15f3e983fdf2cddcdac1537cf12cc811bfa45092e110d0d55fcaf7aa08a|0755|sh
+FILE|installer|install.sh|/opt/etc/mihomo-speedtest/install.sh|145964|c613021603020d3ddc6c2ac5434757a41a57af61019b2a5804a2d9b555335a18|0755|sh
+FILE|installer|version_check.sh|/opt/etc/mihomo-speedtest/version_check.sh|9855|4cb9a8feb4837a1e8bcae27a7f7ca2fe9c02d50fd8456b86771db1ecb206dd86|0755|sh
+FILE|installer|ui.sh|/opt/etc/mihomo-speedtest/ui.sh|15839|ceda80b6b9c244e7653c8ea667ed157ede314fab048e3f815995ac5cee6e58f0|0755|sh
+FILE|installer|netcheck.sh|/opt/etc/mihomo-speedtest/netcheck.sh|14020|c28c9beb338c8e60ca1d0a5fdd787ea8d085bbbe14a7c387171033c15384734a|0755|sh
+FILE|installer|mihomo-speedtest.sh|/opt/etc/mihomo-speedtest/mihomo-speedtest.sh|4786|729aa39dd9d000b240e515ae5470034e0af3988910071ea9a6a1754ee1a447d8|0755|sh
+FILE|installer|update_interactive.sh|/opt/etc/mihomo-speedtest/update_interactive.sh|9200|6e7e43aba37449de3e1dccc27ecda9ed3f586b003fdbfaf126c480255dc39d2f|0755|sh
+FILE|config-tools|migrate_config.sh|/opt/etc/mihomo-speedtest/migrate_config.sh|4407|221a0f6491a8b30c78fd93dd0a4de638b5fa43a19dee9258195b2e29e1c3bf17|0755|sh
+FILE|config-tools|migrate_config.awk|/opt/etc/mihomo-speedtest/migrate_config.awk|20843|c61bd7f37680a8aeae19f253ca91ba0cf0de28eb342da1b8cceddb36d3158f57|0644|awk
+FILE|config-tools|config_diff.awk|/opt/etc/mihomo-speedtest/config_diff.awk|2267|a774dfb460c4906230b4aed1fd18b7327677a495cc5a1080c726e89e082538a7|0644|awk
+FILE|config-tools|setup.sh|/opt/etc/mihomo-speedtest/setup.sh|31858|dc16fb056f2565571600809243f79522c3373f4f169eea5483c2d8e2714d9d0d|0755|sh
+FILE|config-tools|detect_ua.sh|/opt/etc/mihomo-speedtest/detect_ua.sh|6068|b51a6e04cb1956a9b1b9eae6f0825c83b55d4c8c8abcf3a84d05717a07a69e45|0755|sh
+FILE|config-tools|render_config.awk|/opt/etc/mihomo-speedtest/render_config.awk|8477|6fedf9b665e23e51cee90ed0ef4d5541b277f00cb6e3ba400f7ba0b7d7376e5f|0644|awk
+FILE|config-tools|fast_wg.awk|/opt/etc/mihomo-speedtest/fast_wg.awk|4234|29a5dccabfa80501bdb5ff2f6b72c9794dad9d38e6cb26852aa3065efd536c1d|0644|awk
+FILE|config-tools|wg_import.awk|/opt/etc/mihomo-speedtest/wg_import.awk|12552|5d18b088a523439ea7a940ee010bad8262a277ff20d0aa35167f4e17babb5bab|0644|awk
+FILE|config-tools|existing_config.awk|/opt/etc/mihomo-speedtest/existing_config.awk|8341|3d850454c1dc47b7139530ed0b650b5af012744b42287eb05694c56624bf3bc0|0644|awk
+FILE|config-tools|config.example.yaml|/opt/etc/mihomo-speedtest/config.example.yaml|25070|7e53fb8d19d7b84d1609ea8c5876cdc0b00b9e804f429401fb0fcc9a5f659beb|0644|none
+FILE|config-tools|render_services.awk|/opt/etc/mihomo-speedtest/render_services.awk|38196|80f7e7b5a3db96c80e602f3b7dea85ea3b730609ad1a04241cf4e9b1cbbde600|0644|awk
+FILE|config-tools|services.default.tsv|/opt/etc/mihomo-speedtest/services.default.tsv|18558|2399d8073b5cfc647acc9689e806e207ef614c4735fed19d2f0b422b43ce72d5|0644|none
+FILE|config-tools|config_to_state.awk|/opt/etc/mihomo-speedtest/config_to_state.awk|24142|94d80c010fe49a41c241336b7f3d26cf46a73bc4becea3f10338bf412c1896fc|0644|awk
+FILE|config-tools|constructor_build.sh|/opt/etc/mihomo-speedtest/constructor_build.sh|4152|f1bb780b8471b913e489f9d81e1655cc4dd31f346a778b1154dc7a54c5d689a3|0755|sh
+FILE|config-tools|reset_config.sh|/opt/etc/mihomo-speedtest/reset_config.sh|4812|416bb087fb7cf04f40343223f6441affb2a4830b1e58819ee7033cc21ea253ff|0755|sh
+FILE|config-tools|rule-catalog.tsv|/opt/etc/mihomo-speedtest/rule-catalog.tsv|231270|e9d9f27bbcf2c35191ff7eaabb1c63013a52a206cb9e22239b6bcbb272bdaa2a|0644|none
+ACTION|web|restart-web

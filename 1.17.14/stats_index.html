@@ -1,0 +1,43 @@
+<!doctype html><meta charset="utf-8">
+<title>mihomo-speedtest</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiB2aWV3Qm94PSIwIDAgMjAwIDIwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiYWNrZ3JvdW5kIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzE1MWMyMyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzBlMTUxYiIvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJkaWFsIiB4MT0iMCIgeTE9IjEiIHgyPSIxIiB5Mj0iMCI+PHN0b3Agc3RvcC1jb2xvcj0iIzhlOTY5ZSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2U1ZTdlOSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IGlkPSJiYWNrZ3JvdW5kLXRpbGUiIHg9IjAuNSIgeT0iMC41IiB3aWR0aD0iMTk5IiBoZWlnaHQ9IjE5OSIgcng9IjM1IiBmaWxsPSJ1cmwoI2JhY2tncm91bmQpIiBzdHJva2U9IiMyNjMyM2MiIHN0cm9rZS13aWR0aD0iMC41Ii8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTE0IC0zKSIgZmlsbD0iI2ZmZiI+PGcgaWQ9InNwZWVkLWxpbmVzIiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iNy41IiBzdHJva2UtbGluZWNhcD0icm91bmQiPjxwYXRoIGQ9Ik01MCAxNDAuNUg2NSIvPjwvZz48cGF0aCBpZD0iY2F0LWhlYWQiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTc1IDkyLjUgODcuNCA0Ni43UTg5IDM4LjcgOTUuNCA0NC4zTDExMi41IDYwLjhIMTQwTDE1OC44IDQ1LjNRMTY0LjcgNDEuNCAxNjUuNiA0OC43TDE3MCA4OEMxNzIuNCAxMDkuNyAxODUuMiAxMjIuMyAxODguNCAxNDAuNlExODkgMTQ3LjYgMTg2LjggMTQzLjNDMTc0LjMgMTE0LjYgMTUxLjggMTAyLjMgMTMwLjggMTAzLjcgMTEwLjcgMTA0LjIgOTYuMSAxMTQuMiA4Ny42IDEyNVE4NS4yIDEyOC4yIDgxIDEyOC4ySDQwQTMuNzUgMy43NSAwIDAgMSA0MCAxMjAuN0g4MkE1LjcyNSA1LjcyNSAwIDAgMCA4MiAxMDkuMjVINDhBMy43NSAzLjc1IDAgMCAxIDQ4IDEwMS43NUg4Ni45QTMuMjc1IDMuMjc1IDAgMCAwIDg2LjkgOTUuMkg3N1E3NC40IDk1LjIgNzUgOTIuNVpNMTEzLjYgNzkuMUMxMDYgNzkuMSAxMDYgOTUuMiAxMTMuNiA5NS4yIDEyMS4xIDk1LjIgMTIxLjEgNzkuMSAxMTMuNiA3OS4xWk0xNDggNzkuMUMxNDAuNiA3OS4xIDE0MC42IDk1LjIgMTQ4IDk1LjIgMTU1LjUgOTUuMiAxNTUuNSA3OS4xIDE0OCA3OS4xWiIvPjxwYXRoIGlkPSJzcGVlZG9tZXRlci1hcmMiIGZpbGw9InVybCgjZGlhbCkiIGQ9Ik03NC4yIDE2My4zQzc4LjggMTM5LjQgOTQgMTIwLjcgMTE0LjMgMTEzLjMgMTMxLjEgMTA3LjEgMTQ4LjggMTEwLjQgMTYyIDEyMC40TDE1My44IDEyNy4zQzE0MS45IDExOSAxMzAgMTE4LjEgMTE3LjggMTIyLjIgMTAwLjQgMTI4IDg4IDE0Mi41IDgxLjMgMTYzLjNaIi8+PHBhdGggaWQ9Im5lZWRsZSIgZD0iTTE2MyAxMjUuNiAxMzggMTY0LjZBOC44NSA4Ljg1IDAgMSAxIDEyNS40IDE1Mi42WiIvPjwvZz48L3N2Zz4=">
+<link rel="stylesheet" href="style.css">
+<!--
+  SPA-shell веб-сервиса статистики speedtest2 (см. README, раздел про
+  stats_www, и docs/plans/2026-09-12-web-spa-migration-design.md). Один
+  и тот же файл отдаётся под "/", "/stats" и "/settings" (и вообще любым
+  путём, не совпавшим с реальным файлом - см. _spa_fallback() в
+  stats_httpd.py); какой раздел показать, решает app.js по
+  location.pathname. Ставится install.sh как $DIR/stats_index.html;
+  stats_httpd.py раздаёт его по "/" прямо оттуда.
+
+  Иконка вкладки - logo.svg из корня репозитория, встроенная как data: URI
+  (без отдельного файла: его не нужно ставить install.sh, раздавать и
+  пускать до входа). При смене логотипа пересобрать строку href заново.
+
+  app.js - ES-модуль, сам подгружает соседние app-*.js.
+-->
+<div class="wrap">
+<header>
+<div class="header-top">
+<div class="brand"><span class="brand-led" aria-hidden="true"></span><div><h1>MIHOMO-SPEEDTEST</h1><p class="meta">УЗЕЛ УПРАВЛЕНИЯ</p></div></div>
+<button class="theme-btn" id="logoutBtn" type="button" hidden>Выйти</button>
+</div>
+<nav id="mainNav" aria-label="Разделы" hidden>
+<a href="/stats" data-link>Статистика</a>
+<a href="/diag" data-link>Диагностика</a>
+<a href="/settings" data-link>Настройки</a>
+<a href="/config" data-link>Конфиг</a>
+<a href="/xkeen" data-link>XKeen</a>
+<a href="/files" data-link>Файлы</a>
+<a href="/log" data-link>Журнал</a>
+<a href="/updates" data-link>Обновления<span id="updatesBadge" class="nav-badge" hidden></span></a>
+</nav>
+</header>
+<div id="app"></div>
+<footer id="sysFooter" class="sys-footer" hidden>
+<span id="sysFooterLeft"></span>
+<span id="sysFooterRight"></span>
+</footer>
+</div>
+<script type="module" src="app.js"></script>
