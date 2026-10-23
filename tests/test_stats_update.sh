@@ -169,6 +169,28 @@ OUT_NOTES3=$(NOTES_FIXTURE_DIR="$NOTES_DIR_PARTIAL" DIR="$W" TMPROOT="$TEST_ROOT
 assert_contains '"ok":true' "$OUT_NOTES3" "notes: частичная недоступность не должна ронять check"
 assert_contains '"notes":[{"version":9,"tag":"v9","body":"Релиз 9: правка Y"}]' "$OUT_NOTES3" "notes: недоступный релиз молча пропущен"
 
+# API GitHub недоступен - текст релиза x.y.z берётся из зеркала (notes.txt
+# ветки dist); первое зеркало не отвечает.
+mkdir -p "$SRV/mirror"
+sed 's/^RELEASE_TAG=v9$/RELEASE_TAG=1.2.0/' "$SRV/manifest.txt" > "$SRV/mirror/manifest.txt"
+cat > "$TEST_ROOT/fake_notes_mirror.sh" << 'FAKEEOF'
+#!/bin/sh
+echo "$1" >> "$NOTES_URL_LOG"
+case $1 in
+  https://m2.test/gh/o/r@dist-1.2.0/1.2.0/notes.txt) printf 'Зеркало: "правка" Z\n' ;;
+  *) exit 1 ;;
+esac
+FAKEEOF
+chmod +x "$TEST_ROOT/fake_notes_mirror.sh"
+OUT_NOTES_M=$(NOTES_URL_LOG="$TEST_ROOT/notes-urls" DIR="$W" TMPROOT="$TEST_ROOT/tmp" UPDATE_SCRIPT="$W/update.sh" \
+  UPDATE_RELEASE_BASE="http://127.0.0.1:$PORT/mirror" UPDATE_STATE_DIR="$NOTES_STATE5" \
+  STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/rt-notes-m" UPDATE_NOTES_HTTP_CMD="$TEST_ROOT/fake_notes_mirror.sh" \
+  UPDATE_NOTES_MIRRORS="https://m1.test/gh/o/r https://m2.test/gh/o/r" \
+  MST_UPDATE_ACTION=check REQUEST_METHOD=POST "$W/stats_update.sh")
+assert_contains '"tag":"1.2.0","body":"Зеркало: \"правка\" Z"' "$OUT_NOTES_M" "notes: текст релиза из зеркала"
+grep -q 'api.github.com/repos/f0nwa/mihomo-speedtest/releases/tags/1.2.0$' "$TEST_ROOT/notes-urls" || fail "notes: зеркало опрошено раньше API"
+grep -q '^https://m1.test/gh/o/r@dist-1.2.0/1.2.0/notes.txt$' "$TEST_ROOT/notes-urls" || fail "notes: не опрошено первое зеркало"
+
 # --- регрессия: единственная (и последняя) итерация цикла в
 #     fetch_release_notes() заканчивается ОШИБКОЙ fetch_release_note() -
 #     ровно тот же класс ловушки set -eu ("&&" бесповоротным top-level

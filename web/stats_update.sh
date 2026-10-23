@@ -37,8 +37,18 @@ export UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-} UPDATE_STATE_DIR=${UPDATE_ST
 # нового" в релизе (задача веб-редизайна). UPDATE_NOTES_HTTP_CMD - только
 # для тестов (подменяет и curl, и сам API GitHub локальной фикстурой),
 # аналогично UPDATE_HTTP_CMD у update.sh.
-UPDATE_NOTES_API_BASE=${UPDATE_NOTES_API_BASE:-https://api.github.com/repos/f0nwa/mihomo-speedtest/releases/tags}
+UPDATE_NOTES_DEFAULT_API=https://api.github.com/repos/f0nwa/mihomo-speedtest/releases/tags
+UPDATE_NOTES_API_BASE=${UPDATE_NOTES_API_BASE:-$UPDATE_NOTES_DEFAULT_API}
 UPDATE_NOTES_HTTP_CMD=${UPDATE_NOTES_HTTP_CMD:-}
+# Если API GitHub недоступен - текст релиза из зеркала (notes.txt в ветке
+# dist через jsDelivr, см. release/publish_dist.sh). UPDATE_NOTES_MIRRORS
+# заменяет список (пусто - без зеркал); по умолчанию - только для штатного
+# API, как зеркала update.sh.
+if [ "${UPDATE_NOTES_MIRRORS+set}" != set ]; then
+  UPDATE_NOTES_MIRRORS=
+  [ "$UPDATE_NOTES_API_BASE" != "$UPDATE_NOTES_DEFAULT_API" ] ||
+    UPDATE_NOTES_MIRRORS='https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://gcore.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://fastly.jsdelivr.net/gh/f0nwa/mihomo-speedtest'
+fi
 # config_schema в status: схема конфига установленного релиза
 # (installed-manifest.txt) против применённой к config.yaml
 # (config-schema-version) - веб показывает отдельную карточку «Доступно
@@ -176,21 +186,24 @@ read_json_or_null() {
 # ломали итоговый JSON last-check.json). Возврат 1 при любой сетевой/
 # парсинг-ошибке - вызывающий код (fetch_release_notes) должен считать
 # это некритичным и не блокировать сам check.
+notes_get() {
+  # $1=URL, $2=файл. Код 0 - скачано.
+  if [ -n "$UPDATE_NOTES_HTTP_CMD" ]; then
+    $UPDATE_NOTES_HTTP_CMD "$1" > "$2" 2>/dev/null
+  elif command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time "${UPDATE_HTTP_TIMEOUT:-15}" -H 'Accept: application/vnd.github+json' \
+      -H 'User-Agent: mihomo-speedtest' "$1" > "$2" 2>/dev/null
+  else
+    return 1
+  fi
+}
 fetch_release_note() {
   frn_tag=$1
   frn_url="$UPDATE_NOTES_API_BASE/$frn_tag"
   frn_json=$STATS_UPDATE_RUNTIME_DIR/.notes-$$.json
   mkdir -p "$STATS_UPDATE_RUNTIME_DIR" 2>/dev/null || true
-  if [ -n "$UPDATE_NOTES_HTTP_CMD" ]; then
-    $UPDATE_NOTES_HTTP_CMD "$frn_url" > "$frn_json" 2>/dev/null || { rm -f "$frn_json"; return 1; }
-  elif command -v curl >/dev/null 2>&1; then
-    curl -fsSL --max-time "${UPDATE_HTTP_TIMEOUT:-15}" -H 'Accept: application/vnd.github+json' \
-      -H 'User-Agent: mihomo-speedtest' "$frn_url" > "$frn_json" 2>/dev/null || { rm -f "$frn_json"; return 1; }
-  else
-    return 1
-  fi
-  command -v python3 >/dev/null 2>&1 || { rm -f "$frn_json"; return 1; }
-  python3 -c '
+  command -v python3 >/dev/null 2>&1 || return 1
+  if notes_get "$frn_url" "$frn_json" && python3 -c '
 import json, sys
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as f:
@@ -198,10 +211,29 @@ try:
     print(json.dumps(data.get("body") or "", ensure_ascii=False))
 except Exception:
     sys.exit(1)
-' "$frn_json"
-  frn_rc=$?
+' "$frn_json"; then
+    rm -f "$frn_json"
+    return 0
+  fi
   rm -f "$frn_json"
-  return $frn_rc
+  # Зеркала ведутся только для тегов x.y.z.
+  printf '%s\n' "$frn_tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || return 1
+  for frn_mirror in $UPDATE_NOTES_MIRRORS; do
+    case $frn_mirror in https://*) ;; *) continue ;; esac
+    if notes_get "$frn_mirror@dist-$frn_tag/$frn_tag/notes.txt" "$frn_json" && python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        print(json.dumps(f.read().strip(), ensure_ascii=False))
+except Exception:
+    sys.exit(1)
+' "$frn_json"; then
+      rm -f "$frn_json"
+      return 0
+    fi
+  done
+  rm -f "$frn_json"
+  return 1
 }
 
 # Собирает JSON-массив "notes" с описанием последнего релиза (того, что
