@@ -1,0 +1,5 @@
+{
+  "chatgpt": {"base": "svg", "aliases": ["OpenAI ChatGPT"], "categories": ["ai"]},
+  "netflix": {"base": "svg", "aliases": ["Netflix Streaming"], "categories": ["media"]},
+  "missing": {"base": "svg", "aliases": ["Missing"], "categories": []}
+}

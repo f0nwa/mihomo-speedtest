@@ -32,6 +32,7 @@ for f in config-tools/config.example.yaml config-tools/services.default.tsv conf
          config-tools/migrate_config.awk config-tools/fast_wg.awk config-tools/reset_config.sh config-tools/rule-catalog.tsv config-tools/wg_import.awk config-tools/detect_ua.sh speedtest-runtime/sub_convert.awk web/stats_config.sh; do
   cp "$ROOT/$f" "$D/"
 done
+printf '# собран: 2026-10-23\nqure\tyoutube\tYouTube\thttps://example.org/youtube.png\t\n' > "$D/icon-catalog.tsv"
 cp "$D/config.example.yaml" "$M/config.yaml"
 
 export DIR=$D MIHOMO_DIR=$M BIN=$TMP/bin/mihomo XKEEN_BIN=$TMP/bin/xkeen \
@@ -164,6 +165,14 @@ mv "$D/rule-catalog.tsv" "$D/rule-catalog.tsv.off"
 out=$(cgi catalog GET '' </dev/null)
 assert_contains 'Status: 404' "$out"
 mv "$D/rule-catalog.tsv.off" "$D/rule-catalog.tsv"
+out=$(cgi icons GET '' </dev/null)
+assert_contains 'Status: 200' "$out"
+assert_contains 'qure' "$(printf '%s' "$out" | jget '["text"]')"
+mv "$D/icon-catalog.tsv" "$D/icon-catalog.tsv.off"
+out=$(cgi icons GET '' </dev/null)
+assert_contains 'Status: 404' "$out"
+assert_contains 'no_catalog' "$out"
+mv "$D/icon-catalog.tsv.off" "$D/icon-catalog.tsv"
 
 # --- 11: подписки и свои прокси - в чтении и в применении
 out=$(cgi read GET '' </dev/null)

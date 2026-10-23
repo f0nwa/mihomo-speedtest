@@ -1,0 +1,7 @@
+{
+  "name": "Qure Color",
+  "icons": [
+    {"name": "YouTube.png", "url": "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/YouTube.png"},
+    {"name": "Disney+.png", "url": "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Disney+.png"}
+  ]
+}

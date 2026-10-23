@@ -44,9 +44,13 @@ grep -q 'Добавить сервис из базы' "$UI" || fail "нет кн
 grep -q 'showModal' "$UI" || fail "окно добавления не модальное"
 grep -q 'searchCatalog' "$UI" || fail "UI не ищет через модель"
 grep -q '"api/constructor/catalog": ("stats_constructor.sh"' "$ROOT/web/stats_httpd.py" || fail "маршрут каталога"
+grep -q '"api/constructor/icons": ("stats_constructor.sh"' "$ROOT/web/stats_httpd.py" || fail "маршрут каталога иконок"
 grep -q 'config-tools/rule-catalog.tsv|/opt/etc/mihomo-speedtest/rule-catalog.tsv' "$ROOT/release/components.txt" || fail "components: rule-catalog.tsv"
+grep -q 'config-tools/icon-catalog.tsv|/opt/etc/mihomo-speedtest/icon-catalog.tsv' "$ROOT/release/components.txt" || fail "components: icon-catalog.tsv"
 grep -q 'rule-catalog.tsv' "$ROOT/uninstall.sh" || fail "uninstall: rule-catalog.tsv"
+grep -q 'icon-catalog.tsv' "$ROOT/uninstall.sh" || fail "uninstall: icon-catalog.tsv"
 grep -q '^PROJECT_TOOLS=.*rule-catalog.tsv' "$ROOT/install.sh" || fail "PROJECT_TOOLS: rule-catalog.tsv"
+grep -q '^PROJECT_TOOLS=.*icon-catalog.tsv' "$ROOT/install.sh" || fail "PROJECT_TOOLS: icon-catalog.tsv"
 
 grep -q 'перехват' "$UI" || fail "нет предупреждения о перехвате трафика встроенного сервиса"
 grep -q 'findByName' "$UI" || fail "имя существующей группы - подключение к ней, а не ошибка"

@@ -34,6 +34,7 @@
 #                   false|","nodes":[{"name","delay","reality"}]}.
 #   catalog  GET  - {"text"}: каталог наборов правил для поиска
 #                   (rule-catalog.tsv, release/build_rule_catalog.sh).
+#   icons    GET  - {"text"}: каталог URL иконок (icon-catalog.tsv).
 #   apply    POST - то же и применить (?base= как у save в stats_config.sh);
 #                   состояние и managed.sig пишутся только после успешного
 #                   применения.
@@ -60,6 +61,7 @@ CONSTRUCTOR_DEFAULTS=${CONSTRUCTOR_DEFAULTS:-$DIR/services.default.tsv}
 RESET_CONFIG=${RESET_CONFIG:-$DIR/reset_config.sh}
 CONFIG_TO_STATE_AWK=${CONFIG_TO_STATE_AWK:-$DIR/config_to_state.awk}
 CONSTRUCTOR_CATALOG=${CONSTRUCTOR_CATALOG:-$DIR/rule-catalog.tsv}
+CONSTRUCTOR_ICONS=${CONSTRUCTOR_ICONS:-$DIR/icon-catalog.tsv}
 APPLY_LOG=${CONSTRUCTOR_APPLY_LOG:-$APPLY_LOG}
 STATE_FILES="services.tsv geofilter.txt user-rules.txt subscriptions.tsv proxies.yaml"
 WG_IMPORT_AWK=${WG_IMPORT_AWK:-$DIR/wg_import.awk}
@@ -218,6 +220,10 @@ case $action:$method in
   catalog:GET|catalog:HEAD)
     [ -f "$CONSTRUCTOR_CATALOG" ] || fail_json 404 no_catalog "Каталог наборов правил не найден - переустановите проект"
     printf '{"text":%s}\n' "$(jstr_file "$CONSTRUCTOR_CATALOG")" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  icons:GET|icons:HEAD)
+    [ -f "$CONSTRUCTOR_ICONS" ] || fail_json 404 no_catalog "Каталог иконок не найден - переустановите проект"
+    printf '{"text":%s}\n' "$(jstr_file "$CONSTRUCTOR_ICONS")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
   wgconf:POST)
     [ -f "$WG_IMPORT_AWK" ] || fail_json 500 no_tools "wg_import.awk не найден - переустановите проект"

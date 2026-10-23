@@ -30,6 +30,13 @@ assert_contains "FILE|updater|update.sh|/opt/etc/mihomo-speedtest/update.sh|" "$
 assert_contains "FILE|installer|ui.sh|/opt/etc/mihomo-speedtest/ui.sh|" "$OUT" "ui.sh в манифесте компонента installer"
 assert_contains "FILE|installer|update_interactive.sh|/opt/etc/mihomo-speedtest/update_interactive.sh|" "$OUT" "диалог обновления поставляется с командой"
 assert_contains "DEPENDS|config-tools|installer" "$OUT" "setup.sh (config-tools) подключает ui.sh из installer"
+ICON_SIZE=$(wc -c < "$ROOT/config-tools/icon-catalog.tsv" | tr -d ' ')
+if command -v sha256sum >/dev/null 2>&1; then
+  ICON_SHA=$(sha256sum "$ROOT/config-tools/icon-catalog.tsv" | awk '{print $1}')
+else
+  ICON_SHA=$(shasum -a 256 "$ROOT/config-tools/icon-catalog.tsv" | awk '{print $1}')
+fi
+assert_contains "FILE|config-tools|icon-catalog.tsv|/opt/etc/mihomo-speedtest/icon-catalog.tsv|$ICON_SIZE|$ICON_SHA|0644|none" "$OUT" "каталог иконок в манифесте с размером и SHA256"
 
 echo "test_generate_manifest.sh: часть 1 (реальная декларация) OK" >&2
 

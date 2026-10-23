@@ -716,6 +716,7 @@ API_ROUTES = {
     # проверку ядра и при провале - откат.
     "api/constructor": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "read", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/catalog": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "catalog"}),
+    "api/constructor/icons": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "icons"}),
     "api/constructor/wgconf": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "wgconf"}),
     # Подбор User-Agent: до 17 запросов к панели подписки по 10 секунд.
     "api/constructor/detect-ua": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "detect-ua", "MST_CGI_TIMEOUT": "200"}),
