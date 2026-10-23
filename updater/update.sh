@@ -7,8 +7,16 @@ export LC_ALL
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
 PLAN_AWK="$DIR/update_plan.awk"
 UPDATER_VERSION=8
-UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-https://github.com/f0nwa/mihomo-speedtest/releases/latest/download}
+UPDATE_DEFAULT_BASE=https://github.com/f0nwa/mihomo-speedtest/releases/latest/download
+UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE:-$UPDATE_DEFAULT_BASE}
 UPDATE_RELEASE_BASE=${UPDATE_RELEASE_BASE%/}
+# Зеркала релизов на случай, когда GitHub с роутера недоступен: ветка dist
+# репозитория через jsDelivr (см. release/publish_dist.sh). Корень зеркала
+# M даёт указатели каналов M@dist/channels/<канал> и файлы релиза
+# M@dist-<тег>/<тег>/<файл>. По умолчанию - только для штатного источника
+# GitHub; UPDATE_MIRRORS (окружение или speedtest2.env, через пробел)
+# заменяет список, пустое значение отключает зеркала. См. select_source.
+UPDATE_MIRRORS_DEFAULT='https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://gcore.jsdelivr.net/gh/f0nwa/mihomo-speedtest https://fastly.jsdelivr.net/gh/f0nwa/mihomo-speedtest'
 # Канал обновлений: stable (releases/latest) или dev (наибольший тег x.y.z
 # среди последних релизов любого вида, включая pre-release). См.
 # read_update_channel и resolve_channel_base.
@@ -232,7 +240,11 @@ download_to() {
     exit 1
   fi
   download_size=$(wc -c < "$2" | tr -d ' ')
-  [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ] || die 'Пустой файл или превышен лимит загрузки'
+  if [ "$download_size" -gt 0 ] && [ "$download_size" -le "$3" ]; then :
+  else
+    [ -z "${DOWNLOAD_SOFT:-}" ] || return 1
+    die 'Пустой файл или превышен лимит загрузки'
+  fi
 }
 check_download() {
   [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || die 'Неверный размер файла релиза'
@@ -273,7 +285,7 @@ bootstrap_header() {
 pinned_base() {
   case $UPDATE_RELEASE_BASE in
     */releases/latest/download) PINNED_BASE=${UPDATE_RELEASE_BASE%/latest/download}/download/$(manifest_field "$MANIFEST_TMP" RELEASE_TAG) ;;
-    */releases/download/*) check_pinned_tag; PINNED_BASE=$UPDATE_RELEASE_BASE ;;
+    */releases/download/*|*@dist-*/*) check_pinned_tag; PINNED_BASE=$UPDATE_RELEASE_BASE ;;
     *) die 'Подготовка требует источник .../releases/latest/download' ;;
   esac
 }
@@ -284,6 +296,11 @@ check_pinned_tag() {
     */releases/download/*)
       pinned_tag=${UPDATE_RELEASE_BASE##*/releases/download/}
       [ "$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)" = "$pinned_tag" ] || die 'Манифест не соответствует выбранному релизу' ;;
+    *@dist-*/*)
+      # Зеркало: .../<repo>@dist-<T>/<T> - оба тега обязаны совпасть.
+      pinned_tag=${UPDATE_RELEASE_BASE##*/}
+      mirror_ref=${UPDATE_RELEASE_BASE##*@dist-}; mirror_ref=${mirror_ref%%/*}
+      [ "$mirror_ref" = "$pinned_tag" ] && [ "$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)" = "$pinned_tag" ] || die 'Манифест не соответствует выбранному релизу' ;;
   esac
 }
 read_update_channel() {
@@ -293,6 +310,79 @@ read_update_channel() {
     channel=$(sed -n 's/^[[:space:]]*UPDATE_CHANNEL=//p' "$UPDATE_ENV_FILE" | tail -n 1 | tr -d "\"'[:space:]")
   fi
   case $channel in dev) echo dev ;; *) echo stable ;; esac
+}
+read_release_mirrors() {
+  # Окружение (даже пустое) важнее файла настроек; без настройки - список
+  # по умолчанию, но только для штатного источника GitHub (свой
+  # UPDATE_RELEASE_BASE, например локальный сервер, зеркала не включает).
+  if [ "${UPDATE_MIRRORS+set}" = set ]; then printf '%s\n' "$UPDATE_MIRRORS"; return 0; fi
+  if [ -f "$UPDATE_ENV_FILE" ] && [ -r "$UPDATE_ENV_FILE" ] && grep -q '^[[:space:]]*UPDATE_MIRRORS=' "$UPDATE_ENV_FILE"; then
+    sed -n 's/^[[:space:]]*UPDATE_MIRRORS=//p' "$UPDATE_ENV_FILE" | tail -n 1 | tr -d "\"'"
+    return 0
+  fi
+  [ "$UPDATE_RELEASE_BASE" != "$UPDATE_DEFAULT_BASE" ] || printf '%s\n' "$UPDATE_MIRRORS_DEFAULT"
+}
+# newest_tag: наибольший тег x.y.z из строк stdin (покомпонентно, числами).
+newest_tag() {
+  awk '
+    function newer(a, b,   x, y, i) {
+      split(a, x, "."); split(b, y, ".")
+      for (i = 1; i <= 3; i++) if (x[i] + 0 != y[i] + 0) return x[i] + 0 > y[i] + 0
+      return 0
+    }
+    $0 ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ && (best == "" || newer($0, best)) { best = $0 }
+    END { if (best != "") print best }'
+}
+mirror_tag() {
+  # Тег канала по указателям зеркала $1: stable - channels/stable, dev -
+  # наибольший из channels/dev и channels/stable (как с GitHub: наибольший
+  # x.y.z среди релизов любого канала). Пусто - зеркало не ответило.
+  mt_list=
+  for mt_ch in stable dev; do
+    [ "$mt_ch" = stable ] || [ "$1" = dev ] || continue
+    DOWNLOAD_SOFT=1 download_to "$2@dist/channels/$mt_ch" "$WORK/mirror-pointer" 64 2>/dev/null || continue
+    mt_list="$mt_list$(head -n 1 "$WORK/mirror-pointer" | tr -d '\r[:space:]')
+"
+  done
+  printf '%s' "$mt_list" | newest_tag
+}
+select_source() {
+  # Перебор источников релиза: сначала GitHub, затем зеркала по порядку.
+  # Источник выбирается по манифесту (он сразу сохраняется в MANIFEST_TMP);
+  # выбранное зеркало закрепляется в UPDATE_RELEASE_BASE (экспорт) - так
+  # же, как тег канала dev, поэтому дочерние движки качают файлы оттуда же
+  # и сами источник не выбирают.
+  [ -z "${UPDATE_BOOTSTRAP_DIR:-}${UPDATE_VERIFIED_ENGINE_DIR:-}${UPDATE_RECOVERY_ENGINE_DIR:-}" ] || return 0
+  [ -n "$RELEASE_MIRRORS" ] || return 0
+  if [ "$DEV_UNRESOLVED" != 1 ] && DOWNLOAD_SOFT=1 download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144 2>/dev/null; then
+    MANIFEST_PREFETCHED=1
+    return 0
+  fi
+  ss_channel=$(read_update_channel)
+  for ss_mirror in $RELEASE_MIRRORS; do
+    case $ss_mirror in https://*/gh/*) ;; *) continue ;; esac
+    case ${ss_mirror#https://} in *[!A-Za-z0-9._/-]*) continue ;; esac
+    ss_tag=$(mirror_tag "$ss_channel" "$ss_mirror")
+    [ -n "$ss_tag" ] || continue
+    ss_base=$ss_mirror@dist-$ss_tag/$ss_tag
+    DOWNLOAD_SOFT=1 download_to "$ss_base/manifest.txt" "$MANIFEST_TMP" 262144 2>/dev/null || continue
+    [ "$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)" = "$ss_tag" ] || continue
+    ss_host=${ss_mirror#https://}; ss_host=${ss_host%%/*}
+    echo "GitHub недоступен - загрузка через зеркало $ss_host (релиз $ss_tag)" >&2
+    UPDATE_RELEASE_BASE=$ss_base
+    export UPDATE_RELEASE_BASE
+    validate_release_base
+    DEV_UNRESOLVED=0
+    MANIFEST_PREFETCHED=1
+    return 0
+  done
+  rm -f "$MANIFEST_TMP"
+  if [ "$DEV_UNRESOLVED" = 1 ]; then
+    printf 'ERROR: Не удалось определить последний релиз канала разработки: GitHub и зеркала недоступны.\n' >&2
+    update_net_diag
+    exit 1
+  fi
+  # Дальше - обычная загрузка с GitHub с понятной ошибкой и диагностикой.
 }
 resolve_channel_base() {
   # Только для dev и только пока база не закреплена: дочерние движки
@@ -305,7 +395,12 @@ resolve_channel_base() {
   if ! DOWNLOAD_SOFT=1 download_to "$UPDATE_RELEASES_API" "$WORK/releases.json" 4194304; then
     # API отказал: берём теги со страницы релизов github.com (без лимита API)
     # и приводим к виду "tag_name", чтобы дальше работал тот же разбор.
-    download_to "$UPDATE_RELEASES_FALLBACK" "$WORK/releases.html" 4194304
+    # Недоступна и страница, но есть зеркала - тег определит select_source.
+    if [ -n "$RELEASE_MIRRORS" ]; then
+      DOWNLOAD_SOFT=1 download_to "$UPDATE_RELEASES_FALLBACK" "$WORK/releases.html" 4194304 2>/dev/null || { DEV_UNRESOLVED=1; return 0; }
+    else
+      download_to "$UPDATE_RELEASES_FALLBACK" "$WORK/releases.html" 4194304
+    fi
     grep -Eo '/releases/tag/[0-9]+\.[0-9]+\.[0-9]+' "$WORK/releases.html" |
       sed 's|.*/|{"tag_name":"|; s|$|"}|' > "$WORK/releases.json"
   fi
@@ -544,9 +639,13 @@ if [ "$full_config_diff" = 1 ] && [ "$cmd" != show-config-diff ]; then die '--fu
 case $UPDATE_HTTP_TIMEOUT in *[!0-9]*|'') die 'Неверный таймаут загрузки' ;; esac
 [ "$UPDATE_HTTP_TIMEOUT" -gt 0 ] || die 'Неверный таймаут загрузки'
 validate_release_base() {
-  case $UPDATE_RELEASE_BASE in *'@'*|*'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'Неверный URL источника' ;; esac
+  # "@" допустим только в пути (зеркало jsDelivr: .../gh/<repo>@dist-<T>/<T>),
+  # но не в адресе сервера (user@host).
+  case $UPDATE_RELEASE_BASE in *'|'*|*'?'*|*'#'*|*[[:space:]]*|*[[:cntrl:]]*) die 'Неверный URL источника' ;; esac
   url_authority=${UPDATE_RELEASE_BASE#*://}; url_authority=${url_authority%%/*}
   [ -n "$url_authority" ] || die 'Неверный URL источника'
+  case $url_authority in *'@'*) die 'Неверный URL источника' ;; esac
+  case $UPDATE_RELEASE_BASE in *'@'*) case $UPDATE_RELEASE_BASE in https://*/gh/*@dist-*/*) ;; *) die 'Неверный URL источника' ;; esac ;; esac
   case $UPDATE_RELEASE_BASE in
     https://*) : ;;
     http://*)
@@ -580,7 +679,10 @@ MANIFEST_TMP=$WORK/manifest.txt
 # Канал dev закрепляет базу на наибольшем теге x.y.z среди последних
 # релизов GitHub (включая pre-release).
 # Команды без загрузки релиза (discard-plan, rollback-last, recover) не трогаем.
-case $cmd in check|plan|prepare|verify-plan|show-config-diff|apply) resolve_channel_base ;; esac
+RELEASE_MIRRORS=$(read_release_mirrors)
+DEV_UNRESOLVED=0
+MANIFEST_PREFETCHED=0
+case $cmd in check|plan|prepare|verify-plan|show-config-diff|apply) resolve_channel_base; select_source ;; esac
 case $cmd in
   discard-plan)
     . "$DIR/update_prepare.sh"
@@ -631,7 +733,7 @@ case $cmd in
       [ -f "${UPDATE_PINNED_MANIFEST:-}" ] && [ ! -L "$UPDATE_PINNED_MANIFEST" ] || die 'Отсутствует закреплённый манифест'
       cp "$UPDATE_PINNED_MANIFEST" "$MANIFEST_TMP"
     else
-      download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144
+      [ "$MANIFEST_PREFETCHED" = 1 ] || download_to "$UPDATE_RELEASE_BASE/manifest.txt" "$MANIFEST_TMP" 262144
       check_pinned_tag
     fi ;;
 esac
