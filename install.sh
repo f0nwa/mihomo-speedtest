@@ -1638,6 +1638,32 @@ ensure_python3() {
   fi
 }
 
+have_python3_yaml() {
+  python3 -c 'import yaml' >/dev/null 2>&1
+}
+
+ensure_python3_yaml() {
+  # python3-yaml нужен stats_httpd.py только для подписей «провайдер ·
+  # протокол» на вкладке «Статистика». Без него всё остальное работает,
+  # поэтому неудача - лишь предупреждение.
+  have_python3 || return 0
+  have_python3_yaml && return 0
+  if ! have_opkg; then
+    ui_warn "python3-yaml не найден, а opkg недоступен - провайдеры и протоколы нод в статистике будут неизвестны"
+    return 0
+  fi
+  ui_run "PyYAML (opkg install python3-yaml)" opkg install python3-yaml || {
+    ui_run "Список пакетов (opkg update)" opkg update || true
+    ui_run "PyYAML (opkg install python3-yaml, повтор)" opkg install python3-yaml || true
+  }
+  if have_python3_yaml; then
+    ui_ok "python3-yaml установлен через opkg"
+  else
+    ui_warn "Не удалось поставить python3-yaml - провайдеры и протоколы нод в статистике будут неизвестны. Поставьте вручную: opkg install python3-yaml"
+  fi
+  return 0
+}
+
 initialize_web_auth() {
   code=$(python3 "$DIR/stats_auth.py" initialize \
     --state-dir "$DIR/.stats-auth" \
@@ -2405,6 +2431,7 @@ main() {
   # нет - веб-интерфейс тогда просто не поднимается (см. ensure_python3).
   web_ready=1
   ensure_python3 || web_ready=0
+  ensure_python3_yaml
 
   # Порция 3 (см. design): веб-интерфейс статистики поднимается независимо
   # от пробного прогона speedtest - "restart", а не "start", чтобы при

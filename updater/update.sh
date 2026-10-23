@@ -112,6 +112,31 @@ initialize_web_auth() {
     say "Откройте http://<адрес роутера>:${STATS_HTTP_PORT:-8899}/setup и задайте логин и пароль"
   fi
 }
+ensure_python3_yaml() {
+  # Зависимость, добавленная после первых релизов: python3-yaml нужен
+  # stats_httpd.py для подписей «провайдер · протокол» в статистике.
+  # Ставим при обновлении тем, у кого его ещё нет. Сообщения - в stderr
+  # (см. ensure_mihomo_speedtest_symlink), неудача обновление не отменяет.
+  # Только если установлен веб-компонент (target_file - см. initialize_web_auth).
+  [ -f "$(target_file /opt/etc/mihomo-speedtest)/stats_httpd.py" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import yaml' >/dev/null 2>&1 && return 0
+  if ! command -v opkg >/dev/null 2>&1; then
+    echo 'WARN: python3-yaml не найден, а opkg недоступен - провайдеры и протоколы нод в статистике будут неизвестны' >&2
+    return 0
+  fi
+  echo 'Установка python3-yaml (opkg install python3-yaml)...' >&2
+  opkg install python3-yaml >/dev/null 2>&1 || {
+    opkg update >/dev/null 2>&1 || :
+    opkg install python3-yaml >/dev/null 2>&1 || :
+  }
+  if python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo 'python3-yaml установлен' >&2
+  else
+    echo 'WARN: Не удалось поставить python3-yaml - провайдеры и протоколы нод в статистике будут неизвестны. Поставьте вручную: opkg install python3-yaml' >&2
+  fi
+  return 0
+}
 manifest_field() { awk -F= -v k="$2" '$1==k{print $2; exit}' "$1"; }
 sha256_tool() {
   if command -v sha256sum >/dev/null 2>&1; then echo sha256sum
@@ -597,6 +622,7 @@ case $cmd in
       echo 'Обновление установлено, финальные шаги...' >&2
       transaction_result
       ensure_mihomo_speedtest_symlink "$(target_file /opt/etc/mihomo-speedtest)/mihomo-speedtest.sh"
+      ensure_python3_yaml
       initialize_web_auth
     fi
     exit 0 ;;

@@ -81,6 +81,9 @@ FM_RATE_WINDOW = 600
 
 
 # ----- метаданные нод (GET /api/node-providers) -----
+# Разобранные YAML по пути: (mtime_ns, size) -> dict. Конфиг и кеши подписок
+# меняются редко, поэтому вкладка «Статистика» не разбирает их на каждый запрос.
+_YAML_CACHE = {}
 
 def node_provider_labels(config_path=None, details=False):
     """Read node names, providers and protocols without exposing URLs or keys."""
@@ -88,16 +91,26 @@ def node_provider_labels(config_path=None, details=False):
         os.environ.get("MIHOMO_DIR", "/opt/etc/mihomo"), "config.yaml"
     )
 
+    try:
+        import yaml  # python3-yaml (opkg); без него провайдеры неизвестны
+    except ImportError:
+        return {}
+    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
     def read_yaml(path):
         try:
-            result = subprocess.run(
-                ["yq", "-o=json", ".", path], stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, timeout=5, check=True,
-            )
-            value = json.loads(result.stdout)
-            return value if isinstance(value, dict) else {}
-        except (OSError, subprocess.SubprocessError, ValueError):
+            st = os.stat(path)
+            key = (st.st_mtime_ns, st.st_size)
+            cached = _YAML_CACHE.get(path)
+            if cached and cached[0] == key:
+                return cached[1]
+            with open(path, encoding="utf-8") as f:
+                value = yaml.load(f, Loader=loader)
+        except (OSError, ValueError, yaml.YAMLError):
             return {}
+        value = value if isinstance(value, dict) else {}
+        _YAML_CACHE[path] = (key, value)
+        return value
 
     config = read_yaml(config_path)
     labels = {}

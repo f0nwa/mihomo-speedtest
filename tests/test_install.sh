@@ -986,6 +986,39 @@ if OUT=$(
 ); then fail "ensure_python3 must fail when opkg install keeps failing"; fi
 printf '%s' "$OUT" | grep -q "Не удалось автоматически поставить"   || fail "expected final failure warning when opkg install never succeeds, got: $OUT"
 
+# ensure_python3_yaml: python3-yaml ставится через opkg, неудача не валит установку.
+OUT=$(
+  have_python3() { return 0; }
+  have_python3_yaml() { return 0; }
+  opkg() { echo "opkg не должен вызываться при уже установленном python3-yaml" >&2; return 1; }
+  ensure_python3_yaml 2>&1
+) || fail "ensure_python3_yaml must succeed when PyYAML already present"
+[ -z "$OUT" ] || fail "ensure_python3_yaml must stay silent when PyYAML already present, got: $OUT"
+
+YAML_STATE=$TEST_ROOT/yaml-state
+: > "$YAML_STATE"
+OUT=$(
+  YAML_STATE=$YAML_STATE
+  have_python3() { return 0; }
+  have_python3_yaml() { grep -q installed "$YAML_STATE" 2>/dev/null; }
+  have_opkg() { return 0; }
+  opkg() {
+    [ "$1" = install ] && [ "$2" = python3-yaml ] || return 1
+    echo installed > "$YAML_STATE"
+  }
+  ensure_python3_yaml 2>&1
+) || fail "ensure_python3_yaml must succeed when opkg install python3-yaml works"
+printf '%s' "$OUT" | grep -q "python3-yaml установлен" || fail "expected python3-yaml success message, got: $OUT"
+
+OUT=$(
+  have_python3() { return 0; }
+  have_python3_yaml() { return 1; }
+  have_opkg() { return 0; }
+  opkg() { return 1; }
+  ensure_python3_yaml 2>&1
+) || fail "ensure_python3_yaml must not fail the install when opkg keeps failing"
+printf '%s' "$OUT" | grep -q "Не удалось поставить python3-yaml" || fail "expected python3-yaml failure warning, got: $OUT"
+
 # --- Финальный обзор (C1a): mihomo -t должен проверять конфиг относительно
 # MIHOMO_DIR (каталог самой Mihomo: geo-базы, provider-кэши), а не DIR
 # (каталог проекта speedtest2-stats). После разделения каталогов (см.
