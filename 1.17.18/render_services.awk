@@ -45,7 +45,8 @@
 #   unrule<TAB>id<TAB>текст              убрать встроенное правило сервиса
 #   svc<TAB>id<TAB>Имя<TAB>sid           свой сервис; с id или именем
 #                                        встроенного - заменяет встроенный
-#   icon<TAB>id<TAB>url                  иконка своего сервиса
+#   icon<TAB>id<TAB>url                  иконка своего сервиса или замена
+#                                        иконки встроенного сервиса
 #   gkey<TAB>id<TAB>ключ: значение       доп. ключ своей группы
 #   src<TAB>id<TAB>имя<TAB>kind<TAB>url  набор правил: provider
 #                                        имя@kind (kind domain|ipcidr|
@@ -283,9 +284,9 @@ function read_overlay(  rc, n, f, kind, id, pn, typ) {
     if (kind == "svc" || kind == "del" || kind == "unrule") {
     } else if (kind == "icon") {
       need(n, 3, kind)
-      if (!svc_user[id]) err(at() "иконку можно задать только своему сервису, " f[2] " - встроенный")
-      if (id in svc_icon) err(at() "у сервиса " f[2] " иконка задана повторно")
+      if (id in overlay_icon_seen) err(at() "у сервиса " f[2] " иконка задана повторно")
       check_url(f[3], "адрес иконки")
+      overlay_icon_seen[id] = 1
       svc_icon[id] = f[3]
     } else if (kind == "gkey") {
       need(n, 3, kind)

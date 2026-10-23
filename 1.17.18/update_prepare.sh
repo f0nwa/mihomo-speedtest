@@ -196,7 +196,7 @@ prepare_files() {
     # раньше на весь prepare был один общий чекпоинт, не видно, что
     # реально скачивается.
     echo "Загрузка файла: $dest" >&2
-    download_to "$PINNED_BASE/$src" "$WORK/files/$file_number" "$bytes"
+    download_release_file "$src" "$WORK/files/$file_number" "$bytes"
     check_download "$WORK/files/$file_number" "$bytes" "$sum"
     check_file_syntax "$WORK/files/$file_number" "$check"
     chmod "$mode" "$WORK/files/$file_number" || die 'Не удалось задать режим файла'
