@@ -42,6 +42,14 @@ eq(m.serialize().services.includes('icon' + T + 'nl' + T + 'https://i/n.png'), f
 eq(m.serialize().services.includes('gkey' + T + 'nl' + T + 'filter: (?i)NL\n'), true, 'ключ группы сохранён');
 m.setServiceIcon('nl', '');
 eq(m.serialize().services.includes('icon' + T + 'nl' + T), false, 'иконка удалена');
+eq(m.serviceIcon('youtube'), 'https://i/y.png', 'встроенная иконка читается из шаблона');
+m.setServiceIcon('youtube', 'https://cdn.example/youtube.svg');
+eq(m.serviceIcon('youtube'), 'https://cdn.example/youtube.svg', 'встроенная иконка заменена');
+eq(m.serialize().services.includes('icon' + T + 'youtube' + T + 'https://cdn.example/youtube.svg\n'), true, 'замена встроенной иконки сохранена');
+m.setServiceIcon('youtube', 'https://i/y.png');
+eq(m.serialize().services.includes('icon' + T + 'youtube' + T), false, 'возврат к иконке шаблона убирает отличие');
+const ownShadow = M.createModel(D, 'svc' + T + 'youtube' + T + 'Мой сервис' + T + 'other\n', '');
+eq(ownShadow.serviceIcon('youtube'), '', 'свой сервис с id встроенного не наследует его иконку');
 const iconId = m.addService('Иконка', 'other');
 m.setServiceIcon(iconId, 'http://example.org/icon.png');
 eq(m.serialize().services.includes('icon' + T + iconId + T + 'http://example.org/icon.png\n'), true, 'добавление иконки');
@@ -52,7 +60,7 @@ for (const bad of ['ftp://example.org/icon.svg', 'https://example.org/a b.svg', 
   eq(failedAsExpected, true, 'ошибка для недопустимого URL: ' + bad);
   eq(m.serialize(), before, 'недопустимый URL не меняет состояние: ' + bad);
 }
-for (const badId of ['youtube', 'missing']) {
+for (const badId of ['missing']) {
   let failedAsExpected = false;
   try { m.setServiceIcon(badId, 'https://example.org/icon.svg'); } catch (e) { failedAsExpected = true; }
   eq(failedAsExpected, true, 'иконка запрещена для ' + badId);

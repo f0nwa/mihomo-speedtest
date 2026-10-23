@@ -326,6 +326,94 @@ export function renderConstructor(modeBar, opts) {
       return wrap;
     }
 
+    function serviceIconRow(id) {
+      var svc = model.services().filter(function (s) { return s.id === id; })[0];
+      var resetUrl = svc.user ? '' : model.defaultServiceIcon(id);
+      var wrap = el('div', 'cx-icon-picker');
+      wrap.appendChild(el('label', null, 'Иконка группы'));
+      var row = el('div', 'cx-icon-row');
+      var iconIn = el('input'); iconIn.type = 'url'; iconIn.value = model.serviceIcon(id);
+      iconIn.placeholder = 'https://example.org/icon.svg';
+      iconIn.setAttribute('aria-label', 'URL иконки группы');
+      var save = button('Сохранить иконку', 'small');
+      save.addEventListener('click', function () { edit(function () { model.setServiceIcon(id, iconIn.value.trim()); }); });
+      iconIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { save.click(); } });
+      row.appendChild(iconIn); row.appendChild(save);
+      wrap.appendChild(row);
+      var preview = el('div', 'cx-icon-preview'); wrap.appendChild(preview);
+      function showPreview() {
+        clear(preview);
+        var url = iconIn.value.trim();
+        if (!url) { return; }
+        if (!/^https?:\/\/[^\s"'#]+$/.test(url)) {
+          preview.appendChild(el('span', 'hint', 'Укажите прямой URL без пробелов, кавычек и #.'));
+          return;
+        }
+        var img = el('img'); img.alt = 'Текущая иконка группы';
+        img.addEventListener('error', function () {
+          if (img.parentNode !== preview) { return; }
+          clear(preview);
+          preview.appendChild(el('span', 'hint', 'Не удалось загрузить предпросмотр. URL всё ещё можно сохранить.'));
+        });
+        preview.appendChild(img); img.src = url;
+      }
+      iconIn.addEventListener('change', showPreview);
+      showPreview();
+      var actions = el('div', 'cx-icon-row');
+      var choose = button('Выбрать из каталога', 'secondary');
+      var reset = button(svc.user || !resetUrl ? 'Без иконки' : 'Вернуть иконку шаблона', 'secondary');
+      actions.appendChild(choose); actions.appendChild(reset); wrap.appendChild(actions);
+      reset.addEventListener('click', function () {
+        iconIn.value = resetUrl;
+        edit(function () { model.setServiceIcon(id, iconIn.value.trim()); });
+      });
+      var catalogBox = el('div', 'cx-icon-picker'); catalogBox.hidden = true;
+      var search = el('input'); search.type = 'search'; search.placeholder = 'Поиск иконки';
+      search.setAttribute('aria-label', 'Поиск иконки для группы');
+      var options = el('div', 'cx-icon-options');
+      catalogBox.appendChild(search); catalogBox.appendChild(options); wrap.appendChild(catalogBox);
+      var entries = null;
+      function showOptions() {
+        clear(options);
+        if (!entries) { options.appendChild(el('span', 'hint', 'Загружаю иконки...')); return; }
+        var found = searchIcons(entries, search.value.trim() || svc.name, 6);
+        if (!found.length) {
+          options.appendChild(el('span', 'hint', 'Иконки не найдены. Можно указать URL вручную.'));
+          return;
+        }
+        found.forEach(function (item) {
+          var option = button('', 'cx-icon-option');
+          option.setAttribute('aria-label', 'Выбрать иконку ' + item.label);
+          var img = el('img'); img.alt = ''; img.loading = 'lazy';
+          img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
+          option.appendChild(img);
+          option.appendChild(el('span', 'cx-icon-name', item.label));
+          option.addEventListener('click', function () {
+            iconIn.value = item.url;
+            showPreview();
+            edit(function () { model.setServiceIcon(id, iconIn.value.trim()); });
+          });
+          options.appendChild(option); img.src = item.url;
+        });
+      }
+      search.addEventListener('input', showOptions);
+      choose.addEventListener('click', function () {
+        catalogBox.hidden = !catalogBox.hidden;
+        if (catalogBox.hidden) { return; }
+        showOptions();
+        loadIconCatalog().then(function (data) {
+          if (!wrap.isConnected) { return; }
+          entries = data; showOptions();
+        })['catch'](function (e) {
+          if (!wrap.isConnected) { return; }
+          clear(options);
+          options.appendChild(el('span', 'hint', 'Каталог иконок не загрузился: ' + errText(e) + '. URL можно указать вручную.'));
+        });
+        search.focus();
+      });
+      return wrap;
+    }
+
     function serviceRow(s) {
       var box = el('div');
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
@@ -376,6 +464,7 @@ export function renderConstructor(modeBar, opts) {
           chips.appendChild(c);
         });
         if (chips.firstChild) { p.appendChild(chips); }
+        p.appendChild(serviceIconRow(s.id));
         p.appendChild(quicRow(s.id));
         p.appendChild(checkUrlRow(s.id));
         box.appendChild(p);

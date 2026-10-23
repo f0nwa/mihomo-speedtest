@@ -149,6 +149,9 @@ fi
 grep -q 'Адрес для проверки' "$ROOT/web/stats_app_constructor.js" || fail "нет поля «Адрес для проверки» в редакторе сервиса"
 grep -q 'model.setCheckUrl(' "$ROOT/web/stats_app_constructor.js" || fail "поле адреса проверки не сохраняет в модель"
 grep -q 'model.defaultCheckUrls(' "$ROOT/web/stats_app_constructor.js" || fail "подсказка не показывает адрес по умолчанию"
+grep -q 'serviceIconRow(s.id)' "$ROOT/web/stats_app_constructor.js" || fail "в раскрытом сервисе нет редактора иконки"
+grep -q 'model.serviceIcon(id)' "$ROOT/web/stats_app_constructor.js" || fail "редактор не показывает текущую иконку"
+grep -q 'model.setServiceIcon(id, iconIn.value.trim())' "$ROOT/web/stats_app_constructor.js" || fail "редактор не сохраняет новую иконку"
 # Галочка «Блокировать QUIC» в раскрытом сервисе и пометка в строке сервиса.
 grep -q 'Блокировать QUIC (UDP/443)' "$ROOT/web/stats_app_constructor.js" || fail "нет галочки «Блокировать QUIC» в редакторе сервиса"
 grep -q 'model.setBlockQuic(id, cb.checked)' "$ROOT/web/stats_app_constructor.js" || fail "галочка QUIC не сохраняет в модель"

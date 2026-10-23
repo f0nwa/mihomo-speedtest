@@ -66,6 +66,12 @@ assert_not_contains "- name: old" "$OUT" "старое содержимое за
 assert_contains "  # --- SERVICE_GROUPS:END ---" "$OUT" "маркер END сохранён"
 assert_contains "  - name: base" "$OUT" "вне маркеров не трогается"
 
+# Иконка встроенного сервиса заменяется через состояние конструктора.
+printf 'icon\tyoutube\thttps://i/new.svg\n' > "$WORK/o.tsv"
+ICON_OUT=$(awk -v services_file="$S" -v overlay_file="$WORK/o.tsv" -f "$SCRIPT" "$T") || fail "замена встроенной иконки: ошибка сборки"
+assert_contains "icon: https://i/new.svg" "$ICON_OUT" "встроенная иконка заменена"
+assert_not_contains "icon: https://i/y.png" "$ICON_OUT" "старая встроенная иконка убрана"
+
 # test_quoting
 assert_contains "- name: 'IP Detect'" "$OUT" "имя с пробелом в кавычках"
 assert_contains "- name: '18+'" "$OUT" "имя с + в кавычках"
@@ -193,7 +199,7 @@ rc=0; renderov > /dev/null 2>&1 || rc=$?; [ "$rc" = 2 ] || fail "неизвес�
 # test_overlay_errors
 # (svc с id встроенного заменяет его, ссылки на убранный сервис пропускаются -
 #  см. «Ревью порции 2» ниже)
-for bad in 'svc	n	N	nosection' 'svc	n	N	other|svc	n	M	other' 'svc	a	A	other|svc	b	A	other' 'icon	youtube	https://i/y.png'; do
+for bad in 'svc	n	N	nosection' 'svc	n	N	other|svc	n	M	other' 'svc	a	A	other|svc	b	A	other' 'icon	youtube	bad url'; do
   printf '%s\n' "$bad" | tr '|' '\n' > "$WORK/o.tsv"
   rc=0; renderov > "$WORK/eout" 2>"$WORK/eerr" || rc=$?
   [ "$rc" = 2 ] && [ ! -s "$WORK/eout" ] || fail "overlay '$bad' должен давать ошибку (код $rc)"

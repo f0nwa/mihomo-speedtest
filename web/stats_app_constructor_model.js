@@ -48,7 +48,7 @@ var RESERVED = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL
   'Заблок. сервисы', '⚡ Быстрый пул', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'];
 
 export function parseDefaults(text) {
-  var d = { sections: [], services: [], byId: {}, rules: [], checks: {} };
+  var d = { sections: [], services: [], byId: {}, rules: [], checks: {}, icons: {} };
   lines(text).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
     var f = line.split(TAB);
@@ -58,6 +58,7 @@ export function parseDefaults(text) {
       d.services.push(s); d.byId[s.id] = s;
     } else if (f[0] === 'rule') { d.rules.push({ owner: f[1], text: f[2] }); }
     else if (f[0] === 'check') { (d.checks[f[1]] = d.checks[f[1]] || []).push(f[2]); }
+    else if (f[0] === 'icon') { d.icons[f[1]] = f[2]; }
   });
   return d;
 }
@@ -370,16 +371,28 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       users.push({ id: id, name: name, section: section, extra: route ? [routeLine(id, route)] : [] });
       return id;
     },
-    setServiceIcon: function (id, url) {
+    defaultServiceIcon: function (id) { return d.icons[id] || ''; },
+    serviceIcon: function (id) {
+      needService(id);
       var u = findUser(id);
-      if (!u) { throw new Error('Иконку можно задать только своему сервису'); }
+      var iconLine = u ? u.extra.filter(function (l) { return l.split(TAB)[0] === 'icon'; })[0]
+        : srcLines.filter(function (l) { var f = l.split(TAB); return f[0] === 'icon' && f[1] === id; })[0];
+      return iconLine ? iconLine.split(TAB)[2] : (u ? '' : (d.icons[id] || ''));
+    },
+    setServiceIcon: function (id, url) {
+      needService(id);
+      var u = findUser(id);
       url = String(url || '');
       if (url && !/^https?:\/\/[^\s"'#]+$/.test(url)) {
         throw new Error('Адрес иконки должен начинаться с http(s):// и не содержать пробелов, кавычек и #');
       }
-      var at = u.extra.findIndex(function (line) { return line.split(TAB)[0] === 'icon'; });
-      if (at >= 0) { u.extra.splice(at, 1); }
-      if (url) { u.extra.splice(at < 0 ? 0 : at, 0, ['icon', id, url].join(TAB)); }
+      var arr = u ? u.extra : srcLines;
+      var at = arr.findIndex(function (line) {
+        var f = line.split(TAB);
+        return f[0] === 'icon' && f[1] === id;
+      });
+      if (at >= 0) { arr.splice(at, 1); }
+      if (url && (u || url !== (d.icons[id] || ''))) { arr.splice(at < 0 ? arr.length : at, 0, ['icon', id, url].join(TAB)); }
     },
     removeUserService: function (id) {
       users = users.filter(function (u) { return u.id !== id; });

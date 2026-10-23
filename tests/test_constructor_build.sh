@@ -41,6 +41,16 @@ else
   fail "сборка с --import: $(cat "$WORK/log2")"
 fi
 
+# Замена иконки встроенной группы сохраняется при импорте config.yaml.
+sed 's#https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png#https://example.org/custom-youtube.svg#' \
+  "$WORK/source.yaml" > "$WORK/source-icon.yaml"
+mkdir "$WORK/icon-state"
+awk -v defaults="$ROOT/config-tools/services.default.tsv" -v template="$ROOT/config-tools/config.example.yaml" \
+  -v out_dir="$WORK/icon-state" -v report="$WORK/icon.report" -f "$ROOT/config-tools/config_to_state.awk" "$WORK/source-icon.yaml"
+grep -q 'icon	youtube	https://example.org/custom-youtube.svg' "$WORK/icon-state/services.tsv" || fail "импорт: замена иконки YouTube потеряна"
+sh "$SCRIPT" --state "$WORK/icon-state" --source "$WORK/source-icon.yaml" --output "$WORK/out-icon.yaml" --report "$WORK/rep-icon" > "$WORK/log-icon" 2>&1 || fail "сборка с импортированной иконкой: $(cat "$WORK/log-icon")"
+grep -q 'icon: https://example.org/custom-youtube.svg' "$WORK/out-icon.yaml" || fail "сборка: импортированная иконка не сохранилась"
+
 # test_build_errors
 rc=0; sh "$SCRIPT" --source "$WORK/source.yaml" --output "$WORK/o3" --report "$WORK/r3" > /dev/null 2>"$WORK/err" || rc=$?
 [ "$rc" = 1 ] || fail "без --state и --import - код $rc вместо 1"
