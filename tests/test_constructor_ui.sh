@@ -59,6 +59,11 @@ grep -q 'URL иконки' "$UI" || fail "нет поля ручного URL и�
 grep -q 'model.setServiceIcon(id' "$UI" || fail "иконка не сохраняется при создании сервиса"
 grep -q 'ks.length > 0' "$UI" || fail "поле иконки показывается до выбора набора правил"
 grep -q 'iconBox.hidden' "$UI" || fail "поле иконки не скрывается"
+grep -q "fetchJson('/api/constructor/icons')" "$UI" || fail "каталог иконок не загружается"
+grep -q 'if (!iconRequested)' "$UI" || fail "повторный запрос каталога при перерисовке окна"
+grep -q 'if (closed || iconBox.hidden)' "$UI" || fail "запоздалый ответ меняет закрытое окно"
+grep -q 'searchIcons(iconEntries, query, 6)' "$UI" || fail "поиск другого значка не ограничен шестью вариантами"
+grep -q 'iconSearch' "$UI" || fail "нет поиска другого значка"
 
 # Блоки порции 5: подписки, прокси, исключения нод, базовые группы
 MOD="$ROOT/web/stats_app_constructor_modules.js"

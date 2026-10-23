@@ -6,6 +6,8 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 command -v node >/dev/null 2>&1 || { echo "SKIP test_constructor_model: нет node"; exit 0; }
 node --input-type=module - "$ROOT/web/stats_app_constructor_model.js" <<'JS'
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 const M = await import(pathToFileURL(process.argv[2]).href);
 let failed = 0;
 function eq(a, b, what) { const A = JSON.stringify(a), B = JSON.stringify(b); if (A !== B) { console.error('FAIL: ' + what + '\n  ожидалось ' + B + '\n  получено  ' + A); failed = 1; } }
@@ -153,6 +155,33 @@ const CAT = ['# заголовок', '',
 const cat = M.parseCatalog(CAT);
 eq(cat.length, 6, 'каталог: битые строки пропущены');
 eq(M.searchCatalog(cat, '').length, 0, 'пустой запрос - ничего');
+
+// Каталог иконок: точное совпадение выше начального и частичного, URL без дублей.
+const ICON_CAT = [
+  '# собран: 2026-10-23',
+  ['dashboard', 'chatgpt', 'ChatGPT', 'https://icons.example/chatgpt.png', 'OpenAI|GPT'].join(T),
+  ['qure', 'chatgpt-letter', 'ChatGPT Letter', 'https://icons.example/letter.png', ''].join(T),
+  ['dashboard', 'chatgpt-service', 'ChatGPT Service', 'https://icons.example/service.png', ''].join(T),
+  ['dashboard', 'mybot', 'My Bot', 'https://icons.example/mybot.png', 'Helper for ChatGPT'].join(T),
+  ['dashboard', 'duplicate', 'Duplicate', 'https://icons.example/chatgpt.png', 'ChatGPT mirror'].join(T),
+  ['dashboard', 'bad-space', 'Bad', 'https://icons.example/a b.png', ''].join(T),
+  ['dashboard', 'bad-quote', 'Bad', 'https://icons.example/a"b.png', ''].join(T),
+  ['dashboard', 'bad-hash', 'Bad', 'https://icons.example/a#b.png', ''].join(T),
+  ['dashboard', 'short', 'Short', 'https://icons.example/short.png'].join(T),
+  ['other', 'wrong-source', 'Wrong', 'https://icons.example/wrong.png', ''].join(T)
+].join('\n');
+const icons = M.parseIconCatalog(ICON_CAT);
+eq(icons.length, 5, 'иконки: битые строки пропущены');
+eq(icons[0].aliases, ['OpenAI', 'GPT'], 'иконки: синонимы разобраны');
+eq(M.searchIcons(icons, '', 6), [], 'иконки: пустой запрос');
+eq(M.searchIcons(icons, 'CHATGPT', 6).map(x => x.slug),
+  ['chatgpt', 'chatgpt-letter', 'chatgpt-service', 'mybot'], 'иконки: порядок и отсутствие дубля URL');
+eq(M.searchIcons(icons, 'openai', 6).map(x => x.slug), ['chatgpt'], 'иконки: поиск по синониму');
+eq(M.searchIcons(icons, 'chatgpt', 2).length, 2, 'иконки: ограничение выдачи');
+const realIcons = M.parseIconCatalog(readFileSync(join(dirname(process.argv[2]), '..', 'config-tools', 'icon-catalog.tsv'), 'utf8'));
+eq(realIcons.length > 2000, true, 'иконки: готовый каталог разбирается целиком');
+eq(realIcons.some(x => x.source === 'qure'), true, 'иконки: Qure в готовом каталоге');
+eq(realIcons.some(x => x.source === 'dashboard'), true, 'иконки: Dashboard в готовом каталоге');
 let g = M.searchCatalog(cat, 'YouTu');
 eq(g.map(x => [x.key, x.title, x.items.map(i => i.name + '@' + i.kind)]),
   [['youtube', 'YouTube', ['youtube@domain', 'youtube@ipcidr', 'itdog-youtube@domain']]], 'группа youtube');

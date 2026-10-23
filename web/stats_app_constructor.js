@@ -8,11 +8,12 @@
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
 import { createModules, parseWords } from './app-constructor-modules-model.js';
 import { createLayout, createModuleCards, plural } from './app-constructor-modules.js';
-import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, stateBody } from './app-constructor-model.js';
+import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, parseIconCatalog, searchIcons, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
 var catalogPromise = null;   // каталог наборов правил грузится один раз
 var catalogDate = '';        // дата сборки каталога (шапка файла)
+var iconCatalogPromise = null; // каталог иконок загружается только после выбора набора
 
 function loadCatalog() {
   if (!catalogPromise) {
@@ -20,6 +21,14 @@ function loadCatalog() {
       ['catch'](function (e) { catalogPromise = null; throw e; });
   }
   return catalogPromise;
+}
+
+function loadIconCatalog() {
+  if (!iconCatalogPromise) {
+    iconCatalogPromise = fetchJson('/api/constructor/icons').then(function (data) { return parseIconCatalog(data.text || ''); })
+      ['catch'](function (e) { iconCatalogPromise = null; throw e; });
+  }
+  return iconCatalogPromise;
 }
 
 var SOURCE_LABELS = { metacubex: 'MetaCubeX', 'zxc-rv': 'zxc-rv', itdog: 'itdog', legiz: 'legiz' };
@@ -410,7 +419,10 @@ export function renderConstructor(modeBar, opts) {
       bodyBox.appendChild(results);
       var picked = {};   // имя@вид -> запись каталога
       var catalog = null;
+      var closed = false, iconRequested = false, iconEntries = null, iconError = '';
+      var selectedIconUrl = '', iconRenderKey = '', iconButtons = [];
       var nameIn = null, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
+      var iconSearch = null, iconOptions = null;
       if (!target) {
         var cols = el('div', 'cx-cols');
         var c1 = el('div'), c2 = el('div');
@@ -427,6 +439,11 @@ export function renderConstructor(modeBar, opts) {
         cols.appendChild(c1); cols.appendChild(c2);
         bodyBox.appendChild(cols);
         iconBox = el('div', 'cx-icon-picker'); iconBox.hidden = true;
+        iconBox.appendChild(el('label', null, 'Иконка'));
+        iconSearch = el('input'); iconSearch.type = 'search'; iconSearch.placeholder = 'Поиск другой иконки';
+        iconSearch.setAttribute('aria-label', 'Поиск иконки');
+        iconBox.appendChild(iconSearch);
+        iconOptions = el('div', 'cx-icon-options'); iconBox.appendChild(iconOptions);
         iconBox.appendChild(el('label', null, 'URL иконки'));
         var iconRow = el('div', 'cx-icon-row');
         iconIn = el('input'); iconIn.type = 'url'; iconIn.placeholder = 'https://example.org/icon.svg';
@@ -436,9 +453,12 @@ export function renderConstructor(modeBar, opts) {
         iconBox.appendChild(iconRow);
         iconPreview = el('div', 'cx-icon-preview'); iconBox.appendChild(iconPreview);
         bodyBox.appendChild(iconBox);
-        iconIn.addEventListener('input', function () { clear(iconPreview); });
+        iconSearch.addEventListener('input', renderIconOptions);
+        iconIn.addEventListener('input', function () { selectedIconUrl = ''; clear(iconPreview); updateIconSelection(); });
         iconIn.addEventListener('change', showIconPreview);
-        noIcon.addEventListener('click', function () { iconIn.value = ''; showIconPreview(); });
+        noIcon.addEventListener('click', function () {
+          iconIn.value = ''; selectedIconUrl = ''; showIconPreview(); updateIconSelection();
+        });
       }
       var preview = el('div', 'geo-summary');
       var err = el('p', 'xk-err');
@@ -452,12 +472,80 @@ export function renderConstructor(modeBar, opts) {
       ft.appendChild(cancel); ft.appendChild(ok);
       d.appendChild(ft);
       document.body.appendChild(d);
-      function close() { d.close(); if (d.parentNode) { d.parentNode.removeChild(d); } }
+      function close() { closed = true; d.close(); if (d.parentNode) { d.parentNode.removeChild(d); } }
       x.addEventListener('click', close);
       cancel.addEventListener('click', close);
       d.addEventListener('cancel', function (e) { e.preventDefault(); close(); });
 
       function keys() { return Object.keys(picked); }
+      function suggestedIcons() {
+        var queries = [], seenQueries = {};
+        function addQuery(value) {
+          value = String(value || '').trim();
+          var key = value.toLowerCase();
+          if (value && !seenQueries[key]) { queries.push(value); seenQueries[key] = true; }
+        }
+        addQuery(nameIn.value);
+        keys().forEach(function (key) {
+          var item = picked[key];
+          addQuery(suggestName(item.title));
+          addQuery(item.name.replace(/^(itdog|legiz)-/, '').replace(/[-_]/g, ' '));
+        });
+        var lists = queries.map(function (query) { return searchIcons(iconEntries, query, 6); });
+        var out = [], seenUrls = {};
+        for (var rank = 0; rank < 6 && out.length < 6; rank++) {
+          lists.forEach(function (list) {
+            var item = list[rank];
+            if (item && out.length < 6 && !seenUrls[item.url]) { out.push(item); seenUrls[item.url] = true; }
+          });
+        }
+        return out;
+      }
+      function updateIconSelection() {
+        iconButtons.forEach(function (item) {
+          var selected = item.url === selectedIconUrl;
+          item.button.className = 'cx-icon-option' + (selected ? ' on' : '');
+          item.button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
+      }
+      function renderIconOptions() {
+        if (closed || iconBox.hidden) { return; }
+        if (!iconEntries) {
+          var status = iconError || 'Загружаю иконки...';
+          if (iconRenderKey !== status) {
+            clear(iconOptions); iconButtons = [];
+            iconOptions.appendChild(el('span', 'hint', status)); iconRenderKey = status;
+          }
+          return;
+        }
+        var query = iconSearch.value.trim();
+        var found = query ? searchIcons(iconEntries, query, 6) : suggestedIcons();
+        var renderKey = found.length ? found.map(function (item) { return item.url; }).join('\n') : 'empty:' + query;
+        if (renderKey === iconRenderKey) { updateIconSelection(); return; }
+        clear(iconOptions); iconButtons = []; iconRenderKey = renderKey;
+        if (!found.length) {
+          iconOptions.appendChild(el('span', 'hint', query ? 'Иконки не найдены. Можно указать URL вручную.' :
+            'Подходящих иконок нет. Поищите по другому названию или укажите URL.'));
+          return;
+        }
+        found.forEach(function (item) {
+          var option = button('', 'cx-icon-option');
+          option.setAttribute('aria-label', 'Выбрать иконку ' + item.label);
+          var img = el('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+          img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
+          option.appendChild(img);
+          option.appendChild(el('span', 'cx-icon-name', item.label));
+          option.appendChild(el('span', 'hint', item.source === 'qure' ? 'Qure' : 'Dashboard'));
+          option.addEventListener('click', function () {
+            selectedIconUrl = item.url; iconIn.value = item.url;
+            updateIconSelection(); showIconPreview();
+          });
+          iconButtons.push({ button: option, url: item.url });
+          iconOptions.appendChild(option);
+          img.src = item.url;
+        });
+        updateIconSelection();
+      }
       function showIconPreview() {
         if (!iconPreview) { return; }
         clear(iconPreview);
@@ -481,7 +569,29 @@ export function renderConstructor(modeBar, opts) {
         var ks = keys();
         if (iconBox) {
           var showIcon = ks.length > 0 && !model.findByName(nameIn.value.trim());
-          if (iconBox.hidden !== !showIcon) { iconBox.hidden = !showIcon; showIconPreview(); }
+          if (!showIcon) {
+            if (!iconBox.hidden) {
+              iconBox.hidden = true; clear(iconOptions); clear(iconPreview);
+              iconButtons = []; iconRenderKey = '';
+            }
+          } else {
+            var becameVisible = iconBox.hidden;
+            iconBox.hidden = false;
+            if (becameVisible) { showIconPreview(); }
+            renderIconOptions();
+            if (!iconRequested) {
+              iconRequested = true;
+              loadIconCatalog().then(function (entries) {
+                iconEntries = entries;
+                if (closed || iconBox.hidden) { return; }
+                renderIconOptions();
+              })['catch'](function (e) {
+                iconError = 'Каталог иконок не загрузился: ' + errText(e) + '. URL можно указать вручную.';
+                if (closed || iconBox.hidden) { return; }
+                renderIconOptions();
+              });
+            }
+          }
         }
         // без набора - пустая группа, домены вписываются вручную
         ok.disabled = target ? !ks.length : !ks.length && !nameIn.value.trim();
