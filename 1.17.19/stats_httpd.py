@@ -688,6 +688,7 @@ def progress_path():
 API_ROUTES = {
     "api/run": ("stats_run.sh", {}),
     "api/settings": ("stats_cgi.sh", {"API_JSON": "1"}),
+    "api/local-dns": ("stats_local_dns.sh", {}),
     # check синхронно качает манифест, хеши и заметки релиза с GitHub -
     # на медленном канале роутера 30 с не хватало.
     "api/updates/check": ("stats_update.sh", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),
@@ -716,6 +717,7 @@ API_ROUTES = {
     # проверку ядра и при провале - откат.
     "api/constructor": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "read", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/catalog": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "catalog"}),
+    "api/constructor/icons": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "icons"}),
     "api/constructor/wgconf": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "wgconf"}),
     # Подбор User-Agent: до 17 запросов к панели подписки по 10 секунд.
     "api/constructor/detect-ua": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "detect-ua", "MST_CGI_TIMEOUT": "200"}),

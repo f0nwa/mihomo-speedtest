@@ -20,13 +20,13 @@ MIHOMO_DIR=${MIHOMO_DIR:-/opt/etc/mihomo}
 CONFIG=${CONFIG:-$MIHOMO_DIR/config.yaml}
 # Полные инструменты проекта, нужные для планирования обновления (тот же
 # список используется ниже в install_files()).
-PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh ui.sh netcheck.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh reset_config.sh rule-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
+PROJECT_TOOLS="migrate_config.sh migrate_config.awk config_diff.awk install.sh uninstall.sh version_check.sh local_dns_check.sh ui.sh netcheck.sh update_interactive.sh setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh reset_config.sh rule-catalog.tsv icon-catalog.tsv update.sh update_plan.awk update_prepare.sh update_transaction.sh providers.awk mihomo-speedtest.sh"
 # Единый полный список всех файлов проекта под $SELFDIR/$DIR - источник
 # истины и для триггера bootstrap ниже, и для финальной проверки полноты
 # в main() (было два отдельных списка с двумя разными файлами-часовыми -
 # см. CHANGELOG: install.sh не замечал недостающий migrate_config.sh,
 # т.к. триггер смотрел только на version_check.sh/speedtest2.sh).
-ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_diag.sh diag.awk stats_components.sh stats_constructor.sh stats_httpd.py stats_files.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_files.js stats_app_diag.js stats_app_components.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
+ALL_PROJECT_FILES="$PROJECT_TOOLS speedtest2.sh prep.awk render_stats.awk stats_cgi.sh stats_local_dns.sh stats_run.sh stats_update.sh stats_config.sh stats_xkeen.sh stats_diag.sh diag.awk stats_components.sh stats_constructor.sh stats_httpd.py stats_files.py stats_auth.py stats_auth.sh stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_files.js stats_app_diag.js stats_app_components.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_codemirror.js stats_codemirror.css node_stats_update.awk sub_convert.awk render_progress.awk stats_service.sh stats_init.sh"
 INSTALLED_SCRIPT=${INSTALLED_SCRIPT:-$DIR/speedtest2.sh}
 STATS_SERVICE_DEST=${STATS_SERVICE_DEST:-$DIR/stats_service.sh}
 INITD_DIR=${INITD_DIR:-/opt/etc/init.d}
@@ -892,7 +892,7 @@ BOOTSTRAP_MIRRORS_DEFAULT='https://cdn.jsdelivr.net/gh/f0nwa/mihomo-speedtest ht
 
 bootstrap_mirrors() {
   if [ "${UPDATE_MIRRORS+set}" = set ]; then printf '%s\n' "$UPDATE_MIRRORS"
-  elif [ "$UPDATE_RELEASE_BASE" = "$BOOTSTRAP_DEFAULT_BASE" ]; then printf '%s\n' "$BOOTSTRAP_MIRRORS_DEFAULT"; fi
+  elif [ "${UPDATE_RELEASE_BASE:-$BOOTSTRAP_DEFAULT_BASE}" = "$BOOTSTRAP_DEFAULT_BASE" ]; then printf '%s\n' "$BOOTSTRAP_MIRRORS_DEFAULT"; fi
 }
 
 # Тихая загрузка для перебора источников: одна попытка, без обхода через
@@ -966,6 +966,33 @@ bootstrap_from_mirrors() {
   done
   rm -f "$BOOTSTRAP_MANIFEST"
   return 1
+}
+
+# Файл релиза $1 в $2 (размер $3): закреплённый источник (с повторами),
+# затем тот же файл того же релиза из зеркал, затем прежний путь с обходом
+# через mihomo и понятной ошибкой. GitHub может отдать манифест и оборвать
+# загрузку следующего файла. Целостность проверяет вызывающий по манифесту.
+bootstrap_get_file() {
+  bgf_rc=0
+  bootstrap_fetch_retry "$BOOTSTRAP_PINNED_BASE/$1" "$2" "$3" || bgf_rc=$?
+  if [ "$bgf_rc" = 0 ]; then
+    bgf_size=$(wc -c < "$2" | tr -d ' ')
+    [ "$bgf_size" -gt 0 ] && [ "$bgf_size" -le "$3" ] && return 0
+  fi
+  bgf_tag=${BOOTSTRAP_PINNED_BASE##*/}
+  if printf '%s\n' "$bgf_tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    for bgf_m in $(bootstrap_mirrors); do
+      case $bgf_m in https://*/gh/*) ;; *) continue ;; esac
+      case ${bgf_m#https://} in *[!A-Za-z0-9._/-]*) continue ;; esac
+      [ "$bgf_m@dist-$bgf_tag/$bgf_tag" != "$BOOTSTRAP_PINNED_BASE" ] || continue
+      if bootstrap_try_fetch "$bgf_m@dist-$bgf_tag/$bgf_tag/$1" "$2" "$3"; then
+        bgf_host=${bgf_m#https://}
+        ui_log "Файл $1: основной источник не отдал файл - взят с зеркала ${bgf_host%%/*}"
+        return 0
+      fi
+    done
+  fi
+  bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$1" "$2" "$3"
 }
 
 # --- Канал обновлений при установке с нуля --------------------------------
@@ -1099,7 +1126,7 @@ bootstrap_selfinstall() {
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
     bootstrap_idx=$((bootstrap_idx + 1))
     bootstrap_prog "Файлы релиза" "$bootstrap_idx" "$bootstrap_total" "$src"
-    bootstrap_download_to "$BOOTSTRAP_PINNED_BASE/$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
+    bootstrap_get_file "$src" "$BOOTSTRAP_WORK/$src" "$bytes" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     bootstrap_check_download "$BOOTSTRAP_WORK/$src" "$bytes" "$sum" || { rm -rf "$BOOTSTRAP_WORK"; return 1; }
     case $check in
       sh) sh -n "$BOOTSTRAP_WORK/$src" || { bootstrap_prog_close; ui_fail "Неверный синтаксис sh: $src"; rm -rf "$BOOTSTRAP_WORK"; return 1; } ;;
@@ -1479,6 +1506,8 @@ install_files() {
   atomic_install "$SELFDIR/render_stats.awk" "$DIR/render_stats.awk" || return 1
   atomic_install "$SELFDIR/stats_cgi.sh" "$DIR/stats_cgi.sh" || return 1
   chmod +x "$DIR/stats_cgi.sh"
+  atomic_install "$SELFDIR/stats_local_dns.sh" "$DIR/stats_local_dns.sh" || return 1
+  chmod +x "$DIR/stats_local_dns.sh"
   atomic_install "$SELFDIR/stats_run.sh" "$DIR/stats_run.sh" || return 1
   chmod +x "$DIR/stats_run.sh"
   atomic_install "$SELFDIR/stats_update.sh" "$DIR/stats_update.sh" || return 1

@@ -571,6 +571,78 @@ function buildResetStatsCard() {
   return c;
 }
 
+function buildLocalDnsCard() {
+  var c = card('Локальное имя панели');
+  c.appendChild(el('p', 'hint', 'Имя работает для устройств, которые используют DNS Keenetic. Настройки DHCP панель не меняет.'));
+  var label = el('label', 'field');
+  var input = document.createElement('input');
+  input.type = 'checkbox';
+  input.disabled = true;
+  label.appendChild(input);
+  label.appendChild(el('span', null, 'Включить speedtest.home.arpa'));
+  c.appendChild(label);
+  var status = el('p', 'hint', 'Проверяем DNS Keenetic...');
+  var link = el('a');
+  link.target = '_blank';
+  link.rel = 'noopener';
+  var linkRow = el('p', 'hint');
+  linkRow.hidden = true;
+  linkRow.appendChild(link);
+  var message = el('p', 'hint');
+  c.appendChild(status);
+  c.appendChild(linkRow);
+  c.appendChild(message);
+  var alive = viewGuard();
+
+  function showState(data) {
+    input.checked = !!data.enabled;
+    input.disabled = false;
+    if (data.enabled && data.available && data.url) {
+      status.textContent = 'Имя включено. Порт взят из настройки веб-службы.';
+      link.href = data.url;
+      link.textContent = data.url;
+      linkRow.hidden = false;
+    } else {
+      linkRow.hidden = true;
+      if (data.enabled) {
+        status.textContent = 'Запись сохранена, но имя сейчас недоступно: ' + (data.reason || 'проверьте DNS Keenetic');
+      } else if (data.available) {
+        status.textContent = 'Имя можно включить для домашней сети.';
+      } else {
+        status.textContent = 'Имя сейчас недоступно: ' + (data.reason || 'проверьте DNS Keenetic');
+      }
+    }
+  }
+
+  fetchJson('/api/local-dns').then(function (data) {
+    if (alive()) { showState(data); }
+  })['catch'](function (err) {
+    if (!alive()) { return; }
+    status.textContent = 'Не удалось проверить локальное имя: ' + err.message;
+  });
+
+  input.addEventListener('change', function () {
+    var requested = input.checked;
+    input.disabled = true;
+    message.textContent = '';
+    fetchJson('/api/local-dns', { method: 'POST', body: new URLSearchParams({ enabled: requested ? '1' : '0' }) }).then(function (data) {
+      if (!alive()) { return; }
+      showState(data);
+      message.className = data.ok ? 'msg-ok' : 'msg-err';
+      message.textContent = data.ok
+        ? (requested ? 'Локальное имя включено.' : 'Локальное имя отключено.')
+        : (data.reason || 'Не удалось изменить локальное имя.');
+    })['catch'](function (err) {
+      if (!alive()) { return; }
+      input.checked = !requested;
+      input.disabled = false;
+      message.className = 'msg-err';
+      message.textContent = 'Не удалось изменить локальное имя: ' + err.message;
+    });
+  });
+  return c;
+}
+
 export function renderSettings(justSavedMsg) {
   setLoading();
   var alive = viewGuard();
@@ -580,6 +652,7 @@ export function renderSettings(justSavedMsg) {
     var values = data.values || {};
     var form = buildSettingsForm(values);
     app.appendChild(form);
+    app.appendChild(buildLocalDnsCard());
     app.appendChild(buildResetStatsCard());
     if (justSavedMsg) { showFormMessage(form, justSavedMsg, 'ok'); }
   })['catch'](function (err) {

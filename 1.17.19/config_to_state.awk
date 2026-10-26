@@ -139,6 +139,7 @@ function read_defaults(  rc, line, n, f) {
     if (line == "" || line ~ /^#/) continue
     n = split(line, f, "\t")
     if (f[1] == "svc") { nds++; ds_id[nds] = f[2]; ds_name[f[2]] = f[3]; name_to_id[f[3]] = f[2]; is_default_id[f[2]] = 1 }
+    else if (f[1] == "icon") ds_icon[f[2]] = f[3]
     else if (f[1] == "prov") { p = f[3]; sub(/:.*/, "", p); default_prov[p] = f[2] }
     else if (f[1] == "rule") { ndr++; dr_owner[ndr] = f[2]; dr_text[ndr] = f[3]; dr_index[body(f[3])] = ndr }
     else if (f[1] == "fresh") fresh_rule[f[2] SUBSEP f[3]] = 1
@@ -262,6 +263,16 @@ END {
   # Встроенные сервисы, которых нет в config.yaml -> del.
   for (i = 1; i <= nds; i++) {
     if (!(ds_name[ds_id[i]] in cfg_group)) { out_line("del\t" ds_id[i]); deleted[ds_id[i]] = 1; rep("IMPORTED", "del|" ds_id[i]) }
+  }
+  for (i = 1; i <= nds; i++) {
+    id = ds_id[i]
+    if (id in deleted || !(ds_name[id] in cfg_group)) continue
+    gi = cfg_group[ds_name[id]]
+    if (!(gi in gr_icon) || gr_icon[gi] == ds_icon[id]) continue
+    if (gr_icon[gi] ~ /^https?:\/\/[^ "'#]+$/) {
+      out_line("icon\t" id "\t" gr_icon[gi])
+      rep("IMPORTED", "icon|" id)
+    } else rep("REVIEW", "builtin-group-icon|" ds_name[id])
   }
   # Свои группы.
   for (i = 1; i <= ngr; i++) {

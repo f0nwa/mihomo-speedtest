@@ -48,7 +48,7 @@ var RESERVED = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL
   'Заблок. сервисы', '⚡ Быстрый пул', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'];
 
 export function parseDefaults(text) {
-  var d = { sections: [], services: [], byId: {}, rules: [], checks: {} };
+  var d = { sections: [], services: [], byId: {}, rules: [], checks: {}, icons: {} };
   lines(text).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
     var f = line.split(TAB);
@@ -58,6 +58,7 @@ export function parseDefaults(text) {
       d.services.push(s); d.byId[s.id] = s;
     } else if (f[0] === 'rule') { d.rules.push({ owner: f[1], text: f[2] }); }
     else if (f[0] === 'check') { (d.checks[f[1]] = d.checks[f[1]] || []).push(f[2]); }
+    else if (f[0] === 'icon') { d.icons[f[1]] = f[2]; }
   });
   return d;
 }
@@ -370,6 +371,29 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       users.push({ id: id, name: name, section: section, extra: route ? [routeLine(id, route)] : [] });
       return id;
     },
+    defaultServiceIcon: function (id) { return d.icons[id] || ''; },
+    serviceIcon: function (id) {
+      needService(id);
+      var u = findUser(id);
+      var iconLine = u ? u.extra.filter(function (l) { return l.split(TAB)[0] === 'icon'; })[0]
+        : srcLines.filter(function (l) { var f = l.split(TAB); return f[0] === 'icon' && f[1] === id; })[0];
+      return iconLine ? iconLine.split(TAB)[2] : (u ? '' : (d.icons[id] || ''));
+    },
+    setServiceIcon: function (id, url) {
+      needService(id);
+      var u = findUser(id);
+      url = String(url || '');
+      if (url && !/^https?:\/\/[^\s"'#]+$/.test(url)) {
+        throw new Error('Адрес иконки должен начинаться с http(s):// и не содержать пробелов, кавычек и #');
+      }
+      var arr = u ? u.extra : srcLines;
+      var at = arr.findIndex(function (line) {
+        var f = line.split(TAB);
+        return f[0] === 'icon' && f[1] === id;
+      });
+      if (at >= 0) { arr.splice(at, 1); }
+      if (url && (u || url !== (d.icons[id] || ''))) { arr.splice(at < 0 ? arr.length : at, 0, ['icon', id, url].join(TAB)); }
+    },
     removeUserService: function (id) {
       users = users.filter(function (u) { return u.id !== id; });
       doms = doms.filter(function (x) { return x.owner !== id; });
@@ -678,4 +702,52 @@ export function searchCatalog(entries, query, limit) {
     .sort(function (a, b) { return a.score - b.score || (a.key < b.key ? -1 : (a.key > b.key ? 1 : 0)); })
     .slice(0, limit || 30)
     .map(function (g) { return { key: g.key, title: g.title, items: g.items }; });
+}
+
+// Каталог иконок: source, slug, название, URL, синонимы через |.
+// Битые строки пропускаются, изображения здесь не загружаются.
+export function parseIconCatalog(text) {
+  var out = [];
+  lines(text).forEach(function (line) {
+    if (!line || line.charAt(0) === '#') { return; }
+    var f = line.split(TAB);
+    if (f.length !== 5 || ['qure', 'dashboard'].indexOf(f[0]) < 0 ||
+        !/^[A-Za-z0-9][A-Za-z0-9._!&+-]*$/.test(f[1]) || !f[2].trim() ||
+        !/^https?:\/\/[^\s"'#]+$/.test(f[3])) { return; }
+    out.push({ source: f[0], slug: f[1], label: f[2], url: f[3],
+      aliases: f[4] ? f[4].split('|').filter(Boolean) : [] });
+  });
+  return out;
+}
+
+// Точное совпадение, затем начало названия, затем вхождение; при равном
+// качестве - алфавит. Один URL показывается один раз.
+export function searchIcons(entries, query, limit) {
+  var q = String(query || '').trim().toLowerCase();
+  if (!q) { return []; }
+  var matches = [];
+  entries.forEach(function (entry) {
+    var words = [entry.label, entry.slug].concat(entry.aliases || []);
+    var score = 3;
+    words.forEach(function (word) {
+      word = word.toLowerCase();
+      if (word === q) { score = 0; }
+      else if (score > 1 && word.indexOf(q) === 0) { score = 1; }
+      else if (score > 2 && word.indexOf(q) >= 0) { score = 2; }
+    });
+    if (score < 3) { matches.push({ entry: entry, score: score }); }
+  });
+  matches.sort(function (a, b) {
+    var an = a.entry.label.toLowerCase(), bn = b.entry.label.toLowerCase();
+    return a.score - b.score || (an < bn ? -1 : (an > bn ? 1 : 0)) ||
+      (a.entry.source < b.entry.source ? -1 : (a.entry.source > b.entry.source ? 1 : 0));
+  });
+  var out = [], seen = {};
+  var count = limit == null ? 6 : Math.max(0, Number(limit) || 0);
+  matches.forEach(function (item) {
+    if (out.length >= count || seen[item.entry.url]) { return; }
+    seen[item.entry.url] = true;
+    out.push(item.entry);
+  });
+  return out;
 }
