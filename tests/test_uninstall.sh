@@ -559,6 +559,29 @@ grep -qF 'Деинсталляция завершена' "$W10.err" || fail "с�
 
 echo "test_uninstall.sh: mihomo-speedtest symlink removal OK"
 
+# Выбранное в панели локальное имя снимается до удаления CGI-скрипта.
+W11=$(new_dir w11)
+printf '192.168.10.1\n' > "$W11/.local-dns-state"
+cat > "$W11/stats_local_dns.sh" <<'EOF'
+#!/bin/sh
+dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null > "$DIR/local-dns-request"
+rm -f "$DIR/.local-dns-state"
+printf 'Content-Type: application/json\n\n{"ok":true}'
+EOF
+chmod +x "$W11/stats_local_dns.sh"
+INITD11=$TEST_ROOT/initd11
+mkdir -p "$INITD11"
+if ! env PATH="$FAKEBIN:$PATH" DIR="$W11" BIN=mihomo MIHOMO_DIR="$W11" \
+    CONFIG="$W11/does-not-exist.yaml" INSTALLED_SCRIPT="$W11/speedtest2.sh" \
+    STATS_SERVICE_DEST="$W11/stats_service.sh" INITD_SCRIPT="$INITD11/S80speedtest-stats" \
+    STATS_SERVICE_RUNTIME_DIR="$TEST_ROOT/runtime11" STATS_HTTP_DIR="$W11/stats_www" \
+    STATS_UPDATE_RUNTIME_DIR="$TEST_ROOT/update-runtime11" SKIP_CONFIRM=1 \
+    sh "$UNINSTALL" >"$W11.out" 2>"$W11.err"; then
+  fail "сценарий 11: удаление с локальным именем упало ($(cat "$W11.err"))"
+fi
+[ "$(cat "$W11/local-dns-request" 2>/dev/null)" = enabled=0 ] || fail 'сценарий 11: локальное имя не отключено'
+[ ! -e "$W11/.local-dns-state" ] || fail 'сценарий 11: маркер локального имени не удалён'
+
 if [ "$FAILED" -ne 0 ]; then
   exit 1
 fi

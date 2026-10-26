@@ -120,6 +120,7 @@ echo "test_stats_httpd_py.sh: часть 1 (статика и SPA-фоллбек
 # =========================================================================
 W2=$TEST_ROOT/w2/www; A2=$TEST_ROOT/w2/app
 mkdir -p "$W2" "$A2"
+A2=$(CDPATH= cd -P -- "$A2" && pwd)
 printf '<html>spa-shell-marker</html>' > "$A2/stats_index.html"
 mk_script "$A2/stats_cgi.sh" <<'CGI'
 #!/bin/sh
@@ -132,6 +133,17 @@ echo "cwd=$(pwd)"
 if [ "$REQUEST_METHOD" = "POST" ]; then
   body=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
   echo "body=$body"
+fi
+CGI
+mk_script "$A2/stats_local_dns.sh" <<'CGI'
+#!/bin/sh
+echo 'Content-Type: application/json; charset=utf-8'
+echo
+if [ "$REQUEST_METHOD" = POST ]; then
+  body=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
+  printf '{"method":"POST","body":"%s"}' "$body"
+else
+  printf '{"method":"GET"}'
 fi
 CGI
 mk_script "$A2/stats_update.sh" <<'CGI'
@@ -161,6 +173,10 @@ echo "$OUT" | grep -q "api_json=1" || fail "/api/settings: нет API_JSON=1 ($O
 echo "$OUT" | grep -qF "cwd=$A2" || fail "API: скрипт должен запускаться из каталога приложения ($OUT)"
 OUT=$(curl -s -m 2 -X POST --data "node_cap=5" "http://127.0.0.1:$PORT2/api/settings")
 echo "$OUT" | grep -q "body=node_cap=5" || fail "API POST: тело запроса не дошло до скрипта ($OUT)"
+OUT=$(curl -s -m 2 "http://127.0.0.1:$PORT2/api/local-dns")
+echo "$OUT" | grep -q '"method":"GET"' || fail "/api/local-dns: GET не дошёл до скрипта ($OUT)"
+OUT=$(curl -s -m 2 -X POST --data 'enabled=1' "http://127.0.0.1:$PORT2/api/local-dns")
+echo "$OUT" | grep -q '"body":"enabled=1"' || fail "/api/local-dns: POST не дошёл до скрипта ($OUT)"
 
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/settings")
 [ "$code" = "401" ] || fail "API без сессии должен вернуть 401, получено $code"

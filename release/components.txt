@@ -18,6 +18,7 @@ NOTE|installer|Инструменты для следующей установк
 NOTE|config-tools|Новый шаблон и инструменты; рабочий config.yaml не изменяется
 
 DEPENDS|web|speedtest-runtime
+DEPENDS|web|installer
 DEPENDS|config-tools|installer
 
 FILE|updater|updater/update_transaction.sh|/opt/etc/mihomo-speedtest/update_transaction.sh|0755|sh
@@ -33,6 +34,7 @@ FILE|speedtest-runtime|speedtest-runtime/sub_convert.awk|/opt/etc/mihomo-speedte
 
 FILE|web|web/render_stats.awk|/opt/etc/mihomo-speedtest/render_stats.awk|0644|awk
 FILE|web|web/stats_cgi.sh|/opt/etc/mihomo-speedtest/stats_cgi.sh|0755|sh
+FILE|web|web/stats_local_dns.sh|/opt/etc/mihomo-speedtest/stats_local_dns.sh|0755|sh
 FILE|web|web/stats_run.sh|/opt/etc/mihomo-speedtest/stats_run.sh|0755|sh
 FILE|web|web/stats_update.sh|/opt/etc/mihomo-speedtest/stats_update.sh|0755|sh
 FILE|web|web/stats_config.sh|/opt/etc/mihomo-speedtest/stats_config.sh|0755|sh
