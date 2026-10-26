@@ -28,13 +28,13 @@ cat > "$WORK/bin/ndmc" <<'EOF'
 case $2 in
   'show running-config') cat "$FAKE_CONFIG" ;;
   'show interface Home') cat "$FAKE_INTERFACE" ;;
-  'ip host speedtest.home.arpa 192.168.10.1')
+  'ip host speedtest.home.arpa 192.168.10.1'|'ip host mi.home.arpa 192.168.10.1')
     printf '%s\n' "$2" >> "$FAKE_LOG"
     printf '%s\n' "$2" >> "$FAKE_CONFIG"
     ;;
-  'no ip host speedtest.home.arpa 192.168.10.1')
+  'no ip host speedtest.home.arpa 192.168.10.1'|'no ip host mi.home.arpa 192.168.10.1')
     printf '%s\n' "$2" >> "$FAKE_LOG"
-    grep -vFx 'ip host speedtest.home.arpa 192.168.10.1' "$FAKE_CONFIG" > "$FAKE_CONFIG.tmp"
+    grep -vFx "${2#no }" "$FAKE_CONFIG" > "$FAKE_CONFIG.tmp"
     mv "$FAKE_CONFIG.tmp" "$FAKE_CONFIG"
     ;;
   'system configuration save')
@@ -62,10 +62,11 @@ EOF
 request() {
   method=$1
   body=${2:-}
+  target=${3:-speedtest}
   if [ "$method" = POST ]; then
-    printf '%s' "$body" | REQUEST_METHOD=POST CONTENT_LENGTH=${#body} sh "$ROOT/web/stats_local_dns.sh"
+    printf '%s' "$body" | MST_LOCAL_DNS_TARGET="$target" REQUEST_METHOD=POST CONTENT_LENGTH=${#body} sh "$ROOT/web/stats_local_dns.sh"
   else
-    REQUEST_METHOD=GET sh "$ROOT/web/stats_local_dns.sh"
+    MST_LOCAL_DNS_TARGET="$target" REQUEST_METHOD=GET sh "$ROOT/web/stats_local_dns.sh"
   fi
 }
 
@@ -89,6 +90,21 @@ grep -qxF 'ip host speedtest.home.arpa 192.168.10.1' "$FAKE_CONFIG" || { echo 'F
 request POST enabled=1 > /dev/null
 [ "$(grep -c '^system configuration save$' "$FAKE_LOG")" = 1 ] || { echo 'FAIL: повторное включение переписало конфигурацию' >&2; exit 1; }
 
+OUT=$(request GET '' mihomo)
+assert_has "$OUT" '"enabled":false'
+OUT=$(request POST enabled=1 mihomo)
+assert_has "$OUT" '"ok":true'
+assert_has "$OUT" 'http://mi.home.arpa:9090/ui/'
+[ "$(cat "$DIR/.local-dns-mihomo-state")" = 192.168.10.1 ] || { echo 'FAIL: нет отдельного маркера Mihomo' >&2; exit 1; }
+grep -qxF 'ip host mi.home.arpa 192.168.10.1' "$FAKE_CONFIG" || { echo 'FAIL: DNS-запись Mihomo не создана' >&2; exit 1; }
+OUT=$(request GET)
+assert_has "$OUT" '"enabled":true'
+OUT=$(request POST enabled=0 mihomo)
+assert_has "$OUT" '"ok":true'
+[ ! -e "$DIR/.local-dns-mihomo-state" ] || { echo 'FAIL: маркер Mihomo не удалён' >&2; exit 1; }
+grep -qxF 'ip host speedtest.home.arpa 192.168.10.1' "$FAKE_CONFIG" || { echo 'FAIL: отключение Mihomo удалило speedtest' >&2; exit 1; }
+! grep -q '^ip host mi.home.arpa ' "$FAKE_CONFIG" || { echo 'FAIL: DNS-запись Mihomo не удалена' >&2; exit 1; }
+
 printf "STATS_HTTP_PORT='8902'\n" > "$ENV"
 OUT=$(request GET)
 assert_has "$OUT" 'http://speedtest.home.arpa:8902/stats'
@@ -104,7 +120,7 @@ assert_has "$OUT" '"ok":true'
 assert_has "$OUT" '"enabled":false'
 [ ! -e "$DIR/.local-dns-state" ] || { echo 'FAIL: маркер не удалён' >&2; exit 1; }
 ! grep -q '^ip host speedtest.home.arpa ' "$FAKE_CONFIG" || { echo 'FAIL: DNS-запись не удалена' >&2; exit 1; }
-[ "$(grep -c '^system configuration save$' "$FAKE_LOG")" = 2 ] || { echo 'FAIL: удаление не сохранено' >&2; exit 1; }
+[ "$(grep -c '^system configuration save$' "$FAKE_LOG")" = 4 ] || { echo 'FAIL: удаление не сохранено' >&2; exit 1; }
 
 reset_config '192.168.10.11 192.168.10.1'
 OUT=$(request POST enabled=1)
@@ -123,6 +139,12 @@ printf '%s\n' 'ip host speedtest.home.arpa 192.168.10.1' >> "$FAKE_CONFIG"
 OUT=$(request POST enabled=1)
 assert_has "$OUT" '"ok":false'
 [ ! -s "$FAKE_LOG" ] || { echo 'FAIL: присвоена существующая запись без маркера' >&2; exit 1; }
+
+reset_config 192.168.10.1
+printf '%s\n' 'ip host mi.home.arpa 192.168.10.1' >> "$FAKE_CONFIG"
+OUT=$(request POST enabled=1 mihomo)
+assert_has "$OUT" '"ok":false'
+[ ! -s "$FAKE_LOG" ] || { echo 'FAIL: присвоена существующая запись Mihomo без маркера' >&2; exit 1; }
 
 reset_config 192.168.10.1
 FAIL_SAVE=1; export FAIL_SAVE

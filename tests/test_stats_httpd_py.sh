@@ -141,9 +141,9 @@ echo 'Content-Type: application/json; charset=utf-8'
 echo
 if [ "$REQUEST_METHOD" = POST ]; then
   body=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
-  printf '{"method":"POST","body":"%s"}' "$body"
+  printf '{"method":"POST","body":"%s","target":"%s"}' "$body" "${MST_LOCAL_DNS_TARGET:-speedtest}"
 else
-  printf '{"method":"GET"}'
+  printf '{"method":"GET","target":"%s"}' "${MST_LOCAL_DNS_TARGET:-speedtest}"
 fi
 CGI
 mk_script "$A2/stats_update.sh" <<'CGI'
@@ -175,15 +175,24 @@ OUT=$(curl -s -m 2 -X POST --data "node_cap=5" "http://127.0.0.1:$PORT2/api/sett
 echo "$OUT" | grep -q "body=node_cap=5" || fail "API POST: тело запроса не дошло до скрипта ($OUT)"
 OUT=$(curl -s -m 2 "http://127.0.0.1:$PORT2/api/local-dns")
 echo "$OUT" | grep -q '"method":"GET"' || fail "/api/local-dns: GET не дошёл до скрипта ($OUT)"
+echo "$OUT" | grep -q '"target":"speedtest"' || fail "/api/local-dns: неверная цель ($OUT)"
 OUT=$(curl -s -m 2 -X POST --data 'enabled=1' "http://127.0.0.1:$PORT2/api/local-dns")
 echo "$OUT" | grep -q '"body":"enabled=1"' || fail "/api/local-dns: POST не дошёл до скрипта ($OUT)"
+OUT=$(curl -s -m 2 "http://127.0.0.1:$PORT2/api/mihomo-local-dns")
+echo "$OUT" | grep -q '"target":"mihomo"' || fail "/api/mihomo-local-dns: неверная цель ($OUT)"
+OUT=$(curl -s -m 2 -X POST --data 'enabled=1' "http://127.0.0.1:$PORT2/api/mihomo-local-dns")
+echo "$OUT" | grep -q '"body":"enabled=1","target":"mihomo"' || fail "/api/mihomo-local-dns: POST не дошёл до скрипта ($OUT)"
 
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/settings")
 [ "$code" = "401" ] || fail "API без сессии должен вернуть 401, получено $code"
+code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/api/mihomo-local-dns")
+[ "$code" = "401" ] || fail "Локальное имя Mihomo без сессии должно вернуть 401, получено $code"
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' -u admin:hunter2 "http://127.0.0.1:$PORT2/api/settings")
 [ "$code" = "401" ] || fail "Basic Auth не должен обходить вход по сессии, получено $code"
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' -H "Cookie: $AUTH_COOKIE" -X POST "http://127.0.0.1:$PORT2/api/settings")
 [ "$code" = "403" ] || fail "POST без CSRF должен вернуть 403, получено $code"
+code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' -H "Cookie: $AUTH_COOKIE" -X POST "http://127.0.0.1:$PORT2/api/mihomo-local-dns")
+[ "$code" = "403" ] || fail "POST локального имени Mihomo без CSRF должен вернуть 403, получено $code"
 code=$(command curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT2/")
 [ "$code" = "302" ] || fail "страница без сессии должна перенаправляться на вход, получено $code"
 

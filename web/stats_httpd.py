@@ -688,7 +688,8 @@ def progress_path():
 API_ROUTES = {
     "api/run": ("stats_run.sh", {}),
     "api/settings": ("stats_cgi.sh", {"API_JSON": "1"}),
-    "api/local-dns": ("stats_local_dns.sh", {}),
+    "api/local-dns": ("stats_local_dns.sh", {"MST_LOCAL_DNS_TARGET": "speedtest"}),
+    "api/mihomo-local-dns": ("stats_local_dns.sh", {"MST_LOCAL_DNS_TARGET": "mihomo"}),
     # check синхронно качает манифест, хеши и заметки релиза с GitHub -
     # на медленном канале роутера 30 с не хватало.
     "api/updates/check": ("stats_update.sh", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),

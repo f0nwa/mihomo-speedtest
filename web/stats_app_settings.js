@@ -571,15 +571,15 @@ function buildResetStatsCard() {
   return c;
 }
 
-function buildLocalDnsCard() {
-  var c = card('Локальное имя панели');
+function buildLocalDnsCard(options) {
+  var c = card(options.title);
   c.appendChild(el('p', 'hint', 'Имя работает для устройств, которые используют DNS Keenetic. Настройки DHCP панель не меняет.'));
   var label = el('label', 'field');
   var input = document.createElement('input');
   input.type = 'checkbox';
   input.disabled = true;
   label.appendChild(input);
-  label.appendChild(el('span', null, 'Включить speedtest.home.arpa'));
+  label.appendChild(el('span', null, 'Включить ' + options.name));
   c.appendChild(label);
   var status = el('p', 'hint', 'Проверяем DNS Keenetic...');
   var link = el('a');
@@ -598,7 +598,7 @@ function buildLocalDnsCard() {
     input.checked = !!data.enabled;
     input.disabled = false;
     if (data.enabled && data.available && data.url) {
-      status.textContent = 'Имя включено. Порт взят из настройки веб-службы.';
+      status.textContent = options.enabledText;
       link.href = data.url;
       link.textContent = data.url;
       linkRow.hidden = false;
@@ -614,7 +614,7 @@ function buildLocalDnsCard() {
     }
   }
 
-  fetchJson('/api/local-dns').then(function (data) {
+  fetchJson(options.endpoint).then(function (data) {
     if (alive()) { showState(data); }
   })['catch'](function (err) {
     if (!alive()) { return; }
@@ -625,7 +625,7 @@ function buildLocalDnsCard() {
     var requested = input.checked;
     input.disabled = true;
     message.textContent = '';
-    fetchJson('/api/local-dns', { method: 'POST', body: new URLSearchParams({ enabled: requested ? '1' : '0' }) }).then(function (data) {
+    fetchJson(options.endpoint, { method: 'POST', body: new URLSearchParams({ enabled: requested ? '1' : '0' }) }).then(function (data) {
       if (!alive()) { return; }
       showState(data);
       message.className = data.ok ? 'msg-ok' : 'msg-err';
@@ -652,7 +652,18 @@ export function renderSettings(justSavedMsg) {
     var values = data.values || {};
     var form = buildSettingsForm(values);
     app.appendChild(form);
-    app.appendChild(buildLocalDnsCard());
+    app.appendChild(buildLocalDnsCard({
+      title: 'Локальное имя панели',
+      name: 'speedtest.home.arpa',
+      endpoint: '/api/local-dns',
+      enabledText: 'Имя включено. Порт взят из настройки веб-службы.'
+    }));
+    app.appendChild(buildLocalDnsCard({
+      title: 'Локальное имя Zashboard',
+      name: 'mi.home.arpa',
+      endpoint: '/api/mihomo-local-dns',
+      enabledText: 'Имя включено. Zashboard доступен на порту 9090.'
+    }));
     app.appendChild(buildResetStatsCard());
     if (justSavedMsg) { showFormMessage(form, justSavedMsg, 'ok'); }
   })['catch'](function (err) {
