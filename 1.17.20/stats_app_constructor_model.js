@@ -48,7 +48,7 @@ var RESERVED = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL
   'Заблок. сервисы', '⚡ Быстрый пул', '⚡ Самые быстрые + Fallback', '🚀 Авто по пингу', '🛡️Fallback-Stable', '⚙️Manual'];
 
 export function parseDefaults(text) {
-  var d = { sections: [], services: [], byId: {}, rules: [], checks: {} };
+  var d = { sections: [], services: [], byId: {}, rules: [], checks: {}, icons: {} };
   lines(text).forEach(function (line) {
     if (!line || line.charAt(0) === '#') { return; }
     var f = line.split(TAB);
@@ -58,6 +58,7 @@ export function parseDefaults(text) {
       d.services.push(s); d.byId[s.id] = s;
     } else if (f[0] === 'rule') { d.rules.push({ owner: f[1], text: f[2] }); }
     else if (f[0] === 'check') { (d.checks[f[1]] = d.checks[f[1]] || []).push(f[2]); }
+    else if (f[0] === 'icon') { d.icons[f[1]] = f[2]; }
   });
   return d;
 }
@@ -142,7 +143,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var unruled = [];          // [{owner, text}] в порядке
   var users = [];            // свои сервисы [{id,name,section,extra:[строки icon/gkey]}]
   var srcLines = [];         // строки src как есть
-  var doms = [];             // [{owner,type,value}]
+  var doms = [];             // [{owner,type,value,removed}]
   var provLines = [];        // строки prov как есть
   var userRules = [];
   var bsets = [];            // [{group,key,value}] отличия базовых групп
@@ -283,7 +284,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         });
       }
       doms.forEach(function (x) {
-        if (x.owner === id) { out.push({ type: x.type, value: x.value.toLowerCase(), builtin: false, removed: false }); }
+        if (x.owner === id) { out.push({ type: x.type, value: x.value.toLowerCase(), builtin: false, removed: !!x.removed }); }
       });
       return out;
     },
@@ -370,16 +371,28 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       users.push({ id: id, name: name, section: section, extra: route ? [routeLine(id, route)] : [] });
       return id;
     },
-    setServiceIcon: function (id, url) {
+    defaultServiceIcon: function (id) { return d.icons[id] || ''; },
+    serviceIcon: function (id) {
+      needService(id);
       var u = findUser(id);
-      if (!u) { throw new Error('Иконку можно задать только своему сервису'); }
+      var iconLine = u ? u.extra.filter(function (l) { return l.split(TAB)[0] === 'icon'; })[0]
+        : srcLines.filter(function (l) { var f = l.split(TAB); return f[0] === 'icon' && f[1] === id; })[0];
+      return iconLine ? iconLine.split(TAB)[2] : (u ? '' : (d.icons[id] || ''));
+    },
+    setServiceIcon: function (id, url) {
+      needService(id);
+      var u = findUser(id);
       url = String(url || '');
       if (url && !/^https?:\/\/[^\s"'#]+$/.test(url)) {
         throw new Error('Адрес иконки должен начинаться с http(s):// и не содержать пробелов, кавычек и #');
       }
-      var at = u.extra.findIndex(function (line) { return line.split(TAB)[0] === 'icon'; });
-      if (at >= 0) { u.extra.splice(at, 1); }
-      if (url) { u.extra.splice(at < 0 ? 0 : at, 0, ['icon', id, url].join(TAB)); }
+      var arr = u ? u.extra : srcLines;
+      var at = arr.findIndex(function (line) {
+        var f = line.split(TAB);
+        return f[0] === 'icon' && f[1] === id;
+      });
+      if (at >= 0) { arr.splice(at, 1); }
+      if (url && (u || url !== (d.icons[id] || ''))) { arr.splice(at < 0 ? arr.length : at, 0, ['icon', id, url].join(TAB)); }
     },
     removeUserService: function (id) {
       users = users.filter(function (u) { return u.id !== id; });
@@ -414,15 +427,33 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       checkDomain(value);
       var r = findUser(id) ? null : builtinDomainRule(id, type, value);
       if (r && isUnruled(id, r.text)) { model.restoreRule(id, r.text); return; }
-      if (r || doms.some(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === value; })) {
+      if (r) { throw new Error('Домен ' + value + ' уже есть'); }
+      var own = doms.find(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === value; });
+      if (own) {
+        if (own.removed) { own.removed = false; return; }
         throw new Error('Домен ' + value + ' уже есть');
       }
       doms.push({ owner: id, type: type, value: value });
     },
+    editDomain: function (id, type, value, nextValue) {
+      needService(id);
+      var own = doms.find(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase(); });
+      if (!own || own.removed) { throw new Error('Свой домен не найден'); }
+      nextValue = cleanDomain(nextValue);
+      checkDomain(nextValue);
+      if (own.value.toLowerCase() === nextValue) { return; }
+      if ((!findUser(id) && builtinDomainRule(id, type, nextValue)) ||
+          doms.some(function (x) { return x !== own && x.owner === id && x.type === type && x.value.toLowerCase() === nextValue; })) {
+        throw new Error('Домен ' + nextValue + ' уже есть');
+      }
+      own.value = nextValue;
+    },
     removeDomain: function (id, type, value) {
       var r = findUser(id) ? null : builtinDomainRule(id, type, value);
       if (r) { model.removeRule(id, r.text); return; }
-      doms = doms.filter(function (x) { return !(x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase()); });
+      doms.forEach(function (x) {
+        if (x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase()) { x.removed = true; }
+      });
     },
     removeRule: function (id, text) { if (!isUnruled(id, text)) { unruled.push({ owner: id, text: text }); } },
     restoreRule: function (id, text) {
@@ -541,7 +572,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       srcLines.forEach(function (l) { out.push(l); });
       // домены убранного встроенного сервиса сохраняются (сборка их
       // пропускает) - «Вернуть» сервис возвращает и их
-      doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
+      doms.forEach(function (x) { if (!x.removed) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); } });
       Object.keys(checks).forEach(function (id) { out.push(['check', id, checks[id]].join(TAB)); });
       Object.keys(quic).forEach(function (id) { out.push('noquic' + TAB + id); });
       provLines.forEach(function (l) { out.push(l); });

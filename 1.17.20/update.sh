@@ -227,10 +227,22 @@ download_to() {
   # Лимит касается всех файлов процесса транспорта, включая его журнал.
   # Минимум 256 КиБ допускает небольшой журнал даже при загрузке короткого файла.
   [ "$write_limit" -ge 262144 ] || write_limit=262144
-  if (ulimit -f "$(( (write_limit + 511) / 512 ))"; http_get "$1" "$3") > "$2"; then
+  # Быстрые сетевые сбои (DNS, отказ, обрыв TLS/соединения) повторяем до
+  # UPDATE_RETRIES раз (по умолчанию 3) с паузой UPDATE_RETRY_DELAY*N с:
+  # GitHub с роутера часто рвёт отдельные соединения посреди загрузки.
+  dl_try=1
+  while :; do
+    download_status=0
+    (ulimit -f "$(( (write_limit + 511) / 512 ))"; http_get "$1" "$3") > "$2" || download_status=$?
+    [ "$download_status" != 0 ] || break
+    case $download_status in 6|7|35|52|56) ;; *) break ;; esac
+    [ "$dl_try" -lt "${UPDATE_RETRIES:-3}" ] || break
+    sleep $(( ${UPDATE_RETRY_DELAY:-2} * dl_try ))
+    dl_try=$((dl_try + 1))
+  done
+  if [ "$download_status" = 0 ]; then
     :
   else
-    download_status=$?
     [ -z "${DOWNLOAD_SOFT:-}" ] || return 1
     dl_why=$(update_reason "$download_status")
     [ -z "$dl_why" ] || dl_why=": $dl_why"
@@ -245,6 +257,30 @@ download_to() {
     [ -z "${DOWNLOAD_SOFT:-}" ] || return 1
     die 'Пустой файл или превышен лимит загрузки'
   fi
+}
+download_release_file() {
+  # $1=имя файла релиза, $2=куда, $3=размер. Сначала закреплённый источник
+  # (PINNED_BASE); не вышло - тот же файл того же релиза из зеркал (ветка
+  # dist, см. select_source): GitHub может отдать манифест и оборвать
+  # загрузку следующего файла. Целостность проверяет вызывающий
+  # (check_download по манифесту). Все источники молчат - прежняя ошибка
+  # с адресом основного источника и диагностикой.
+  DOWNLOAD_SOFT=1 download_to "$PINNED_BASE/$1" "$2" "$3" 2>/dev/null && return 0
+  drf_tag=$(manifest_field "$MANIFEST_TMP" RELEASE_TAG)
+  if printf '%s\n' "$drf_tag" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    for drf_mirror in $RELEASE_MIRRORS; do
+      case $drf_mirror in https://*/gh/*) ;; *) continue ;; esac
+      case ${drf_mirror#https://} in *[!A-Za-z0-9._/-]*) continue ;; esac
+      drf_base=$drf_mirror@dist-$drf_tag/$drf_tag
+      [ "$drf_base" != "$PINNED_BASE" ] || continue
+      if DOWNLOAD_SOFT=1 download_to "$drf_base/$1" "$2" "$3" 2>/dev/null; then
+        drf_host=${drf_mirror#https://}; drf_host=${drf_host%%/*}
+        echo "Файл $1: основной источник не отдал файл - взят с зеркала $drf_host" >&2
+        return 0
+      fi
+    done
+  fi
+  download_to "$PINNED_BASE/$1" "$2" "$3"
 }
 check_download() {
   [ "$(wc -c < "$1" | tr -d ' ')" = "$2" ] || die 'Неверный размер файла релиза'
@@ -320,7 +356,12 @@ read_release_mirrors() {
     sed -n 's/^[[:space:]]*UPDATE_MIRRORS=//p' "$UPDATE_ENV_FILE" | tail -n 1 | tr -d "\"'"
     return 0
   fi
-  [ "$UPDATE_RELEASE_BASE" != "$UPDATE_DEFAULT_BASE" ] || printf '%s\n' "$UPDATE_MIRRORS_DEFAULT"
+  # Штатный источник - и закреплённый: дочерний движок получает уже
+  # .../releases/download/<тег> (канал dev) или адрес зеркала.
+  case $UPDATE_RELEASE_BASE in
+    "$UPDATE_DEFAULT_BASE"|https://github.com/f0nwa/mihomo-speedtest/releases/download/*|https://*.jsdelivr.net/gh/f0nwa/mihomo-speedtest@dist-*)
+      printf '%s\n' "$UPDATE_MIRRORS_DEFAULT" ;;
+  esac
 }
 # newest_tag: наибольший тег x.y.z из строк stdin (покомпонентно, числами).
 newest_tag() {
@@ -432,7 +473,7 @@ bootstrap_prepare() {
   pinned_base
   mkdir "$WORK/bootstrap"
   while IFS='|' read -r kind cid src dest bytes sum mode check; do
-    download_to "$PINNED_BASE/$src" "$WORK/bootstrap/$src" "$bytes"
+    download_release_file "$src" "$WORK/bootstrap/$src" "$bytes"
     check_download "$WORK/bootstrap/$src" "$bytes" "$sum"
     case $check in
       sh) sh -n "$WORK/bootstrap/$src" || die 'Неверный синтаксис bootstrap' ;;
