@@ -259,10 +259,26 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function domainRow(id, d) {
-      var r = el('div', 'xk-row cx-row' + (d.removed ? ' off' : ''));
-      r.appendChild(el('span', 'xk-val', d.value));
+      var r = el('div', 'xk-row cx-row' + (d.removed ? (d.builtin ? ' off' : ' cx-domain-removed') : ''));
+      if (d.builtin) {
+        r.appendChild(el('span', 'xk-val', d.value));
+      } else {
+        var inp = el('input', 'cx-name'); inp.type = 'text'; inp.value = d.value; inp.spellcheck = false;
+        inp.disabled = d.removed;
+        inp.setAttribute('aria-label', 'Домен ' + d.value);
+        var save = button('Сохранить', 'small'); save.hidden = true;
+        inp.addEventListener('input', function () { save.hidden = inp.value.trim() === d.value; });
+        inp.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !save.hidden) { e.preventDefault(); save.click(); }
+          if (e.key === 'Escape') { inp.value = d.value; save.hidden = true; }
+        });
+        save.addEventListener('click', function () { edit(function () { model.editDomain(id, d.type, d.value, inp.value); }); });
+        r.appendChild(inp); r.appendChild(save);
+      }
       r.appendChild(el('span', 'geo-code', TYPE_LABELS[d.type] + (d.builtin ? ', встроенный' : '')));
+      if (d.removed && !d.builtin) { r.appendChild(el('span', 'cx-domain-removed-note', 'Убрана')); }
       var b = button(d.removed ? 'Вернуть' : 'Убрать', 'small muted');
+      b.setAttribute('aria-label', (d.removed ? 'Вернуть ' : 'Убрать ') + d.value);
       b.addEventListener('click', function () {
         edit(function () {
           if (d.removed) { model.addDomain(id, d.type, d.value); } else { model.removeDomain(id, d.type, d.value); }

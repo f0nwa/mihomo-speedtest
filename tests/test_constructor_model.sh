@@ -404,6 +404,34 @@ mq.setBlockQuic(qid, true);
 mq.removeUserService(qid);
 eq(mq.serialize().services, ['noquic', 'youtube'].join(T) + '\n', 'noquic: удаляется вместе со своим сервисом');
 
+// Свой домен остаётся в списке до применения, редактируется на месте и возвращается.
+const ownLines = ['dom', 'youtube', 'suffix', 'first.example'].join(T) + '\n' +
+  ['dom', 'youtube', 'full', 'second.example'].join(T) + '\n';
+const md = M.createModel(D, ownLines, '');
+md.removeDomain('youtube', 'suffix', 'first.example');
+eq(md.domains('youtube')[0], { type: 'suffix', value: 'first.example', builtin: false, removed: true }, 'удалённый свой домен остаётся в модели');
+eq(md.serialize().services, ['dom', 'youtube', 'full', 'second.example'].join(T) + '\n', 'удалённый домен не попадает в конфиг');
+md.addDomain('youtube', 'suffix', 'first.example');
+eq(md.domains('youtube')[0].removed, false, 'повторное добавление возвращает домен');
+eq(md.serialize().services, ownLines, 'возврат восстанавливает порядок и конфиг');
+md.editDomain('youtube', 'suffix', 'first.example', 'https://Edited.Example/path');
+eq(md.domains('youtube')[0].value, 'edited.example', 'редактирование очищает адрес');
+eq(md.domains('youtube')[1].value, 'second.example', 'редактирование не затрагивает соседний домен');
+const editedLines = ['dom', 'youtube', 'suffix', 'edited.example'].join(T) + '\n' +
+  ['dom', 'youtube', 'full', 'second.example'].join(T) + '\n';
+eq(md.serialize().services, editedLines, 'редактирование сохраняет место строки');
+throws(() => md.editDomain('youtube', 'suffix', 'edited.example', 'bad domain'), 'ошибка при недопустимом домене');
+md.addDomain('kinopub', 'suffix', 'candidate.example');
+throws(() => md.editDomain('kinopub', 'suffix', 'candidate.example', 'pkr.ovh'), 'нельзя дублировать встроенный домен');
+md.addDomain('youtube', 'suffix', 'taken.example');
+throws(() => md.editDomain('youtube', 'suffix', 'edited.example', 'taken.example'), 'нельзя дублировать свой домен');
+eq(md.domains('youtube')[0].value, 'edited.example', 'неудачная правка не меняет домен');
+md.removeDomain('youtube', 'suffix', 'edited.example');
+eq(md.domains('youtube')[0].removed, true, 'редактированный домен можно убрать');
+md.addDomain('youtube', 'suffix', 'edited.example');
+eq(md.domains('youtube')[0].removed, false, 'редактированный домен можно вернуть');
+throws(() => md.editDomain('kinopub', 'suffix', 'pkr.ovh', 'new.example'), 'встроенный домен нельзя редактировать');
+
 if (failed) process.exit(1);
 console.log('OK test_constructor_model');
 JS

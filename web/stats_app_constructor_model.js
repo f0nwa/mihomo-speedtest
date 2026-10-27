@@ -143,7 +143,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
   var unruled = [];          // [{owner, text}] в порядке
   var users = [];            // свои сервисы [{id,name,section,extra:[строки icon/gkey]}]
   var srcLines = [];         // строки src как есть
-  var doms = [];             // [{owner,type,value}]
+  var doms = [];             // [{owner,type,value,removed}]
   var provLines = [];        // строки prov как есть
   var userRules = [];
   var bsets = [];            // [{group,key,value}] отличия базовых групп
@@ -284,7 +284,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
         });
       }
       doms.forEach(function (x) {
-        if (x.owner === id) { out.push({ type: x.type, value: x.value.toLowerCase(), builtin: false, removed: false }); }
+        if (x.owner === id) { out.push({ type: x.type, value: x.value.toLowerCase(), builtin: false, removed: !!x.removed }); }
       });
       return out;
     },
@@ -427,15 +427,33 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       checkDomain(value);
       var r = findUser(id) ? null : builtinDomainRule(id, type, value);
       if (r && isUnruled(id, r.text)) { model.restoreRule(id, r.text); return; }
-      if (r || doms.some(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === value; })) {
+      if (r) { throw new Error('Домен ' + value + ' уже есть'); }
+      var own = doms.find(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === value; });
+      if (own) {
+        if (own.removed) { own.removed = false; return; }
         throw new Error('Домен ' + value + ' уже есть');
       }
       doms.push({ owner: id, type: type, value: value });
     },
+    editDomain: function (id, type, value, nextValue) {
+      needService(id);
+      var own = doms.find(function (x) { return x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase(); });
+      if (!own || own.removed) { throw new Error('Свой домен не найден'); }
+      nextValue = cleanDomain(nextValue);
+      checkDomain(nextValue);
+      if (own.value.toLowerCase() === nextValue) { return; }
+      if ((!findUser(id) && builtinDomainRule(id, type, nextValue)) ||
+          doms.some(function (x) { return x !== own && x.owner === id && x.type === type && x.value.toLowerCase() === nextValue; })) {
+        throw new Error('Домен ' + nextValue + ' уже есть');
+      }
+      own.value = nextValue;
+    },
     removeDomain: function (id, type, value) {
       var r = findUser(id) ? null : builtinDomainRule(id, type, value);
       if (r) { model.removeRule(id, r.text); return; }
-      doms = doms.filter(function (x) { return !(x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase()); });
+      doms.forEach(function (x) {
+        if (x.owner === id && x.type === type && x.value.toLowerCase() === String(value).toLowerCase()) { x.removed = true; }
+      });
     },
     removeRule: function (id, text) { if (!isUnruled(id, text)) { unruled.push({ owner: id, text: text }); } },
     restoreRule: function (id, text) {
@@ -554,7 +572,7 @@ export function createModel(defaultsText, servicesText, userRulesText, templateB
       srcLines.forEach(function (l) { out.push(l); });
       // домены убранного встроенного сервиса сохраняются (сборка их
       // пропускает) - «Вернуть» сервис возвращает и их
-      doms.forEach(function (x) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); });
+      doms.forEach(function (x) { if (!x.removed) { out.push(['dom', x.owner, x.type, x.value].join(TAB)); } });
       Object.keys(checks).forEach(function (id) { out.push(['check', id, checks[id]].join(TAB)); });
       Object.keys(quic).forEach(function (id) { out.push('noquic' + TAB + id); });
       provLines.forEach(function (l) { out.push(l); });
