@@ -63,13 +63,21 @@ function join_series_values(p_idx, p_speed, pn, run_n,   i, j, out) {
 # кавычка и управляющие \n/\r/\t. HTML-сущности НЕ добавляются -
 # потребитель JSON (JSON.parse) ожидает сырую строку, а экранирует при
 # выводе сам браузерный код (textContent).
-function json_esc(s) {
-  gsub(/\\/, "\\\\", s)
-  gsub(/"/, "\\\"", s)
-  gsub(/\t/, "\\t", s)
-  gsub(/\r/, "\\r", s)
-  gsub(/\n/, "\\n", s)
-  return s
+function json_esc(s,   i, c, out) {
+  # gsub повторно разбирает слеши в строке замены; BusyBox awk может
+  # оставить один слеш и испортить JSON (например, имя с буквальным \U).
+  # Собираем результат напрямую, сохраняя исходное имя после JSON.parse.
+  out = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\\") out = out "\\\\"
+    else if (c == "\"") out = out "\\\""
+    else if (c == "\t") out = out "\\t"
+    else if (c == "\r") out = out "\\r"
+    else if (c == "\n") out = out "\\n"
+    else out = out c
+  }
+  return out
 }
 
 function json_str(s) {
