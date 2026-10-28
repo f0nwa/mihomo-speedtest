@@ -259,10 +259,26 @@ export function renderConstructor(modeBar, opts) {
     }
 
     function domainRow(id, d) {
-      var r = el('div', 'xk-row cx-row' + (d.removed ? ' off' : ''));
-      r.appendChild(el('span', 'xk-val', d.value));
+      var r = el('div', 'xk-row cx-row' + (d.removed ? (d.builtin ? ' off' : ' cx-domain-removed') : ''));
+      if (d.builtin) {
+        r.appendChild(el('span', 'xk-val', d.value));
+      } else {
+        var inp = el('input', 'cx-name'); inp.type = 'text'; inp.value = d.value; inp.spellcheck = false;
+        inp.disabled = d.removed;
+        inp.setAttribute('aria-label', 'Домен ' + d.value);
+        var save = button('Сохранить', 'small'); save.hidden = true;
+        inp.addEventListener('input', function () { save.hidden = inp.value.trim() === d.value; });
+        inp.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !save.hidden) { e.preventDefault(); save.click(); }
+          if (e.key === 'Escape') { inp.value = d.value; save.hidden = true; }
+        });
+        save.addEventListener('click', function () { edit(function () { model.editDomain(id, d.type, d.value, inp.value); }); });
+        r.appendChild(inp); r.appendChild(save);
+      }
       r.appendChild(el('span', 'geo-code', TYPE_LABELS[d.type] + (d.builtin ? ', встроенный' : '')));
+      if (d.removed && !d.builtin) { r.appendChild(el('span', 'cx-domain-removed-note', 'Убрана')); }
       var b = button(d.removed ? 'Вернуть' : 'Убрать', 'small muted');
+      b.setAttribute('aria-label', (d.removed ? 'Вернуть ' : 'Убрать ') + d.value);
       b.addEventListener('click', function () {
         edit(function () {
           if (d.removed) { model.addDomain(id, d.type, d.value); } else { model.removeDomain(id, d.type, d.value); }
@@ -326,6 +342,94 @@ export function renderConstructor(modeBar, opts) {
       return wrap;
     }
 
+    function serviceIconRow(id) {
+      var svc = model.services().filter(function (s) { return s.id === id; })[0];
+      var resetUrl = svc.user ? '' : model.defaultServiceIcon(id);
+      var wrap = el('div', 'cx-icon-picker');
+      wrap.appendChild(el('label', null, 'Иконка группы'));
+      var row = el('div', 'cx-icon-row');
+      var iconIn = el('input'); iconIn.type = 'url'; iconIn.value = model.serviceIcon(id);
+      iconIn.placeholder = 'https://example.org/icon.svg';
+      iconIn.setAttribute('aria-label', 'URL иконки группы');
+      var save = button('Сохранить иконку', 'small');
+      save.addEventListener('click', function () { edit(function () { model.setServiceIcon(id, iconIn.value.trim()); }); });
+      iconIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { save.click(); } });
+      row.appendChild(iconIn); row.appendChild(save);
+      wrap.appendChild(row);
+      var preview = el('div', 'cx-icon-preview'); wrap.appendChild(preview);
+      function showPreview() {
+        clear(preview);
+        var url = iconIn.value.trim();
+        if (!url) { return; }
+        if (!/^https?:\/\/[^\s"'#]+$/.test(url)) {
+          preview.appendChild(el('span', 'hint', 'Укажите прямой URL без пробелов, кавычек и #.'));
+          return;
+        }
+        var img = el('img'); img.alt = 'Текущая иконка группы';
+        img.addEventListener('error', function () {
+          if (img.parentNode !== preview) { return; }
+          clear(preview);
+          preview.appendChild(el('span', 'hint', 'Не удалось загрузить предпросмотр. URL всё ещё можно сохранить.'));
+        });
+        preview.appendChild(img); img.src = url;
+      }
+      iconIn.addEventListener('change', showPreview);
+      showPreview();
+      var actions = el('div', 'cx-icon-row');
+      var choose = button('Выбрать из каталога', 'secondary');
+      var reset = button(svc.user || !resetUrl ? 'Без иконки' : 'Вернуть иконку шаблона', 'secondary');
+      actions.appendChild(choose); actions.appendChild(reset); wrap.appendChild(actions);
+      reset.addEventListener('click', function () {
+        iconIn.value = resetUrl;
+        edit(function () { model.setServiceIcon(id, iconIn.value.trim()); });
+      });
+      var catalogBox = el('div', 'cx-icon-picker'); catalogBox.hidden = true;
+      var search = el('input'); search.type = 'search'; search.placeholder = 'Поиск иконки';
+      search.setAttribute('aria-label', 'Поиск иконки для группы');
+      var options = el('div', 'cx-icon-options');
+      catalogBox.appendChild(search); catalogBox.appendChild(options); wrap.appendChild(catalogBox);
+      var entries = null;
+      function showOptions() {
+        clear(options);
+        if (!entries) { options.appendChild(el('span', 'hint', 'Загружаю иконки...')); return; }
+        var found = searchIcons(entries, search.value.trim() || svc.name, 6);
+        if (!found.length) {
+          options.appendChild(el('span', 'hint', 'Иконки не найдены. Можно указать URL вручную.'));
+          return;
+        }
+        found.forEach(function (item) {
+          var option = button('', 'cx-icon-option');
+          option.setAttribute('aria-label', 'Выбрать иконку ' + item.label);
+          var img = el('img'); img.alt = ''; img.loading = 'lazy';
+          img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
+          option.appendChild(img);
+          option.appendChild(el('span', 'cx-icon-name', item.label));
+          option.addEventListener('click', function () {
+            iconIn.value = item.url;
+            showPreview();
+            edit(function () { model.setServiceIcon(id, iconIn.value.trim()); });
+          });
+          options.appendChild(option); img.src = item.url;
+        });
+      }
+      search.addEventListener('input', showOptions);
+      choose.addEventListener('click', function () {
+        catalogBox.hidden = !catalogBox.hidden;
+        if (catalogBox.hidden) { return; }
+        showOptions();
+        loadIconCatalog().then(function (data) {
+          if (!wrap.isConnected) { return; }
+          entries = data; showOptions();
+        })['catch'](function (e) {
+          if (!wrap.isConnected) { return; }
+          clear(options);
+          options.appendChild(el('span', 'hint', 'Каталог иконок не загрузился: ' + errText(e) + '. URL можно указать вручную.'));
+        });
+        search.focus();
+      });
+      return wrap;
+    }
+
     function serviceRow(s) {
       var box = el('div');
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
@@ -376,6 +480,7 @@ export function renderConstructor(modeBar, opts) {
           chips.appendChild(c);
         });
         if (chips.firstChild) { p.appendChild(chips); }
+        p.appendChild(serviceIconRow(s.id));
         p.appendChild(quicRow(s.id));
         p.appendChild(checkUrlRow(s.id));
         box.appendChild(p);
@@ -421,7 +526,7 @@ export function renderConstructor(modeBar, opts) {
       var catalog = null;
       var closed = false, iconRequested = false, iconEntries = null, iconError = '';
       var selectedIconUrl = '', iconRenderKey = '', iconButtons = [];
-      var nameIn = null, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
+      var nameIn = null, nameEdited = false, routeSel = null, iconBox = null, iconIn = null, iconPreview = null;
       var iconSearch = null, iconOptions = null;
       if (!target) {
         var cols = el('div', 'cx-cols');
@@ -478,6 +583,11 @@ export function renderConstructor(modeBar, opts) {
       d.addEventListener('cancel', function (e) { e.preventDefault(); close(); });
 
       function keys() { return Object.keys(picked); }
+      function updateSuggestedName() {
+        if (!nameIn || nameEdited) { return; }
+        var first = keys()[0];
+        nameIn.value = first ? suggestName(picked[first].title) : '';
+      }
       function suggestedIcons() {
         var queries = [], seenQueries = {};
         function addQuery(value) {
@@ -640,7 +750,7 @@ export function renderConstructor(modeBar, opts) {
             cb.addEventListener('change', function () {
               if (cb.checked) { picked[k] = e; } else { delete picked[k]; }
               lab.className = 'geo-country' + (cb.checked ? ' on' : '');
-              if (nameIn && cb.checked && !nameIn.value.trim()) { nameIn.value = suggestName(g.title); }
+              updateSuggestedName();
               updatePreview();
             });
             lab.appendChild(cb);
@@ -651,7 +761,10 @@ export function renderConstructor(modeBar, opts) {
           });
         });
       }
-      if (nameIn) { nameIn.addEventListener('input', updatePreview); routeSel.addEventListener('change', updatePreview); }
+      if (nameIn) {
+        nameIn.addEventListener('input', function () { nameEdited = true; updatePreview(); });
+        routeSel.addEventListener('change', updatePreview);
+      }
       updatePreview();
       results.appendChild(el('p', 'hint', 'Загружаю базу...'));
       loadCatalog().then(function (cat) {

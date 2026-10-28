@@ -77,10 +77,10 @@ PURGE_DATA=${PURGE_DATA:-0}
 # speedtest2.sh --check-update), но остаётся в списке, чтобы удаление
 # убирало его и со старых установок.
 FALLBACK_PROJECT_FILES="speedtest2.sh prep.awk providers.awk node_stats_update.awk sub_convert.awk
-render_stats.awk stats_cgi.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
+render_stats.awk stats_cgi.sh stats_local_dns.sh stats_run.sh stats_update.sh stats_httpd.py stats_auth.py stats_auth.sh
 stats_index.html stats_style.css stats_app.js stats_app_core.js stats_app_stats.js stats_app_settings.js stats_app_updates.js stats_app_log.js stats_app_config.js stats_app_xkeen.js stats_app_diag.js stats_app_files.js stats_app_components.js stats_app_constructor.js stats_app_constructor_model.js stats_app_constructor_modules.js stats_app_constructor_modules_model.js stats_chart.js render_progress.awk stats_init.sh
 stats_system.sh stats_config.sh stats_xkeen.sh stats_diag.sh diag.awk stats_components.sh stats_constructor.sh stats_codemirror.js stats_codemirror.css stats_files.py
-uninstall.sh VERSIONS install.sh version_check.sh ui.sh netcheck.sh update_interactive.sh mihomo-speedtest.sh
+uninstall.sh VERSIONS install.sh version_check.sh local_dns_check.sh ui.sh netcheck.sh update_interactive.sh mihomo-speedtest.sh
 migrate_config.sh migrate_config.awk config_diff.awk setup.sh detect_ua.sh render_config.awk fast_wg.awk wg_import.awk existing_config.awk config.example.yaml render_services.awk services.default.tsv config_to_state.awk constructor_build.sh reset_config.sh rule-catalog.tsv icon-catalog.tsv
 update_transaction.sh update_prepare.sh update.sh update_plan.awk"
 
@@ -368,6 +368,28 @@ remove_project_files() {
   ui_ok "Файлы проекта"
 }
 
+remove_local_dns_name() {
+  # Маркер означает, что запись создал проект. При ошибке оставляем маркер
+  # и предупреждаем: чужую запись удалять нельзя.
+  for target in speedtest mihomo; do
+    case $target in
+      speedtest) marker=.local-dns-state; name=speedtest.home.arpa ;;
+      mihomo) marker=.local-dns-mihomo-state; name=mi.home.arpa ;;
+    esac
+    [ -f "$DIR/$marker" ] || continue
+    if [ ! -f "$DIR/stats_local_dns.sh" ]; then
+      ui_warn "Локальное имя $name не удалено: скрипт управления отсутствует"
+      continue
+    fi
+    result=$(printf 'enabled=0' | DIR="$DIR" ENV="$DIR/speedtest2.env" MST_LOCAL_DNS_TARGET="$target" REQUEST_METHOD=POST CONTENT_LENGTH=9 \
+      sh "$DIR/stats_local_dns.sh" 2>/dev/null) || result=
+    case $result in
+      *'"ok":true'*) ui_ok "Локальное имя $name удалено" ;;
+      *) ui_warn "Не удалось удалить локальное имя $name; проверьте DNS-запись Keenetic вручную" ;;
+    esac
+  done
+}
+
 purge_data() {
   [ "$PURGE_DATA" = 1 ] || return 0
   # fast.yaml/speedtest_last.txt - тоже результат работы speedtest2.sh (см.
@@ -422,6 +444,7 @@ main() {
   remove_update_cron
   ui_ok "Задачи cron"
   revert_config
+  remove_local_dns_name
   remove_project_files
   purge_data
   ui_done "Деинсталляция завершена"
