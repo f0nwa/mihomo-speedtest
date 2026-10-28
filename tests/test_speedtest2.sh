@@ -816,6 +816,43 @@ assert_eq "$(cat "$WORK/cnt.txt")" 2
 grep -q 'already' "$WORK/map.txt" || fail "prepare_nodes: нода из yaml-источника потерялась"
 grep -q 'Auto' "$WORK/map.txt" || fail "prepare_nodes: нода из base64-источника не попала в пул"
 
+# После изменения config.yaml спидтест должен читать текущие провайдеры,
+# даже если SOURCES в speedtest2.env остался от прежней установки.
+SAVED_MIHOMO_DIR=$MIHOMO_DIR
+SAVED_MAIN_CONFIG=$MAIN_CONFIG
+SAVED_PROVIDERS_AWK=$UPDATE_PROVIDERS_AWK
+MIHOMO_DIR=$TEST_ROOT/source-sync
+mkdir -p "$MIHOMO_DIR/proxy-providers"
+MAIN_CONFIG=$MIHOMO_DIR/config.yaml
+UPDATE_PROVIDERS_AWK=$ROOT/speedtest-runtime/providers.awk
+printf '%s\n' 'proxies:' '  - name: static-node' '    type: vless' \
+  'proxy-providers:' '  wpn:' '    type: http' \
+  '    url: https://subscription.example/new' \
+  '    path: ./proxy-providers/wpn.yaml' > "$MAIN_CONFIG"
+printf '%s\n' 'proxies:' '  - name: old-node' '    type: vless' > "$MIHOMO_DIR/proxy-providers/old.yaml"
+printf '%s\n' 'proxies:' '  - name: wpn-node' '    type: vless' > "$MIHOMO_DIR/proxy-providers/wpn.yaml"
+SOURCES="$MAIN_CONFIG $MIHOMO_DIR/proxy-providers/old.yaml"
+WORK=$TEST_ROOT/prepare-new-provider
+mkdir -p "$WORK/nodes"
+RUN_LOG=$WORK/run.log
+: > "$RUN_LOG"
+prepare_nodes || fail "prepare_nodes: новый провайдер не должен ломать разбор"
+grep -q 'wpn-node' "$WORK/map.txt" || fail "prepare_nodes: новый провайдер отсутствует из-за устаревшего SOURCES"
+grep -q 'static-node' "$WORK/map.txt" || fail "prepare_nodes: статическая нода потерялась"
+! grep -q 'old-node' "$WORK/map.txt" || fail "prepare_nodes: удалённый провайдер остался из устаревшего SOURCES"
+printf '%s\n' 'proxies:' '  - name: static-only' '    type: vless' > "$MAIN_CONFIG"
+SOURCES="$MAIN_CONFIG $MIHOMO_DIR/proxy-providers/old.yaml"
+WORK=$TEST_ROOT/prepare-no-providers
+mkdir -p "$WORK/nodes"
+RUN_LOG=$WORK/run.log
+: > "$RUN_LOG"
+prepare_nodes || fail "prepare_nodes: конфиг без провайдеров не должен ломать разбор"
+grep -q 'static-only' "$WORK/map.txt" || fail "prepare_nodes: статическая нода без провайдеров потерялась"
+! grep -q 'old-node' "$WORK/map.txt" || fail "prepare_nodes: удалённый последний провайдер остался из устаревшего SOURCES"
+MIHOMO_DIR=$SAVED_MIHOMO_DIR
+MAIN_CONFIG=$SAVED_MAIN_CONFIG
+UPDATE_PROVIDERS_AWK=$SAVED_PROVIDERS_AWK
+
 # --- prepare_nodes(): все источники отклонены -> 0 нод, без зависания на чтении stdin ---
 WORK=$TEST_ROOT/prepare-allrejected
 mkdir -p "$WORK/nodes"
