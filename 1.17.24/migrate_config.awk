@@ -213,8 +213,11 @@ function render(text, section, a,n,j,s,subsection,proxies,dns,listeners) {
   }
 }
 # Подписки и свои ноды из состояния конструктора (SUBS_FILE: строки
-# "url<TAB>User-Agent<TAB>имя"; PROXIES_FILE: блок нод без заголовка)
+# "url<TAB>User-Agent<TAB>имя[<TAB>1]"; PROXIES_FILE: блок нод без заголовка)
 # подставляются вместо секций источника - дальше идёт обычный перенос.
+# Четвёртое поле "1" - подписке нужны данные устройства (панель с лимитом
+# устройств): в header: пишутся x-hwid и прочие из HWID, DEV_OS, OS_VER,
+# DEV_MODEL (значения проверяет sub_device_load в detect_ua.sh).
 function override_from_state(  line,f,text,ok) {
   if(SUBS_FILE!="") {
     text="proxy-providers:\n"
@@ -225,7 +228,10 @@ function override_from_state(  line,f,text,ok) {
       if(f[1] !~ /^https?:\/\/[^ "\\]+$/) bad("подписки: адрес подписки " f[3] " должен начинаться с http(s):// без пробелов и кавычек")
       if(f[2] ~ /["\\]/) bad("подписки: User-Agent подписки " f[3] " с кавычкой или обратной косой чертой")
       text=text "  " f[3] ":\n    url: \"" f[1] "\"\n"
-      if(f[2]!="") text=text "    header:\n      User-Agent:\n        - \"" f[2] "\"\n"
+      if(f[4]=="1" && HWID=="") bad("подписки: нет HWID устройства для подписки " f[3])
+      if(f[2]!="" || f[4]=="1") text=text "    header:\n"
+      if(f[2]!="") text=text "      User-Agent:\n        - \"" f[2] "\"\n"
+      if(f[4]=="1") text=text "      x-hwid:\n        - \"" HWID "\"\n      x-device-os:\n        - \"" DEV_OS "\"\n      x-ver-os:\n        - \"" OS_VER "\"\n      x-device-model:\n        - \"" DEV_MODEL "\"\n"
     }
     close(SUBS_FILE)
     seen[1,"proxy-providers"]=1;sections[1,"proxy-providers"]=text
