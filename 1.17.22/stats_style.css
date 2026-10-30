@@ -414,10 +414,10 @@ label.config-fs-sec{display:inline-flex;align-items:center;gap:6px;margin:0 0 0 
 .xk-text{margin:10px 0 6px;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
 .xk-add .xk-grow{align-self:center}
 .cx-row input.cx-name{flex:1 1 160px;min-width:0}
-.cx-row.cx-proxy-removed,.cx-row.cx-sub-removed,.cx-row.cx-service-removed{border-color:var(--danger);background:#d1453b22}
-.cx-row.cx-proxy-removed input.cx-name:disabled,.cx-row.cx-sub-removed input.cx-name:disabled{color:var(--danger);opacity:1;-webkit-text-fill-color:var(--danger)}
+.cx-row.cx-proxy-removed,.cx-row.cx-sub-removed,.cx-row.cx-service-removed,.cx-row.cx-domain-removed{border-color:var(--danger);background:#d1453b22}
+.cx-row.cx-proxy-removed input.cx-name:disabled,.cx-row.cx-sub-removed input.cx-name:disabled,.cx-row.cx-domain-removed input.cx-name:disabled{color:var(--danger);opacity:1;-webkit-text-fill-color:var(--danger)}
 .cx-row.cx-service-removed .xk-val{color:var(--danger)}
-.cx-proxy-removed-note,.cx-sub-removed-note,.cx-service-removed-note{color:var(--danger);font-size:12px}
+.cx-proxy-removed-note,.cx-sub-removed-note,.cx-service-removed-note,.cx-domain-removed-note{color:var(--danger);font-size:12px}
 .cx-paste{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin:0 0 6px}
 .cx-paste .xk-text{flex:1 1 260px;width:auto;min-width:0;margin:0}
 .cx-paste .submit{margin-top:0;flex:0 0 auto}
@@ -487,6 +487,7 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
 .cx-ua-note{flex:1 1 100%;margin:0}
 .cx-ua-note details{margin-top:4px}
+.cx-hwid{display:inline-flex;gap:4px;align-items:center;font-size:13px;white-space:nowrap;cursor:pointer}
 .msg-ok-text{color:#16a34a}
 .cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
 .cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}
@@ -642,3 +643,5 @@ label.node-select{display:inline-flex;align-items:center;gap:8px;margin:0;font-s
 .cx-provider-all{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}
 .cx-provider-all input{accent-color:var(--accent)}
 @media(max-width:640px){.xk-row input[type=text].cx-provider{flex-basis:100%;width:100%}}
+.device-hwid{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);word-break:break-all}
+.device-status{color:var(--text);margin-bottom:12px}

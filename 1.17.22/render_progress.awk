@@ -45,13 +45,19 @@ BEGIN {
   FS = "\t"
 }
 
-function json_esc(s) {
-  gsub(/\\/, "\\\\", s)
-  gsub(/"/, "\\\"", s)
-  gsub(/\t/, "\\t", s)
-  gsub(/\r/, "\\r", s)
-  gsub(/\n/, "\\n", s)
-  return s
+function json_esc(s,   i, c, out) {
+  # Как в render_stats.awk: без повторного разбора строки замены gsub.
+  out = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\\") out = out "\\\\"
+    else if (c == "\"") out = out "\\\""
+    else if (c == "\t") out = out "\\t"
+    else if (c == "\r") out = out "\\r"
+    else if (c == "\n") out = out "\\n"
+    else out = out c
+  }
+  return out
 }
 
 function json_str(s) {

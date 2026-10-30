@@ -22,10 +22,23 @@
 #                   http(s)://...; detect_ua.sh): перебирает типичные
 #                   клиентские UA и останавливается на первом, под которым
 #                   панель отдаёт clash YAML или base64-список нод:
-#                   {"ok":true,"ua","quality":"full|short|","kind","reason":
-#                   "|none|unreachable","tried":[{"ua","http","bytes","kind"}]}.
-#   probe-nodes POST - проверка, отвечают ли ноды подписки (тело: адрес и
-#                   User-Agent, по строке): подписка качается, ноды (clash
+#                   {"ok":true,"ua","quality":"full|short|","kind","hwid":
+#                   true|false (панели нужен HWID устройства),"device_error",
+#                   "reason":"|none|unreachable","tried":[{"ua","http",
+#                   "bytes","kind","hwid"}]}.
+#   device   GET  - устройство роутера для панелей подписок с лимитом
+#                   устройств (detect_ua.sh, sub-device.env): {"ok":true,
+#                   "hwid" (пусто - ещё не создан),"os","os_ver","model",
+#                   "subs":[имена подписок с x-hwid в config.yaml]}.
+#            POST - сохранить: тело - ОС, версия ОС, модель и "reset"
+#                   (новый HWID) или пустая строка, по строке. Есть подписки
+#                   с HWID - их заголовки обновляются в config.yaml обычным
+#                   применением (mihomo -t, бэкап, перезапуск, откат), файл
+#                   устройства пишется после успеха; нет - только файл:
+#                   {"ok":true,"applied":false}.
+#   probe-nodes POST - проверка, отвечают ли ноды подписки (тело: адрес,
+#                   User-Agent и необязательно "hwid" - с данными устройства,
+#                   по строке): подписка качается, ноды (clash
 #                   YAML или список vless-ссылок) проверяются по одной во
 #                   временном ядре на 127.0.0.1, по журналу рукопожатия
 #                   REALITY определяется, отклоняет ли сервер клиента
@@ -165,6 +178,11 @@ sync_block() {
 # Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
 # stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
+  # Новые данные устройства (device:POST) - на диск только после того, как
+  # конфиг с ними принят: иначе файл и config.yaml разошлись бы.
+  if [ "${DEVICE_PENDING:-0}" = 1 ]; then
+    if sub_device_save; then alog "Данные устройства сохранены"; else alog "ОШИБКА: не удалось сохранить $SUB_DEVICE_FILE"; fi
+  fi
   [ -n "${NEW_STATE:-}" ] || return 0
   if persist_state "$NEW_STATE"; then sync_block; fi
   return 0
@@ -262,39 +280,73 @@ case $action:$method in
       fail_json 400 bad_url "Адрес подписки должен начинаться с http:// или https:// и не содержать пробелов, кавычек и обратных косых черт"
     fi
     DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
-    # Перебор в порядке UA_LIST, как pick_ua в setup.sh: полный clash YAML и
-    # base64-список подходят сразу, укороченный YAML - запасной вариант.
-    # Первый же ответ без соединения (код 000) - сеть или хост недоступны,
-    # остальные 16 запросов по 10 секунд ждать незачем.
+    # Перебор - общий с setup.sh (ua_pick в detect_ua.sh): полный clash YAML
+    # и base64-список подходят сразу, укороченный YAML - запасной вариант,
+    # заглушка панели с лимитом устройств - повтор с HWID устройства, нет
+    # соединения на первом запросе - остальные не нужны.
     du_tab=$(printf '\t')
-    du_tmp=$WORK/probe.body
+    : > "$WORK/du.tsv"
+    ua_pick "$du_url" "$WORK/probe.body" "$WORK/du.tsv"
+    rm -f "$WORK/probe.body" "$WORK/probe.body.hdr"
+    du_n=0
     : > "$WORK/du.rows"
-    du_found="" du_found_kind="" du_fallback="" du_fallback_kind="" du_n=0 du_dead=0
-    while IFS= read -r du_cand; do
-      [ -n "$du_cand" ] || continue
-      du_res=$(probe_ua "$du_cand" "$du_url" "$du_tmp")
-      du_code=${du_res%%"$du_tab"*}; du_res=${du_res#*"$du_tab"}
-      du_size=${du_res%%"$du_tab"*}; du_kind=${du_res#*"$du_tab"}
+    while IFS="$du_tab" read -r du_cand du_code du_size du_kind du_hw; do
       [ "$du_n" = 0 ] || printf ',' >> "$WORK/du.rows"
       du_n=$((du_n + 1))
-      printf '{"ua":%s,"http":%s,"bytes":%s,"kind":%s}' "$(jstr "$du_cand")" "$(jstr "$du_code")" "$du_size" "$(jstr "$du_kind")" >> "$WORK/du.rows"
-      case $du_kind in
-        "clash YAML, полный"*|"v2ray-подписка"*) du_found=$du_cand; du_found_kind=$du_kind; break ;;
-        "clash YAML, укороченный"*) [ -n "$du_fallback" ] || { du_fallback=$du_cand; du_fallback_kind=$du_kind; } ;;
-      esac
-      if [ "$du_n" = 1 ] && [ "$du_code" = 000 ]; then du_dead=1; break; fi
-    done <<UALIST
-$UA_LIST
-UALIST
-    rm -f "$du_tmp"
-    du_quality="" du_ua="" du_kind=""
-    if [ -n "$du_found" ]; then du_quality=full du_ua=$du_found du_kind=$du_found_kind
-    elif [ -n "$du_fallback" ]; then du_quality=short du_ua=$du_fallback du_kind=$du_fallback_kind; fi
+      printf '{"ua":%s,"http":%s,"bytes":%s,"kind":%s,"hwid":%s}' "$(jstr "$du_cand")" "$(jstr "$du_code")" "${du_size:-0}" \
+        "$(jstr "$du_kind")" "$([ "$du_hw" = 1 ] && echo true || echo false)" >> "$WORK/du.rows"
+    done < "$WORK/du.tsv"
     du_reason=""
-    if [ -z "$du_ua" ]; then if [ "$du_dead" = 1 ]; then du_reason=unreachable; else du_reason=none; fi; fi
-    printf '{"ok":true,"ua":%s,"quality":%s,"kind":%s,"reason":%s,"tried":[%s]}\n' "$(jstr "$du_ua")" "$(jstr "$du_quality")" \
-      "$(jstr "$du_kind")" "$(jstr "$du_reason")" "$(cat "$WORK/du.rows")" > "$WORK/resp"
+    if [ -z "$UA_PICK_UA" ]; then if [ "$UA_PICK_DEAD" = 1 ]; then du_reason=unreachable; else du_reason=none; fi; fi
+    printf '{"ok":true,"ua":%s,"quality":%s,"kind":%s,"hwid":%s,"device_error":%s,"reason":%s,"tried":[%s]}\n' "$(jstr "$UA_PICK_UA")" \
+      "$(jstr "$UA_PICK_QUALITY")" "$(jstr "$UA_PICK_KIND")" "$([ "$UA_PICK_HWID" = 1 ] && echo true || echo false)" \
+      "$(jstr "$UA_PICK_ERR")" "$(jstr "$du_reason")" "$(cat "$WORK/du.rows")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
+  device:GET)
+    [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+    DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+    sub_device_peek
+    target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+    : > "$WORK/dsubs"
+    [ ! -f "$target" ] || sub_device_subs "$target" > "$WORK/dsubs"
+    dv_list="" dv_n=0
+    while IFS= read -r dv_s; do
+      [ "$dv_n" = 0 ] || dv_list="$dv_list,"
+      dv_n=$((dv_n + 1)); dv_list="$dv_list$(jstr "$dv_s")"
+    done < "$WORK/dsubs"
+    printf '{"ok":true,"hwid":%s,"os":%s,"os_ver":%s,"model":%s,"subs":[%s]}\n' "$(jstr "$SUB_HWID")" \
+      "$(jstr "$SUB_DEVICE_OS")" "$(jstr "$SUB_OS_VER")" "$(jstr "$SUB_DEVICE_MODEL")" "$dv_list" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  device:POST)
+    [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+    DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+    read_body "$WORK/body"
+    dv_os=$(sed -n '1p' "$WORK/body" | tr -d '\r')
+    dv_ver=$(sed -n '2p' "$WORK/body" | tr -d '\r')
+    dv_model=$(sed -n '3p' "$WORK/body" | tr -d '\r')
+    dv_reset=$(sed -n '4p' "$WORK/body" | tr -d '\r')
+    dv_extra=$(sed -n '5,$p' "$WORK/body" | tr -d '[:space:]')
+    [ -z "$dv_extra" ] || fail_json 400 bad_body "Лишние строки в запросе"
+    case $dv_reset in ''|reset) ;; *) fail_json 400 bad_body "Четвёртая строка - reset или пусто" ;; esac
+    sub_device_text_ok "$dv_os" || fail_json 400 bad_os "ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_text_ok "$dv_ver" || fail_json 400 bad_os_ver "Версия ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_text_ok "$dv_model" || fail_json 400 bad_model "Модель: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_peek
+    SUB_DEVICE_OS=$dv_os SUB_OS_VER=$dv_ver SUB_DEVICE_MODEL=$dv_model
+    if [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
+      SUB_HWID=$(sub_device_new_hwid) || fail_json 500 no_hwid "Не удалось сгенерировать HWID устройства"
+    fi
+    target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+    : > "$WORK/dsubs"
+    [ ! -f "$target" ] || sub_device_subs "$target" > "$WORK/dsubs"
+    if [ ! -s "$WORK/dsubs" ]; then
+      sub_device_save || fail_json 500 write_failed "Не удалось сохранить $SUB_DEVICE_FILE"
+      printf '{"ok":true,"applied":false}\n' > "$WORK/resp"
+      reply 200 "$WORK/resp"
+    fi
+    sub_device_rewrite "$target" "$WORK/cand.yaml" || fail_json 500 rewrite_failed "Не удалось подготовить конфиг"
+    DEVICE_PENDING=1
+    apply_candidate "$WORK/cand.yaml" ;;
   probe-nodes:POST)
     [ -x "$BIN" ] || fail_json 500 no_core "mihomo не найден: $BIN"
     read_body "$WORK/body"
@@ -302,15 +354,27 @@ UALIST
     # запроса, ни в журнал, ни в ответ.
     pn_url=$(sed -n '1p' "$WORK/body" | tr -d '\r')
     pn_ua=$(sed -n '2p' "$WORK/body" | tr -d '\r')
-    pn_extra=$(sed -n '3,$p' "$WORK/body" | tr -d '[:space:]')
+    # Третья строка "hwid" (необязательно) - запрос с данными устройства.
+    pn_hwid=$(sed -n '3p' "$WORK/body" | tr -d '\r')
+    pn_extra=$(sed -n '4,$p' "$WORK/body" | tr -d '[:space:]')
+    case $pn_hwid in ''|hwid) ;; *) pn_extra=$pn_hwid ;; esac
     if [ -n "$pn_extra" ] || ! printf '%s' "$pn_url" | grep -Eq '^https?://[^[:space:]"\\]+$'; then
       fail_json 400 bad_url "Адрес подписки должен начинаться с http:// или https:// и не содержать пробелов, кавычек и обратных косых черт"
     fi
     if printf '%s' "$pn_ua" | grep -q '["\\]'; then
       fail_json 400 bad_ua "User-Agent: нельзя кавычки и обратную косую черту"
     fi
-    pn_code=$(curl -sL --compressed --proto '=http,https' --proto-redir '=http,https' -m 15 -A "$pn_ua" \
-      -o "$WORK/sub.body" -w '%{http_code}' "$pn_url" 2>/dev/null) || pn_code=000
+    if [ "$pn_hwid" = hwid ]; then
+      [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+      DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+      sub_device_load || fail_json 500 no_device "Данные устройства для HWID: $SUB_DEVICE_ERR"
+      pn_code=$(curl -sL --compressed --proto '=http,https' --proto-redir '=http,https' -m 15 -A "$pn_ua" \
+        -H "x-hwid: $SUB_HWID" -H "x-device-os: $SUB_DEVICE_OS" -H "x-ver-os: $SUB_OS_VER" \
+        -H "x-device-model: $SUB_DEVICE_MODEL" -o "$WORK/sub.body" -w '%{http_code}' "$pn_url" 2>/dev/null) || pn_code=000
+    else
+      pn_code=$(curl -sL --compressed --proto '=http,https' --proto-redir '=http,https' -m 15 -A "$pn_ua" \
+        -o "$WORK/sub.body" -w '%{http_code}' "$pn_url" 2>/dev/null) || pn_code=000
+    fi
     [ "$pn_code" = 200 ] || fail_json 502 fetch_failed "Подписка не открылась (HTTP $pn_code)"
     # Источник нод: clash YAML (блок proxies:) или base64-список vless-ссылок.
     : > "$WORK/nodes.yaml"

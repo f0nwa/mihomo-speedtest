@@ -5,7 +5,9 @@
 // ошибку человек видит сразу.
 //
 // Состояние (файлы $DIR/config-state/):
-//   subscriptions.tsv  url<TAB>User-Agent<TAB>имя, по строке на подписку;
+//   subscriptions.tsv  url<TAB>User-Agent<TAB>имя[<TAB>1], по строке на подписку;
+//                      1 - подписке нужен HWID устройства (панель с лимитом
+//                      устройств; данные устройства - config-tools/detect_ua.sh);
 //   proxies.yaml       блок своих нод: записи "  - name: ..." с вложенными
 //                      строками (без заголовка proxies:);
 //   geofilter.txt      слова фильтра нод, по слову в строке (нет - слова
@@ -23,7 +25,7 @@ function yq(v) { return "'" + String(v).replace(/'/g, "''") + "'"; }
 
 // User-Agent, под которыми панели подписок отдают нужный формат
 // (config-tools/detect_ua.sh); первый - как в шаблоне.
-export var UA_PRESETS = ['v2rayNG/1.8.0', 'clash.meta', 'mihomo/1.18.0', 'clash-verge/v2.0.5', 'ClashforWindows/0.20.39', 'Shadowrocket/1897'];
+export var UA_PRESETS = ['v2rayNG/1.8.0', 'FlClashX/0.3.2', 'Happ/4.11.0', 'clash.meta', 'mihomo/1.18.0', 'clash-verge/v2.0.5', 'ClashforWindows/0.20.39', 'Shadowrocket/1897'];
 
 export function parseSubs(text) {
   var out = [];
@@ -31,13 +33,13 @@ export function parseSubs(text) {
     if (!l) { return; }
     var f = l.split(TAB);
     if (f.length < 3) { return; }
-    out.push({ url: f[0], ua: f[1], name: f[2] });
+    out.push({ url: f[0], ua: f[1], name: f[2], hwid: f[3] === '1' });
   });
   return out;
 }
 
 export function serializeSubs(list) {
-  return list.map(function (s) { return [s.url, s.ua, s.name].join(TAB); }).join('\n') + (list.length ? '\n' : '');
+  return list.map(function (s) { return [s.url, s.ua, s.name].concat(s.hwid ? ['1'] : []).join(TAB); }).join('\n') + (list.length ? '\n' : '');
 }
 
 export function checkSubName(name, others) {
@@ -355,14 +357,14 @@ export function createModules(data) {
     // Исходный фильтр взят из BLOCK спидтеста, а не из конструктора/шаблона.
     fromBlock: function () { return fromBlock; },
     // ----- подписки -----
-    subs: function () { return activeSubs().map(function (s) { return { url: s.url, ua: s.ua, name: s.name }; }); },
-    subRows: function () { return subs.map(function (s) { return { url: s.url, ua: s.ua, name: s.name, removed: !!s.removed }; }); },
-    addSub: function (url, ua, name) {
+    subs: function () { return activeSubs().map(function (s) { return { url: s.url, ua: s.ua, name: s.name, hwid: !!s.hwid }; }); },
+    subRows: function () { return subs.map(function (s) { return { url: s.url, ua: s.ua, name: s.name, hwid: !!s.hwid, removed: !!s.removed }; }); },
+    addSub: function (url, ua, name, hwid) {
       url = String(url || '').trim(); ua = String(ua || '').trim();
       checkSubUrl(url); checkUa(ua);
       name = String(name || '').trim() || suggestSubName(url, reservedSubNames());
       checkSubName(name, reservedSubNames());
-      subs.push({ url: url, ua: ua, name: name });
+      subs.push({ url: url, ua: ua, name: name, hwid: !!hwid });
       return name;
     },
     editSub: function (name, patch) {
@@ -372,7 +374,7 @@ export function createModules(data) {
       n.url = String(n.url).trim(); n.ua = String(n.ua || '').trim(); n.name = String(n.name).trim();
       checkSubUrl(n.url); checkUa(n.ua);
       if (n.name !== name) { checkSubName(n.name, reservedSubNames()); }
-      s.url = n.url; s.ua = n.ua; s.name = n.name;
+      s.url = n.url; s.ua = n.ua; s.name = n.name; s.hwid = !!n.hwid;
     },
     removeSub: function (name) {
       var s = subs.filter(function (x) { return x.name === name; })[0];
@@ -488,6 +490,7 @@ export function createModules(data) {
         if (!old) { res.push('+ подписка ' + s.name); }
         else if (old.url !== s.url) { res.push('Подписка ' + s.name + ': новый адрес'); }
         else if (old.ua !== s.ua) { res.push('Подписка ' + s.name + ': другой User-Agent'); }
+        else if (!!old.hwid !== !!s.hwid) { res.push('Подписка ' + s.name + (s.hwid ? ': включён HWID устройства' : ': выключен HWID устройства')); }
       });
       n0.forEach(function (n) { if (subNames().indexOf(n) < 0) { res.push('Убрать подписку ' + n); } });
       var pn0 = p0.map(function (p) { return p.name; });
