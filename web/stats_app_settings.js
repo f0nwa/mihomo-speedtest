@@ -534,6 +534,104 @@ function buildSettingsForm(values) {
   return form;
 }
 
+// Устройство роутера для панелей подписок с лимитом устройств (HWID):
+// /api/constructor/device (stats_constructor.sh, данные - sub-device.env,
+// config-tools/detect_ua.sh). Отправляется только подпискам с флажком
+// «HWID устройства» в конструкторе.
+var DEVICE_FIELDS = [
+  ['os', 'ОС', 'Например Android или iOS.'],
+  ['os_ver', 'Версия ОС', 'Например 15 для Android или 18.3 для iOS.'],
+  ['model', 'Модель', 'Как её покажет провайдер в списке устройств, например SM-A556B или iPhone 15.']
+];
+
+function deviceErrText(err) {
+  var d = err && err.data ? err.data : {};
+  if (d.error === 'check_failed') { return 'конфиг с новыми данными не прошёл проверку mihomo -t, ничего не изменено.'; }
+  if (d.error === 'restart_failed') { return 'ядро не поднялось с новым конфигом' + (d.rolled_back ? ', возвращён прежний конфиг.' : ', проверьте по SSH.'); }
+  return d.message || (err && err.message) || String(err);
+}
+
+function buildDeviceCard() {
+  var c = card('Устройство для панелей подписок');
+  c.appendChild(el('p', 'hint', 'Некоторые провайдеры (панели с лимитом устройств, например Remnawave) отдают ноды только устройству, ' +
+    'которое прислало свой ID - HWID. Без него вместо нод приходит заглушка вроде «приложение не поддерживает учёт устройств». ' +
+    'Для таких провайдеров роутер представляется одним обычным устройством с данными ниже. HWID получают только подписки с флажком ' +
+    '«HWID устройства» в конструкторе - «Определить» отмечает его сам, когда провайдер этого требует. Остальные провайдеры этих данных не видят.'));
+  var status = el('p', 'hint device-status', 'Загружаю...');
+  c.appendChild(status);
+  var hwRow = el('div', 'field');
+  var hwHead = el('div', 'field-head');
+  hwHead.appendChild(el('label', null, 'HWID'));
+  hwRow.appendChild(hwHead);
+  var hwVal = el('code', 'device-hwid');
+  hwRow.appendChild(hwVal);
+  hwRow.appendChild(el('p', 'hint', 'Создаётся один раз и у каждого роутера свой. Не меняется сам: новый HWID провайдер считает новым устройством и занимает ещё один слот лимита.'));
+  c.appendChild(hwRow);
+  var inputs = {};
+  DEVICE_FIELDS.forEach(function (f) {
+    var wrap = el('div', 'field');
+    var head = el('div', 'field-head');
+    var label = el('label', null, f[1]);
+    label.setAttribute('for', 'device_' + f[0]);
+    head.appendChild(label);
+    wrap.appendChild(head);
+    var input = el('input'); input.type = 'text'; input.id = 'device_' + f[0]; input.maxLength = 64;
+    wrap.appendChild(input);
+    wrap.appendChild(el('p', 'hint', f[2]));
+    inputs[f[0]] = input;
+    c.appendChild(wrap);
+  });
+  var save = el('button', 'submit', 'Сохранить устройство'); save.type = 'button';
+  var reset = el('button', 'submit secondary', 'Сбросить HWID'); reset.type = 'button';
+  var row = el('div', 'btn-row');
+  row.appendChild(save); row.appendChild(reset);
+  c.appendChild(row);
+  var msg = el('p', 'hint');
+  c.appendChild(msg);
+  var alive = viewGuard();
+  var subs = [];
+
+  function busy(on) { save.disabled = on; reset.disabled = on; }
+  function show(d) {
+    subs = d.subs || [];
+    hwVal.textContent = d.hwid || 'ещё не создан - появится, когда подписке понадобится';
+    reset.hidden = !d.hwid;
+    inputs.os.value = d.os || ''; inputs.os_ver.value = d.os_ver || ''; inputs.model.value = d.model || '';
+    status.textContent = subs.length
+      ? 'HWID сейчас получают подписки: ' + subs.join(', ') + '.'
+      : 'Сейчас ни одна подписка не отправляет HWID.';
+  }
+  function load() {
+    return fetchJson('/api/constructor/device').then(function (d) { if (alive()) { show(d); } })['catch'](function (err) {
+      if (alive()) { status.textContent = 'Не удалось загрузить данные устройства: ' + deviceErrText(err); }
+    });
+  }
+  function send(withReset) {
+    var applyNote = subs.length ? 'Данные обновятся в конфиге у подписок: ' + subs.join(', ') + '. Конфиг будет проверен, ядро mihomo перезапустится.' : '';
+    if (withReset && !window.confirm('Создать новый HWID? Провайдеры увидят новое устройство и займут ещё один слот лимита; старое устройство можно удалить у провайдера. ' + applyNote)) { return; }
+    if (!withReset && applyNote && !window.confirm(applyNote + ' Продолжить?')) { return; }
+    busy(true);
+    msg.className = 'hint';
+    msg.textContent = applyNote ? 'Применяю конфиг...' : 'Сохраняю...';
+    var body = [inputs.os.value.trim(), inputs.os_ver.value.trim(), inputs.model.value.trim(), withReset ? 'reset' : ''].join('\n');
+    fetchJson('/api/constructor/device', { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (r) {
+      if (!alive()) { return; }
+      msg.className = 'msg-ok';
+      msg.textContent = r.applied === false || r.unchanged ? 'Сохранено.'
+        : (r.restarted ? 'Сохранено: конфиг применён, ядро перезапущено.' : 'Сохранено: конфиг записан, перезапустите ядро вручную.');
+      return load();
+    }, function (err) {
+      if (!alive()) { return; }
+      msg.className = 'msg-err';
+      msg.textContent = 'Не удалось сохранить: ' + deviceErrText(err);
+    }).then(function () { busy(false); });
+  }
+  save.addEventListener('click', function () { send(false); });
+  reset.addEventListener('click', function () { send(true); });
+  load();
+  return c;
+}
+
 // Полный сброс статистики: сводка прогонов, история нод-победителей и
 // доступность нод (лента и таблица) (reset_node_stats() в stats_cgi.sh).
 // Настройки не меняются.
@@ -664,6 +762,7 @@ export function renderSettings(justSavedMsg) {
       endpoint: '/api/mihomo-local-dns',
       enabledText: 'Имя включено. Zashboard доступен на порту 9090.'
     }));
+    app.appendChild(buildDeviceCard());
     app.appendChild(buildResetStatsCard());
     if (justSavedMsg) { showFormMessage(form, justSavedMsg, 'ok'); }
   })['catch'](function (err) {

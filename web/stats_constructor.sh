@@ -26,6 +26,16 @@
 #                   true|false (панели нужен HWID устройства),"device_error",
 #                   "reason":"|none|unreachable","tried":[{"ua","http",
 #                   "bytes","kind","hwid"}]}.
+#   device   GET  - устройство роутера для панелей подписок с лимитом
+#                   устройств (detect_ua.sh, sub-device.env): {"ok":true,
+#                   "hwid" (пусто - ещё не создан),"os","os_ver","model",
+#                   "subs":[имена подписок с x-hwid в config.yaml]}.
+#            POST - сохранить: тело - ОС, версия ОС, модель и "reset"
+#                   (новый HWID) или пустая строка, по строке. Есть подписки
+#                   с HWID - их заголовки обновляются в config.yaml обычным
+#                   применением (mihomo -t, бэкап, перезапуск, откат), файл
+#                   устройства пишется после успеха; нет - только файл:
+#                   {"ok":true,"applied":false}.
 #   probe-nodes POST - проверка, отвечают ли ноды подписки (тело: адрес,
 #                   User-Agent и необязательно "hwid" - с данными устройства,
 #                   по строке): подписка качается, ноды (clash
@@ -168,6 +178,11 @@ sync_block() {
 # Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
 # stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
+  # Новые данные устройства (device:POST) - на диск только после того, как
+  # конфиг с ними принят: иначе файл и config.yaml разошлись бы.
+  if [ "${DEVICE_PENDING:-0}" = 1 ]; then
+    if sub_device_save; then alog "Данные устройства сохранены"; else alog "ОШИБКА: не удалось сохранить $SUB_DEVICE_FILE"; fi
+  fi
   [ -n "${NEW_STATE:-}" ] || return 0
   if persist_state "$NEW_STATE"; then sync_block; fi
   return 0
@@ -287,6 +302,51 @@ case $action:$method in
       "$(jstr "$UA_PICK_QUALITY")" "$(jstr "$UA_PICK_KIND")" "$([ "$UA_PICK_HWID" = 1 ] && echo true || echo false)" \
       "$(jstr "$UA_PICK_ERR")" "$(jstr "$du_reason")" "$(cat "$WORK/du.rows")" > "$WORK/resp"
     reply 200 "$WORK/resp" ;;
+  device:GET)
+    [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+    DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+    sub_device_peek
+    target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+    : > "$WORK/dsubs"
+    [ ! -f "$target" ] || sub_device_subs "$target" > "$WORK/dsubs"
+    dv_list="" dv_n=0
+    while IFS= read -r dv_s; do
+      [ "$dv_n" = 0 ] || dv_list="$dv_list,"
+      dv_n=$((dv_n + 1)); dv_list="$dv_list$(jstr "$dv_s")"
+    done < "$WORK/dsubs"
+    printf '{"ok":true,"hwid":%s,"os":%s,"os_ver":%s,"model":%s,"subs":[%s]}\n' "$(jstr "$SUB_HWID")" \
+      "$(jstr "$SUB_DEVICE_OS")" "$(jstr "$SUB_OS_VER")" "$(jstr "$SUB_DEVICE_MODEL")" "$dv_list" > "$WORK/resp"
+    reply 200 "$WORK/resp" ;;
+  device:POST)
+    [ -f "$DETECT_UA_SH" ] || fail_json 500 no_tools "detect_ua.sh не найден - переустановите проект"
+    DETECT_UA_LIB_ONLY=1 . "$DETECT_UA_SH"
+    read_body "$WORK/body"
+    dv_os=$(sed -n '1p' "$WORK/body" | tr -d '\r')
+    dv_ver=$(sed -n '2p' "$WORK/body" | tr -d '\r')
+    dv_model=$(sed -n '3p' "$WORK/body" | tr -d '\r')
+    dv_reset=$(sed -n '4p' "$WORK/body" | tr -d '\r')
+    dv_extra=$(sed -n '5,$p' "$WORK/body" | tr -d '[:space:]')
+    [ -z "$dv_extra" ] || fail_json 400 bad_body "Лишние строки в запросе"
+    case $dv_reset in ''|reset) ;; *) fail_json 400 bad_body "Четвёртая строка - reset или пусто" ;; esac
+    sub_device_text_ok "$dv_os" || fail_json 400 bad_os "ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_text_ok "$dv_ver" || fail_json 400 bad_os_ver "Версия ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_text_ok "$dv_model" || fail_json 400 bad_model "Модель: от 1 до 64 символов, без кавычек и обратной косой черты"
+    sub_device_peek
+    SUB_DEVICE_OS=$dv_os SUB_OS_VER=$dv_ver SUB_DEVICE_MODEL=$dv_model
+    if [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
+      SUB_HWID=$(sub_device_new_hwid) || fail_json 500 no_hwid "Не удалось сгенерировать HWID устройства"
+    fi
+    target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
+    : > "$WORK/dsubs"
+    [ ! -f "$target" ] || sub_device_subs "$target" > "$WORK/dsubs"
+    if [ ! -s "$WORK/dsubs" ]; then
+      sub_device_save || fail_json 500 write_failed "Не удалось сохранить $SUB_DEVICE_FILE"
+      printf '{"ok":true,"applied":false}\n' > "$WORK/resp"
+      reply 200 "$WORK/resp"
+    fi
+    sub_device_rewrite "$target" "$WORK/cand.yaml" || fail_json 500 rewrite_failed "Не удалось подготовить конфиг"
+    DEVICE_PENDING=1
+    apply_candidate "$WORK/cand.yaml" ;;
   probe-nodes:POST)
     [ -x "$BIN" ] || fail_json 500 no_core "mihomo не найден: $BIN"
     read_body "$WORK/body"

@@ -112,19 +112,28 @@ sub_device_save() {
   } 2>/dev/null || { rm -f "$sds_tmp"; return 1; }
 }
 
+# Читает SUB_HWID, SUB_DEVICE_OS, SUB_OS_VER, SUB_DEVICE_MODEL из
+# SUB_DEVICE_FILE без записи: негодные значения - по умолчанию, негодный
+# или отсутствующий HWID - пустой.
+sub_device_peek() {
+  SUB_HWID=$(sub_device_read SUB_HWID)
+  SUB_DEVICE_OS=$(sub_device_read SUB_DEVICE_OS)
+  SUB_OS_VER=$(sub_device_read SUB_OS_VER)
+  SUB_DEVICE_MODEL=$(sub_device_read SUB_DEVICE_MODEL)
+  sub_device_hwid_ok "$SUB_HWID" || SUB_HWID=""
+  sub_device_text_ok "$SUB_DEVICE_OS" || SUB_DEVICE_OS=$SUB_DEVICE_OS_DEFAULT
+  sub_device_text_ok "$SUB_OS_VER" || SUB_OS_VER=$SUB_OS_VER_DEFAULT
+  sub_device_text_ok "$SUB_DEVICE_MODEL" || SUB_DEVICE_MODEL=$SUB_DEVICE_MODEL_DEFAULT
+  return 0
+}
+
 # Загружает SUB_HWID, SUB_DEVICE_OS, SUB_OS_VER, SUB_DEVICE_MODEL. Нет
 # файла или HWID в нём негодный - генерирует новый и сохраняет файл.
 # Код 1 и текст в SUB_DEVICE_ERR, если сохранить не удалось.
 sub_device_load() {
   SUB_DEVICE_ERR=""
-  SUB_HWID=$(sub_device_read SUB_HWID)
-  SUB_DEVICE_OS=$(sub_device_read SUB_DEVICE_OS)
-  SUB_OS_VER=$(sub_device_read SUB_OS_VER)
-  SUB_DEVICE_MODEL=$(sub_device_read SUB_DEVICE_MODEL)
-  sub_device_text_ok "$SUB_DEVICE_OS" || SUB_DEVICE_OS=$SUB_DEVICE_OS_DEFAULT
-  sub_device_text_ok "$SUB_OS_VER" || SUB_OS_VER=$SUB_OS_VER_DEFAULT
-  sub_device_text_ok "$SUB_DEVICE_MODEL" || SUB_DEVICE_MODEL=$SUB_DEVICE_MODEL_DEFAULT
-  sub_device_hwid_ok "$SUB_HWID" && return 0
+  sub_device_peek
+  [ -z "$SUB_HWID" ] || return 0
   SUB_HWID=$(sub_device_new_hwid) || SUB_HWID=""
   if [ -z "$SUB_HWID" ]; then
     SUB_DEVICE_ERR="не удалось сгенерировать HWID устройства"
@@ -135,6 +144,36 @@ sub_device_load() {
     SUB_HWID=""
     return 1
   fi
+}
+
+# Имена подписок config.yaml ($1), которым уходит HWID (x-hwid в header:).
+sub_device_subs() {
+  awk '
+    /^[A-Za-z0-9_-]+:/ { pp = ($0 ~ /^proxy-providers:/); next }
+    pp && /^  [A-Za-z0-9_-]+:[ \t]*$/ { n = $0; sub(/^  /, "", n); sub(/:.*/, "", n); next }
+    pp && /^[ ]+x-hwid:/ && n != "" && !(n in seen) { seen[n] = 1; print n }
+  ' "$1"
+}
+
+# config.yaml $1 -> $2 с текущими SUB_* в x-hwid, x-device-os, x-ver-os и
+# x-device-model подписок (значение - строка "- ..." под ключом, как пишут
+# render_config.awk и migrate_config.awk). Остальное - без изменений.
+sub_device_rewrite() {
+  awk -v h="$SUB_HWID" -v o="$SUB_DEVICE_OS" -v v="$SUB_OS_VER" -v m="$SUB_DEVICE_MODEL" '
+    /^[A-Za-z0-9_-]+:/ { pp = ($0 ~ /^proxy-providers:/); key = ""; print; next }
+    pp && /^[ ]+x-(hwid|device-os|ver-os|device-model):[ \t]*$/ {
+      key = $0; sub(/^[ ]+x-/, "", key); sub(/:.*/, "", key); print; next
+    }
+    pp && key != "" && /^[ ]+- / {
+      ind = $0; sub(/-.*/, "", ind)
+      if (key == "hwid") val = h
+      else if (key == "device-os") val = o
+      else if (key == "ver-os") val = v
+      else val = m
+      print ind "- \"" val "\""; key = ""; next
+    }
+    { key = ""; print }
+  ' "$1" > "$2"
 }
 
 # Вид ответа с учётом заголовков панели: заглушка без HWID и исчерпанный

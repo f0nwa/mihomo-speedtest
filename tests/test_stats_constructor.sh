@@ -366,6 +366,50 @@ assert_contains 'Status: 400' "$out"
 out=$(printf 'https://a.test/1' | MST_CONSTRUCTOR_ACTION=detect-ua REQUEST_METHOD=GET sh "$SCRIPT")
 assert_contains 'Status: 405' "$out"
 
+# --- 16b: устройство для панелей с лимитом устройств (HWID)
+cp "$M/config.yaml" "$TMP/config.before-device"
+awk '{print} /^  provider-a:$/{a=1} a && /^        - "v2rayNG\/1.8.0"$/{print "      x-hwid:"; print "        - \"OldHwid0123456\""; print "      x-device-model:"; print "        - \"Old\""; a=0}' \
+  "$D/config.example.yaml" > "$M/config.yaml"
+rm -f "$DIR/sub-device.env"
+out=$(cgi device GET '' </dev/null)
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["subs"]')" = "['provider-a']" ] || fail "16b: subs: $out"
+[ "$(printf '%s' "$out" | jget '["hwid"]')" = "" ] || fail "16b: HWID ещё не создан"
+[ "$(printf '%s' "$out" | jget '["model"]')" = "SM-A556B" ] || fail "16b: модель по умолчанию"
+[ ! -f "$DIR/sub-device.env" ] || fail "16b: GET не создаёт файл"
+out=$(printf 'Android\n14\nPixel 8\n\n' | cgi device POST '')
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["restarted"]')" = True ] || fail "16b: применён с перезапуском: $out"
+hw=$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")
+printf '%s' "$hw" | grep -Eq '^[A-Za-z0-9]{16}$' || fail "16b: HWID создан при сохранении"
+grep -q "^        - \"$hw\"\$" "$M/config.yaml" || fail "16b: HWID в config.yaml"
+grep -q '^        - "Pixel 8"$' "$M/config.yaml" || fail "16b: модель в config.yaml"
+grep -q 'OldHwid0123456' "$M/config.yaml" && fail "16b: старый HWID заменён"
+[ "$(grep -c '^      x-hwid:$' "$M/config.yaml")" = 1 ] || fail "16b: x-hwid не добавлен другим подпискам"
+out=$(printf 'Android\n14\nPixel 8\nreset\n' | cgi device POST '')
+assert_contains 'Status: 200' "$out"
+hw2=$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")
+[ -n "$hw2" ] && [ "$hw2" != "$hw" ] || fail "16b: сброс HWID"
+grep -q "^        - \"$hw2\"\$" "$M/config.yaml" || fail "16b: новый HWID в config.yaml"
+for bad in 'i"OS\n1\nm\n\n' 'Android\n\nm\n\n' 'Android\n1\nm\nбыть\n' 'Android\n1\nm\n\nлишняя\n'; do
+  assert_contains 'Status: 400' "$(printf "$bad" | cgi device POST '')"
+done
+[ "$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")" = "$hw2" ] || fail "16b: отказ не меняет файл"
+# конфиг не прошёл mihomo -t - файл устройства не меняется
+mv "$TMP/bin/mihomo" "$TMP/bin/mihomo.ok"
+printf '#!/bin/sh\necho bad >&2\nexit 1\n' > "$TMP/bin/mihomo"; chmod +x "$TMP/bin/mihomo"
+out=$(printf 'Android\n14\nOther\n\n' | cgi device POST '')
+assert_contains 'Status: 422' "$out"
+mv -f "$TMP/bin/mihomo.ok" "$TMP/bin/mihomo"
+grep -q '^SUB_DEVICE_MODEL=Pixel 8$' "$DIR/sub-device.env" || fail "16b: при отказе mihomo -t файл устройства прежний"
+# подписок с HWID нет - только файл, без применения
+cp "$D/config.example.yaml" "$M/config.yaml"
+out=$(printf 'iOS\n18.3\niPhone 15\n\n' | cgi device POST '')
+[ "$(printf '%s' "$out" | jget '["applied"]')" = False ] || fail "16b: без подписок с HWID - без применения: $out"
+grep -q '^SUB_DEVICE_MODEL=iPhone 15$' "$DIR/sub-device.env" || fail "16b: файл сохранён"
+cmp -s "$D/config.example.yaml" "$M/config.yaml" || fail "16b: config.yaml не тронут"
+cp "$TMP/config.before-device" "$M/config.yaml"
+
 # --- 17: проверка нод подписки (ядро - заглушка с API и строками Reality)
 cat > "$TMP/fakecore" <<'EOF_CORE'
 #!/usr/bin/env python3
