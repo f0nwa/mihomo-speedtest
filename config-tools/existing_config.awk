@@ -23,7 +23,11 @@
 # старое поведение - переносится весь блок proxies: как есть.
 #
 # Использование:
-#   awk -v urls_out=PATH [-v proxies_out=PATH] [-v dns_out=PATH] -f existing_config.awk config.yaml
+#   awk -v urls_out=PATH [-v proxies_out=PATH] [-v dns_out=PATH] [-v hwid_out=PATH] -f existing_config.awk config.yaml
+#
+# hwid_out: если задан, в файл дописываются URL подписок, у которых в
+# header: есть x-hwid (подписке нужны данные устройства, см. sub_device_load
+# в detect_ua.sh) - по строке на подписку.
 #
 # listeners_out: если задан и в исходном config.yaml есть свои входы в
 # верхнеуровневом listeners:, в файл пишутся их записи как есть (блочные
@@ -39,7 +43,7 @@
 BEGIN {
   in_pp = 0; prov_indent = -1; attr_indent = -1
   cur_has_url = 0; cur_is_file = 0; cur_url = ""; cur_ua = ""; cur_name = ""
-  in_header = 0; header_indent = -1; ua_key_indent = -1
+  in_header = 0; header_indent = -1; ua_key_indent = -1; cur_hwid = 0
   in_proxies = 0; in_proxies_capture = 0; proxies_text = ""; proxies_placeholder = 0
   in_dns = 0; dns_text = ""
   in_listeners = 0; listeners_text = ""; listener_entry = ""; listener_name = ""
@@ -53,9 +57,10 @@ function flush_listener() {
 function flush_provider() {
   if (cur_has_url && !cur_is_file && cur_url != "") {
     print cur_url "\t" cur_ua "\t" cur_name >> urls_out
+    if (cur_hwid && hwid_out != "") print cur_url >> hwid_out
   }
   cur_has_url = 0; cur_is_file = 0; cur_url = ""; attr_indent = -1
-  cur_ua = ""; cur_name = ""; in_header = 0; header_indent = -1; ua_key_indent = -1
+  cur_ua = ""; cur_name = ""; in_header = 0; header_indent = -1; ua_key_indent = -1; cur_hwid = 0
 }
 
 /^proxy-providers:[ \t]*$/ { in_proxies = 0; in_pp = 1; next }
@@ -94,6 +99,8 @@ in_pp {
     in_header = 1; header_indent = ind
   } else if (in_header && ind <= header_indent) {
     in_header = 0
+  } else if (in_header && $0 ~ /^[ \t]*x-hwid:/) {
+    cur_hwid = 1
   } else if (in_header && ua_key_indent < 0 && $0 ~ /^[ \t]*User-Agent:[ \t]*$/) {
     ua_key_indent = ind
   } else if (in_header && ua_key_indent >= 0 && ind > ua_key_indent && cur_ua == "" && match($0, /^[ \t]*-[ \t]*"?[^"\r\n]*/)) {

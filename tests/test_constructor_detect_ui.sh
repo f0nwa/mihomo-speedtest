@@ -192,6 +192,24 @@ t.btn.click(); await tick();
 if (!/должен начинаться/.test(t.note.textContent)) { console.error('FAIL: ошибка сервера не показана: ' + t.note.textContent); failed = 1; }
 eq(t.btn.disabled, false, 'после ошибки кнопка свободна');
 eq(t.f.value(), 'v2rayNG/1.8.0', 'после ошибки выбор не тронут');
+
+// панель требует HWID: флажок отмечается, проверка нод - с данными устройства
+mockServer({ ok: true, ua: 'FlClashX/0.3.2', quality: 'full', kind: 'clash YAML, полный', hwid: true, reason: '', tried: [] });
+{
+  const url = { value: 'https://panel.test/limit' };
+  const hw = M.hwidCheck(false);
+  const f = M.uaField('v2rayNG/1.8.0', () => url.value, hw);
+  find(f, (n) => n.tag === 'button').click(); await tick(); await tick();
+  eq(hw.box.checked, true, 'hwid: флажок отмечен');
+  eq(requests[1].opts.body, 'https://panel.test/limit\nFlClashX/0.3.2\nhwid', 'hwid: проверка нод с данными устройства');
+  const note = findAll(f, (n) => /cx-ua-note/.test(n.className))[0];
+  if (!/HWID/.test(note.textContent)) { console.error('FAIL: нет пометки про HWID: ' + note.textContent); failed = 1; }
+  // обычная панель снимает флажок
+  mockServer({ ok: true, ua: 'FlClashX/0.3.2', quality: 'full', kind: 'k', hwid: false, reason: '', tried: [] });
+  find(f, (n) => n.tag === 'button').click(); await tick(); await tick();
+  eq(hw.box.checked, false, 'hwid: снят, если панели не нужен');
+  eq(requests[1].opts.body, 'https://panel.test/limit\nFlClashX/0.3.2', 'без hwid - две строки');
+}
 process.exit(failed);
 JS
 echo "test_constructor_detect_ui: OK"

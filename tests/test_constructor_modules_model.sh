@@ -35,6 +35,21 @@ const sum = m.summary({ subscriptions: SUBS, proxies: PROX, geofilter: '' });
 eq(sum, ['+ подписка a2', '+ подписка my-panel-example', 'Убрать подписку a'], 'сводка подписок');
 eq(sum.join(' ').includes('T2') || sum.join(' ').includes('NEW'), false, 'адреса подписок не попадают в сводку');
 eq(M.parseSubs('bad line\n\nu\tua\tn\n').length, 1, 'битая строка пропускается');
+// HWID устройства: четвёртое поле "1" сохраняется при правках и в сводке
+{
+  const H = 'https://h.example/T' + T + 'FlClashX/0.3.2' + T + 'h' + T + '1\n';
+  eq(M.parseSubs(H)[0].hwid, true, 'hwid из 4-го поля');
+  eq(M.parseSubs('u' + T + 'ua' + T + 'n\n')[0].hwid, false, 'без 4-го поля - без hwid');
+  const mh = M.createModules({ subscriptions: H, proxies: null, geofilter: null, geofilter_default: '' });
+  eq(mh.serialize().subscriptions, H, 'hwid: без правок - как было');
+  mh.editSub('h', { name: 'h2' });
+  eq(mh.serialize().subscriptions, H.replace(T + 'h' + T, T + 'h2' + T), 'hwid: переименование сохраняет признак');
+  mh.editSub('h2', { name: 'h', hwid: false });
+  eq(mh.serialize().subscriptions, H.replace(T + '1\n', '\n'), 'hwid: снят');
+  eq(mh.summary({ subscriptions: H }), ['Подписка h: выключен HWID устройства'], 'hwid: сводка');
+  mh.addSub('https://n.example/T', 'Happ/4.11.0', 'n', true);
+  eq(mh.subs().filter(x => x.name === 'n')[0].hwid, true, 'hwid: новая подписка');
+}
 
 // ----- свои прокси -----
 eq(m.proxies().map(p => [p.name, p.type, p.server, p.port]), [['🇩🇪 Hysteria2', 'hysteria2', 'de.example', '443']], 'список нод');

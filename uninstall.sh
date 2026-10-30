@@ -348,7 +348,7 @@ remove_project_files() {
     [ -n "$p" ] || continue
     rm -f "$p"
   done
-  rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env"
+  rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env" "$DIR/sub-device.env"
   rm -f "$INITD_SCRIPT"
   rm -rf "$STATS_SERVICE_RUNTIME_DIR"
   rm -rf "$STATS_AUTH_RUNTIME_DIR"

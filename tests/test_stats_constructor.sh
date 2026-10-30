@@ -245,17 +245,19 @@ assert_contains 'Status: 200' "$out"
 mkdir -p "$TMP/curlbin"
 cat > "$TMP/curlbin/curl" <<'EOF_CURL'
 #!/bin/sh
-out="" ua="" url=""
+out="" ua="" url="" hdr="" hwid=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out=$2; shift 2 ;;
     -A) ua=$2; shift 2 ;;
+    -D) hdr=$2; shift 2 ;;
+    -H) case $2 in "x-hwid: "*) hwid=${2#x-hwid: } ;; esac; shift 2 ;;
     -w|-m|--proto|--proto-redir) shift 2 ;;
     -*) shift ;;
     *) url=$1; shift ;;
   esac
 done
-echo "$ua $url" >> "$CURL_LOG"
+echo "$ua $url${hwid:+ hwid=$hwid}" >> "$CURL_LOG"
 full='mixed-port: 7890
 proxy-groups: []
 proxies: []'
@@ -274,6 +276,16 @@ case $url in
       *) printf '<html>403</html>' > "$out" ;;
     esac ;;
   */b64) printf 'dmxlc3M6Ly90ZXN0\n' > "$out" ;;
+  */hwid)
+    # Панель с лимитом устройств: без x-hwid - заглушка (валидный YAML!)
+    # и x-hwid-not-supported; с ним Happ получает JSON, остальные - YAML.
+    if [ -z "$hwid" ]; then
+      printf 'HTTP/1.1 200 OK\r\nx-hwid-limit: true\r\nx-hwid-not-supported: true\r\n\r\n' > "$hdr"
+      printf '%s\n' "$full" > "$out"
+    else
+      printf 'HTTP/1.1 200 OK\r\nx-hwid-active: true\r\n\r\n' > "$hdr"
+      case $ua in Happ*) printf '[{"dns":{}}]' > "$out" ;; *) printf '%s\n' "$full" > "$out" ;; esac
+    fi ;;
   *) printf '<html>403</html>' > "$out" ;;
 esac
 printf 200
@@ -288,18 +300,40 @@ assert_contains 'Status: 200' "$out"
 [ "$(printf '%s' "$out" | jget '["ua"]')" = "clash-verge/v2.0.5" ] || fail "16: ua full: $out"
 [ "$(printf '%s' "$out" | jget '["quality"]')" = full ] || fail "16: quality full"
 [ "$(printf '%s' "$out" | jget '["reason"]')" = "" ] || fail "16: reason full"
-[ "$(printf '%s' "$out" | jget '["tried"].__len__()')" = 4 ] || fail "16: перебор должен остановиться на подошедшем UA"
+[ "$(printf '%s' "$out" | jget '["tried"].__len__()')" = 6 ] || fail "16: перебор должен остановиться на подошедшем UA"
 [ "$(printf '%s' "$out" | jget '["tried"][0]["http"]')" = 200 ] || fail "16: tried.http"
-assert_contains 'JSON' "$(printf '%s' "$out" | jget '["tried"][0]["kind"]')"
+[ "$(printf '%s' "$out" | jget '["tried"][0]["ua"]')" = "Happ/4.11.0" ] || fail "16: первым идёт Happ"
+[ "$(printf '%s' "$out" | jget '["hwid"]')" = False ] || fail "16: обычной панели HWID не нужен"
+assert_contains 'JSON' "$(printf '%s' "$out" | jget '["tried"][2]["kind"]')"
 assert_contains 'clash YAML, полный' "$(printf '%s' "$out" | jget '["kind"]')"
 assert_not_contains 'SECRETKEY123' "$(printf '%s' "$out" | sed -n '/^{/,$p')"
-[ "$(wc -l < "$CURL_LOG" | tr -d ' ')" = 4 ] || fail "16: число запросов curl"
+[ "$(wc -l < "$CURL_LOG" | tr -d ' ')" = 6 ] || fail "16: число запросов curl"
 grep -q '^ClashforWindows/0.20.39 https://panel.test/SECRETKEY123/full$' "$CURL_LOG" || fail "16: curl получил UA и адрес"
 
 # base64-список подходит так же, как в setup.sh
 out=$(detect 'http://panel.test/b64')
-[ "$(printf '%s' "$out" | jget '["ua"]')" = "v2rayNG/1.8.0" ] || fail "16: base64"
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "Happ/4.11.0" ] || fail "16: base64"
 [ "$(printf '%s' "$out" | jget '["quality"]')" = full ] || fail "16: base64 quality"
+
+# панель с лимитом устройств: заглушка без HWID - повтор с HWID устройства,
+# дальше все запросы с ним; HWID создаётся один раз и хранится в DIR
+rm -f "$DIR/sub-device.env"
+: > "$CURL_LOG"
+out=$(detect 'https://panel.test/hwid')
+[ "$(printf '%s' "$out" | jget '["ua"]')" = "FlClashX/0.3.2" ] || fail "16: hwid ua: $out"
+[ "$(printf '%s' "$out" | jget '["hwid"]')" = True ] || fail "16: hwid флаг"
+[ "$(printf '%s' "$out" | jget '["tried"].__len__()')" = 3 ] || fail "16: hwid: Happ без HWID, Happ с HWID, FlClashX"
+assert_contains 'заглушка' "$(printf '%s' "$out" | jget '["tried"][0]["kind"]')"
+[ "$(printf '%s' "$out" | jget '["tried"][1]["hwid"]')" = True ] || fail "16: hwid: повтор с HWID"
+hw=$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")
+printf '%s' "$hw" | grep -Eq '^[A-Za-z0-9]{16}$' || fail "16: HWID сгенерирован: [$hw]"
+[ "$(grep -c "hwid=$hw\$" "$CURL_LOG")" = 2 ] || fail "16: два запроса с HWID"
+out=$(detect 'https://panel.test/hwid')
+[ "$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")" = "$hw" ] || fail "16: HWID постоянный"
+# обычная панель HWID не получает
+: > "$CURL_LOG"
+detect 'https://panel.test/full' > /dev/null
+! grep -q 'hwid=' "$CURL_LOG" || fail "16: обычной панели HWID не отправлен"
 
 # только укороченный YAML - запасной вариант после перебора всех UA
 out=$(detect 'https://panel.test/short')
@@ -451,6 +485,11 @@ assert_contains 'Status: 400' "$(probe 'ftp://x/y')"
 assert_contains 'Status: 400' "$(probe 'https://x/"y')"
 assert_contains 'Status: 400' "$(probe 'https://panel.test/p-mixed' 'a"b')"
 assert_contains 'Status: 400' "$(printf 'https://a.test/1\nUA\nлишняя\n' | BIN="$TMP/fakecore" PATH="$TMP/curlbin:$PATH" cgi probe-nodes POST '')"
+# третья строка "hwid" - запрос с данными устройства, другое - отказ
+assert_contains 'Status: 400' "$(printf 'https://a.test/1\nUA\nhwid\nлишняя\n' | BIN="$TMP/fakecore" PATH="$TMP/curlbin:$PATH" cgi probe-nodes POST '')"
+out=$(printf 'https://a.test/p-mixed\nUA\nhwid\n' | BIN="$TMP/fakecore" MST_PROBE_API_PORT=29190 MST_PROBE_MIXED_PORT=27890 PATH="$TMP/curlbin:$PATH" cgi probe-nodes POST '')
+assert_contains 'Status: 200' "$out"
+
 assert_contains 'Status: 500' "$(printf 'https://a.test/1\nUA\n' | BIN="$TMP/nocore" PATH="$TMP/curlbin:$PATH" cgi probe-nodes POST '')"
 # временное ядро не остаётся запущенным
 sleep 1

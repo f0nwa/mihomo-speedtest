@@ -48,7 +48,14 @@ trap 'exit 143' HUP TERM
 # Причину отказа migrate_config.awk пишет в отдельный файл (без значений
 # конфига) - без неё пользователь видел только общую фразу и не мог понять,
 # что поправить.
-if ! (ulimit -f 4096; awk -v SUBS_FILE="$subs_file" -v PROXIES_FILE="$proxies_file" -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -v REASONF="$WORK/reason" -f "$DIR/migrate_config.awk" "$source_file" "$template_file"); then
+# Данные устройства (HWID) - только если подписке из состояния конструктора
+# они нужны (четвёртое поле "1" в --subs, см. migrate_config.awk).
+SUB_HWID= SUB_DEVICE_OS= SUB_OS_VER= SUB_DEVICE_MODEL=
+if [ -n "$subs_file" ] && awk -F '\t' '$4 == "1" { f = 1 } END { exit !f }' "$subs_file" 2>/dev/null; then
+  DETECT_UA_LIB_ONLY=1 . "$DIR/detect_ua.sh"
+  sub_device_load || fail "Данные устройства для HWID: $SUB_DEVICE_ERR"
+fi
+if ! (ulimit -f 4096; awk -v SUBS_FILE="$subs_file" -v HWID="$SUB_HWID" -v DEV_OS="$SUB_DEVICE_OS" -v OS_VER="$SUB_OS_VER" -v DEV_MODEL="$SUB_DEVICE_MODEL" -v PROXIES_FILE="$proxies_file" -v SOURCE="$source_file" -v OUT="$WORK/candidate" -v REPORT="$WORK/report" -v REASONF="$WORK/reason" -f "$DIR/migrate_config.awk" "$source_file" "$template_file"); then
   reason=
   [ -f "$WORK/reason" ] && reason=$(head -n 1 "$WORK/reason" | cut -c1-300)
   [ -n "$reason" ] || reason='причина не определена'
