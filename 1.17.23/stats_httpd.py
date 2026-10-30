@@ -688,7 +688,8 @@ def progress_path():
 API_ROUTES = {
     "api/run": ("stats_run.sh", {}),
     "api/settings": ("stats_cgi.sh", {"API_JSON": "1"}),
-    "api/local-dns": ("stats_local_dns.sh", {}),
+    "api/local-dns": ("stats_local_dns.sh", {"MST_LOCAL_DNS_TARGET": "speedtest"}),
+    "api/mihomo-local-dns": ("stats_local_dns.sh", {"MST_LOCAL_DNS_TARGET": "mihomo"}),
     # check синхронно качает манифест, хеши и заметки релиза с GitHub -
     # на медленном канале роутера 30 с не хватало.
     "api/updates/check": ("stats_update.sh", {"MST_UPDATE_ACTION": "check", "MST_CGI_TIMEOUT": "120"}),
@@ -719,10 +720,11 @@ API_ROUTES = {
     "api/constructor/catalog": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "catalog"}),
     "api/constructor/icons": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "icons"}),
     "api/constructor/wgconf": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "wgconf"}),
-    # Подбор User-Agent: до 17 запросов к панели подписки по 10 секунд.
+    # Подбор User-Agent: до 20 запросов к панели подписки по 10 секунд.
     "api/constructor/detect-ua": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "detect-ua", "MST_CGI_TIMEOUT": "200"}),
     # Проверка нод подписки: загрузка, временное ядро и до 8 нод по очереди.
     "api/constructor/probe-nodes": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "probe-nodes", "MST_CGI_TIMEOUT": "120"}),
+    "api/constructor/device": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "device", "MST_CGI_TIMEOUT": "180"}),
     "api/constructor/preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "preview", "MST_CGI_TIMEOUT": "60"}),
     "api/constructor/apply": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "apply", "MST_CGI_TIMEOUT": "180"}),
     "api/constructor/reset-preview": ("stats_constructor.sh", {"MST_CONSTRUCTOR_ACTION": "reset-preview", "MST_CGI_TIMEOUT": "60"}),

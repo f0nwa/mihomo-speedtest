@@ -661,6 +661,19 @@ convert_source() {
 }
 
 prepare_nodes() {
+  # speedtest2.env сохраняет SOURCES при установке, но список провайдеров в
+  # config.yaml может измениться позже через конструктор или YAML-редактор.
+  # Перед каждым прогоном берём актуальные пути; при ошибке разбора оставляем
+  # прежний список, чтобы не потерять рабочие источники.
+  if [ -f "$MAIN_CONFIG" ] && [ -f "$UPDATE_PROVIDERS_AWK" ]; then
+    if parsed_sources=$(awk -v CONFIG="$MAIN_CONFIG" -v CONFDIR="$(dirname "$MAIN_CONFIG")" \
+      -f "$UPDATE_PROVIDERS_AWK" "$MAIN_CONFIG" 2> "$WORK/providers.err"); then
+      fresh_sources=$(printf '%s\n' "$parsed_sources" | sed -n "s/^SOURCES='\(.*\)'$/\1/p")
+      [ -z "$fresh_sources" ] || SOURCES=$fresh_sources
+    elif grep -q 'Не найдено ни одного проверенного proxy-provider с url' "$WORK/providers.err"; then
+      SOURCES=$MAIN_CONFIG
+    fi
+  fi
   conv_sources=""
   for src in $SOURCES; do
     csrc=$(convert_source "$src") || continue

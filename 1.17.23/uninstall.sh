@@ -348,7 +348,7 @@ remove_project_files() {
     [ -n "$p" ] || continue
     rm -f "$p"
   done
-  rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env"
+  rm -f "$STATS_SERVICE_DEST" "$DIR/speedtest2.env" "$DIR/sub-device.env"
   rm -f "$INITD_SCRIPT"
   rm -rf "$STATS_SERVICE_RUNTIME_DIR"
   rm -rf "$STATS_AUTH_RUNTIME_DIR"
@@ -371,17 +371,23 @@ remove_project_files() {
 remove_local_dns_name() {
   # Маркер означает, что запись создал проект. При ошибке оставляем маркер
   # и предупреждаем: чужую запись удалять нельзя.
-  [ -f "$DIR/.local-dns-state" ] || return 0
-  if [ ! -f "$DIR/stats_local_dns.sh" ]; then
-    ui_warn "Локальное имя не удалено: скрипт управления отсутствует"
-    return 0
-  fi
-  result=$(printf 'enabled=0' | DIR="$DIR" ENV="$DIR/speedtest2.env" REQUEST_METHOD=POST CONTENT_LENGTH=9 \
-    sh "$DIR/stats_local_dns.sh" 2>/dev/null) || result=
-  case $result in
-    *'"ok":true'*) ui_ok "Локальное имя speedtest.home.arpa удалено" ;;
-    *) ui_warn "Не удалось удалить локальное имя speedtest.home.arpa; проверьте DNS-запись Keenetic вручную" ;;
-  esac
+  for target in speedtest mihomo; do
+    case $target in
+      speedtest) marker=.local-dns-state; name=speedtest.home.arpa ;;
+      mihomo) marker=.local-dns-mihomo-state; name=mi.home.arpa ;;
+    esac
+    [ -f "$DIR/$marker" ] || continue
+    if [ ! -f "$DIR/stats_local_dns.sh" ]; then
+      ui_warn "Локальное имя $name не удалено: скрипт управления отсутствует"
+      continue
+    fi
+    result=$(printf 'enabled=0' | DIR="$DIR" ENV="$DIR/speedtest2.env" MST_LOCAL_DNS_TARGET="$target" REQUEST_METHOD=POST CONTENT_LENGTH=9 \
+      sh "$DIR/stats_local_dns.sh" 2>/dev/null) || result=
+    case $result in
+      *'"ok":true'*) ui_ok "Локальное имя $name удалено" ;;
+      *) ui_warn "Не удалось удалить локальное имя $name; проверьте DNS-запись Keenetic вручную" ;;
+    esac
+  done
 }
 
 purge_data() {

@@ -1,12 +1,17 @@
 #!/bin/sh
-# GET /api/local-dns: состояние локального имени панели.
+# GET: состояние локального имени панели speedtest или Zashboard.
 # POST enabled=1|0: добавить или убрать только собственную запись Keenetic.
 set -u
 
-NAME=speedtest.home.arpa
+TARGET=${MST_LOCAL_DNS_TARGET:-speedtest}
+case $TARGET in
+  speedtest) NAME=speedtest.home.arpa; STATE_NAME=.local-dns-state; PAGE_PATH=/stats ;;
+  mihomo) NAME=mi.home.arpa; STATE_NAME=.local-dns-mihomo-state; PAGE_PATH=/ui/ ;;
+  *) printf 'Content-Type: application/json; charset=utf-8\n\n{"ok":false,"reason":"Неизвестное локальное имя"}'; exit 0 ;;
+esac
 DIR=${DIR:-/opt/etc/mihomo-speedtest}
 ENV=${ENV:-$DIR/speedtest2.env}
-STATE=${LOCAL_DNS_STATE_FILE:-$DIR/.local-dns-state}
+STATE=${LOCAL_DNS_STATE_FILE:-$DIR/$STATE_NAME}
 CHECK=${LOCAL_DNS_CHECK_SCRIPT:-$DIR/local_dns_check.sh}
 LOCK=${LOCAL_DNS_LOCK_DIR:-${TMPDIR:-/tmp}/mihomo-speedtest-local-dns.lock}
 
@@ -66,7 +71,7 @@ refresh() {
   fi
   if [ -n "$state_ip" ] && [ "$records" = "$state_ip" ]; then enabled=true; fi
   if [ -n "$records" ] && [ "$enabled" != true ]; then
-    reason='Имя speedtest.home.arpa уже занято другой записью'
+    reason="Имя $NAME уже занято другой записью"
   elif [ -n "$state_ip" ] && [ -n "$allowed_ip" ] && [ "$state_ip" != "$allowed_ip" ]; then
     reason='Адрес Home изменился; требуется обновить локальную запись'
   elif [ -z "$allowed_ip" ]; then
@@ -80,6 +85,10 @@ refresh() {
 }
 
 web_port() {
+  if [ "$TARGET" = mihomo ]; then
+    port=9090
+    return 0
+  fi
   port=$(sed -n 's/^STATS_HTTP_PORT=//p' "$ENV" 2>/dev/null | tail -1 | tr -d "'\"")
   port=${port:-8899}
   case $port in ''|*[!0-9]*) return 1 ;; esac
@@ -97,7 +106,7 @@ respond() {
   [ -z "$override" ] || reason=$override
   url=null
   if [ "$enabled" = true ] && [ "$available" = true ] && web_port; then
-    url="\"http://$NAME:$port/stats\""
+    url="\"http://$NAME:$port$PAGE_PATH\""
   fi
   printf 'Content-Type: application/json; charset=utf-8\n\n'
   printf '{"ok":%s,"enabled":%s,"available":%s,"name":"%s","url":%s,"reason":"%s"}' \

@@ -435,7 +435,10 @@ var CUSTOM_UA = '__custom__';
 // «Определить», которая просит роутер перебрать типичные клиентские UA
 // (/api/constructor/detect-ua, config-tools/detect_ua.sh) и подставляет
 // первый, под которым панель отдаёт clash YAML или список нод.
-export function uaField(value, getUrl) {
+// hwidBox (необязательно) - флажок «HWID устройства» (hwidCheck): подбор
+// отмечает его, если панель без данных устройства отдала заглушку, и
+// проверка нод идёт с ними.
+export function uaField(value, getUrl, hwidBox) {
   var wrap = el('span', 'cx-ua');
   var sel = el('select');
   sel.setAttribute('aria-label', 'User-Agent');
@@ -454,8 +457,20 @@ export function uaField(value, getUrl) {
   set(value);
   wrap.appendChild(sel); wrap.appendChild(custom);
   wrap.value = function () { return sel.value === CUSTOM_UA ? custom.value.trim() : sel.value; };
-  if (getUrl) { addDetect(wrap, getUrl, set); }
+  if (getUrl) { addDetect(wrap, getUrl, set, hwidBox); }
   return wrap;
+}
+
+// Флажок «HWID устройства» подписки: панелям с лимитом устройств роутер
+// отправляет x-hwid и данные устройства (одни на роутер), остальным - нет.
+export function hwidCheck(checked) {
+  var lab = el('label', 'cx-hwid');
+  var box = el('input'); box.type = 'checkbox'; box.checked = !!checked;
+  lab.title = 'Отправлять панели подписки HWID и данные устройства роутера. Нужно только провайдерам с лимитом устройств: ' +
+    'без HWID они отдают заглушку вместо нод. «Определить» включает это само, когда нужно.';
+  lab.appendChild(box); lab.appendChild(document.createTextNode(' HWID устройства'));
+  lab.box = box;
+  return lab;
 }
 
 // Кнопка «Определить» и строки результата под полем UA. Запросы идут на
@@ -463,7 +478,7 @@ export function uaField(value, getUrl) {
 // отвечают ли ноды выбранным UA (подписка качается ещё раз, ноды проверяет
 // временное ядро); кнопка занята, пока идёт то и другое. Адрес уходит телом
 // POST - ключ доступа не попадает в строку запроса и журналы.
-function addDetect(wrap, getUrl, setUa) {
+function addDetect(wrap, getUrl, setUa, hwidBox) {
   var btn = button('Определить', 'small muted');
   btn.title = 'Проверить адрес под разными User-Agent, выбрать подходящий и проверить, отвечают ли ноды';
   var note = el('div', 'hint cx-ua-note');
@@ -518,12 +533,14 @@ function addDetect(wrap, getUrl, setUa) {
         return null;
       }
       setUa(d.ua);
-      say(d.quality === 'short'
+      if (hwidBox) { hwidBox.box.checked = !!d.hwid; }
+      var hw = d.hwid ? ' Панель требует HWID устройства - включён.' : '';
+      say((d.quality === 'short'
         ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
-        : 'Выбран ' + d.ua + ': ' + d.kind + '.', d.quality === 'short' ? '' : 'msg-ok-text');
+        : 'Выбран ' + d.ua + ': ' + d.kind + '.') + hw, d.quality === 'short' ? '' : 'msg-ok-text');
       put(probe, 'Проверяю, отвечают ли ноды...', '');
       // Сбой самой проверки нод не отменяет найденный User-Agent.
-      return post('/api/constructor/probe-nodes', url + '\n' + d.ua).then(verdict, function (err) {
+      return post('/api/constructor/probe-nodes', url + '\n' + d.ua + (d.hwid ? '\nhwid' : '')).then(verdict, function (err) {
         put(probe, 'Проверить, отвечают ли ноды, не удалось: ' + errText(err), '');
       });
     }, function (err) {
@@ -564,7 +581,7 @@ export function createModuleCards(ctx) {
     });
     save.addEventListener('click', function () { ctx.edit(function () { mods.editSub(s.name, { name: nm.value }); }); });
     r.appendChild(nm); r.appendChild(save);
-    r.appendChild(el('span', 'geo-code', hostOf(s.url) + (s.ua ? ' · ' + s.ua : '')));
+    r.appendChild(el('span', 'geo-code', hostOf(s.url) + (s.ua ? ' · ' + s.ua : '') + (s.hwid ? ' · HWID' : '')));
     // Убранная подписка остаётся в списке красной до применения, как нода
     // в «Прокси»: её можно вернуть, но не править.
     if (s.removed) {
@@ -584,15 +601,17 @@ export function createModuleCards(ctx) {
   function subEditor(s) {
     var r = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.value = s.url; url.setAttribute('aria-label', 'Адрес подписки');
-    var ua = uaField(s.ua, function () { return url.value; });
+    var hw = hwidCheck(s.hwid);
+    var ua = uaField(s.ua, function () { return url.value; }, hw);
     var row = el('div', 'xk-add');
     var ok = button('Сохранить', 'submit'), cancel = button('Отмена', 'submit secondary');
     ok.addEventListener('click', function () {
-      ctx.edit(function () { mods.editSub(s.name, { url: url.value, ua: ua.value() }); editingSub = null; });
+      ctx.edit(function () { mods.editSub(s.name, { url: url.value, ua: ua.value(), hwid: hw.box.checked }); editingSub = null; });
     });
     cancel.addEventListener('click', function () { editingSub = null; render(); });
     r.appendChild(el('label', null, 'Адрес')); r.appendChild(url);
     r.appendChild(el('label', null, 'User-Agent')); r.appendChild(ua);
+    r.appendChild(hw);
     row.appendChild(ok); row.appendChild(cancel);
     r.appendChild(row);
     return r;
@@ -608,16 +627,17 @@ export function createModuleCards(ctx) {
     var add = el('div', 'cx-editor');
     var url = el('input'); url.type = 'text'; url.placeholder = 'https://...'; url.setAttribute('aria-label', 'Адрес новой подписки');
     var name = el('input'); name.type = 'text'; name.placeholder = 'имя (необязательно)'; name.setAttribute('aria-label', 'Имя подписки');
-    var ua = uaField(UA_PRESETS[0], function () { return url.value; });
+    var hw = hwidCheck(false);
+    var ua = uaField(UA_PRESETS[0], function () { return url.value; }, hw);
     var btn = button('Добавить подписку', 'submit');
     btn.addEventListener('click', function () {
-      ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value); });
+      ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value, hw.box.checked); });
     });
     url.addEventListener('keydown', function (e) { if (e.key === 'Enter') { btn.click(); } });
     add.appendChild(el('div', 'geo-group-title', 'Новая подписка'));
     add.appendChild(url);
     var row = el('div', 'xk-add');
-    row.appendChild(name); row.appendChild(ua); row.appendChild(btn);
+    row.appendChild(name); row.appendChild(ua); row.appendChild(hw); row.appendChild(btn);
     add.appendChild(row);
     subsHost.appendChild(add);
   }
