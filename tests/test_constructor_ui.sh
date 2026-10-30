@@ -92,7 +92,10 @@ grep -q "'изменён'" "$MOD" || fail "нет пометки «изменё�
 grep -q "cx-topbar" "$UI" || fail "кнопка применения не наверху"
 ! grep -q "card('Изменения')" "$UI" || fail "осталась нижняя карточка «Изменения»"
 grep -q "createLayout" "$UI" || fail "нет раскладки слева-справа"
-grep -q "createLayout(1)" "$UI" || fail "по умолчанию должен открываться первый модуль («Подписки»)"
+grep -q "createLayout(opts.module != null ? opts.module : 1)" "$UI" || fail "по умолчанию должен открываться модуль «Подписки»"
+grep -q "layout.add(0, 'Устройство')" "$UI" || fail "нет модуля «Устройство» перед «Подписками»"
+grep -q "export function buildDevice" "$MOD" || fail "нет редактора устройства в модулях конструктора"
+! grep -q "buildDevice\|api/constructor/device" "$ROOT/web/stats_app_settings.js" || fail "редактор устройства остался в Настройках"
 ! grep -q "cx-bnum" "$MOD" || fail "в списке модулей остались номера"
 grep -q "cx-nav" "$MOD" || fail "нет списка модулей слева"
 grep -q "model.changes(initial)" "$UI" || fail "блоки не помечаются изменёнными"
@@ -120,7 +123,7 @@ grep -q "menuItem('Заменить шаблоном" "$CFG" && fail "«Заме
 grep -q "button('Миграция к шаблону'" "$UI" || fail "конструктор: нет кнопки «Миграция к шаблону»"
 grep -q "button('Заменить шаблоном…'" "$UI" || fail "конструктор: нет кнопки «Заменить шаблоном…»"
 grep -q "templateAction: templateActionFromConstructor" "$CFG" || fail "панель конструктора не получает templateAction"
-[ "$(grep -c 'templateAction: opts.templateAction' "$UI")" = 3 ] || fail "перерисовка конструктора теряет templateAction"
+[ "$(grep -c 'templateAction: opts.templateAction' "$UI")" = "$(grep -c 'renderConstructor(modeBar, {' "$UI")" ] || fail "перерисовка конструктора теряет templateAction"
 
 # переключатель «куда попадают прокси» (ownscope) в разделе «Прокси»
 M="$ROOT/web/stats_app_constructor_modules.js"

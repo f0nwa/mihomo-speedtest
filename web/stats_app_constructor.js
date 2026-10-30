@@ -7,7 +7,7 @@
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
 import { createModules, parseWords } from './app-constructor-modules-model.js';
-import { createLayout, createModuleCards, plural } from './app-constructor-modules.js';
+import { buildDevice, createLayout, createModuleCards, plural } from './app-constructor-modules.js';
 import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, parseIconCatalog, searchIcons, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
@@ -174,8 +174,23 @@ export function renderConstructor(modeBar, opts) {
     head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
-    // слева список модулей, справа выбранный (по умолчанию - первый, «Подписки»)
-    var layout = createLayout(1);
+    // слева список модулей, справа выбранный (по умолчанию «Подписки»;
+    // после сохранения устройства - снова «Устройство»)
+    var layout = createLayout(opts.module != null ? opts.module : 1);
+    // Устройство для панелей подписок с лимитом устройств: своё сохранение,
+    // сразу применяет config.yaml - поэтому только без несохранённых правок
+    // конструктора, а после него страница перечитывается.
+    var devBlk = layout.add(0, 'Устройство');
+    buildDevice(devBlk.body, {
+      summary: devBlk.summary,
+      canSave: function () {
+        return v.dirty ? 'Сначала примените или отмените изменения конструктора: сохранение устройства тоже применяет конфиг.' : '';
+      },
+      saved: function (r, text) {
+        if (r.applied === false) { return; }
+        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true, module: 0, flash: text });
+      }
+    });
     var modCards = createModuleCards({ layout: layout, mods: mods, model: model, savedWords: savedWords, edit: edit, msg: msg,
       redraw: draw, changed: refreshChanges });
 
