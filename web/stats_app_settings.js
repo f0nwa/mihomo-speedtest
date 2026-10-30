@@ -537,12 +537,24 @@ function buildSettingsForm(values) {
 // Устройство роутера для панелей подписок с лимитом устройств (HWID):
 // /api/constructor/device (stats_constructor.sh, данные - sub-device.env,
 // config-tools/detect_ua.sh). Отправляется только подпискам с флажком
-// «HWID устройства» в конструкторе.
-var DEVICE_FIELDS = [
-  ['os', 'ОС', 'Например Android или iOS.'],
-  ['os_ver', 'Версия ОС', 'Например 15 для Android или 18.3 для iOS.'],
-  ['model', 'Модель', 'Как её покажет провайдер в списке устройств, например SM-A556B или iPhone 15.']
+// «HWID устройства» в конструкторе. Пресеты - готовые ОС/версия/модель;
+// правка поля переключает выбор на «Свой».
+var DEVICE_PRESETS = [
+  { id: 'a55', label: 'Galaxy A55', os: 'Android', os_ver: '15', model: 'SM-A556B' },
+  { id: 's24', label: 'Galaxy S24', os: 'Android', os_ver: '15', model: 'SM-S921B' },
+  { id: 'px8', label: 'Pixel 8', os: 'Android', os_ver: '15', model: 'Pixel 8' },
+  { id: 'rn13', label: 'Redmi Note 13', os: 'Android', os_ver: '14', model: 'Redmi Note 13' },
+  { id: 'ip15', label: 'iPhone 15', os: 'iOS', os_ver: '18.3', model: 'iPhone 15' },
+  { id: 'mac', label: 'Mac', os: 'macOS', os_ver: '15.3', model: 'Mac' }
 ];
+var DEVICE_FIELDS = [
+  ['os', 'ОС'],
+  ['os_ver', 'Версия ОС'],
+  ['model', 'Модель']
+];
+// Как в Remnawave: иначе панель молча игнорирует заголовок.
+var HWID_RE = /^[A-Za-z0-9=-]{10,64}$/;
+var DEVICE_TEXT_RE = /^[^"\\\u0000-\u001f\u007f]{1,64}$/;
 
 function deviceErrText(err) {
   var d = err && err.data ? err.data : {};
@@ -551,69 +563,145 @@ function deviceErrText(err) {
   return d.message || (err && err.message) || String(err);
 }
 
-function buildDeviceCard() {
+function devicePresetOf(v) {
+  var hit = DEVICE_PRESETS.filter(function (p) { return p.os === v.os && p.os_ver === v.os_ver && p.model === v.model; })[0];
+  return hit ? hit.id : 'own';
+}
+
+export function buildDeviceCard() {
   var c = card('Устройство для панелей подписок');
-  c.appendChild(el('p', 'hint', 'Некоторые провайдеры (панели с лимитом устройств, например Remnawave) отдают ноды только устройству, ' +
-    'которое прислало свой ID - HWID. Без него вместо нод приходит заглушка вроде «приложение не поддерживает учёт устройств». ' +
-    'Для таких провайдеров роутер представляется одним обычным устройством с данными ниже. HWID получают только подписки с флажком ' +
-    '«HWID устройства» в конструкторе - «Определить» отмечает его сам, когда провайдер этого требует. Остальные провайдеры этих данных не видят.'));
+  c.appendChild(el('p', 'hint', 'Провайдеры с лимитом устройств (например, панели Remnawave) отдают ноды только устройству со своим ID - HWID. ' +
+    'Без него вместо нод приходит заглушка вроде «приложение не поддерживает учёт устройств». Для таких провайдеров роутер ' +
+    'представляется одним обычным устройством. HWID получают только подписки с флажком «HWID устройства» в конструкторе - ' +
+    '«Определить» отмечает его сам, когда провайдер этого требует. Остальные провайдеры этих данных не видят.'));
   var status = el('p', 'hint device-status', 'Загружаю...');
   c.appendChild(status);
-  var hwRow = el('div', 'field');
-  var hwHead = el('div', 'field-head');
-  hwHead.appendChild(el('label', null, 'HWID'));
-  hwRow.appendChild(hwHead);
-  var hwVal = el('code', 'device-hwid');
-  hwRow.appendChild(hwVal);
-  hwRow.appendChild(el('p', 'hint', 'Создаётся один раз и у каждого роутера свой. Не меняется сам: новый HWID провайдер считает новым устройством и занимает ещё один слот лимита.'));
-  c.appendChild(hwRow);
+
+  c.appendChild(el('label', null, 'Представляться как'));
+  var chips = el('div', 'device-chips');
+  c.appendChild(chips);
+
+  var grid = el('div', 'device-grid');
   var inputs = {};
   DEVICE_FIELDS.forEach(function (f) {
     var wrap = el('div', 'field');
-    var head = el('div', 'field-head');
     var label = el('label', null, f[1]);
     label.setAttribute('for', 'device_' + f[0]);
-    head.appendChild(label);
-    wrap.appendChild(head);
+    wrap.appendChild(label);
     var input = el('input'); input.type = 'text'; input.id = 'device_' + f[0]; input.maxLength = 64;
+    input.addEventListener('input', function () { picked = 'own'; drawChips(); drawPreview(); });
     wrap.appendChild(input);
-    wrap.appendChild(el('p', 'hint', f[2]));
     inputs[f[0]] = input;
-    c.appendChild(wrap);
+    grid.appendChild(wrap);
   });
+  c.appendChild(grid);
+  c.appendChild(el('p', 'hint', 'Правка любого поля переключает выбор на «Свой».'));
+
+  var preview = el('div', 'device-preview');
+  c.appendChild(preview);
+
+  c.appendChild(el('label', null, 'HWID'));
+  var hwRow = el('div', 'device-hwid-row');
+  var hwVal = el('code', 'device-hwid');
+  var hwInput = el('input'); hwInput.type = 'text'; hwInput.maxLength = 64; hwInput.className = 'device-hwid-input';
+  hwInput.setAttribute('aria-label', 'Свой HWID'); hwInput.hidden = true;
+  var manual = el('button', 'submit secondary', 'Ввести вручную'); manual.type = 'button';
+  var regen = el('button', 'submit secondary', 'Сгенерировать новый'); regen.type = 'button';
+  hwRow.appendChild(hwVal); hwRow.appendChild(hwInput); hwRow.appendChild(manual); hwRow.appendChild(regen);
+  c.appendChild(hwRow);
+  var hwHint = el('p', 'hint', 'Создаётся один раз и у каждого роутера свой. Новый HWID провайдер считает новым устройством: займётся ещё один слот лимита.');
+  c.appendChild(hwHint);
+
   var save = el('button', 'submit', 'Сохранить устройство'); save.type = 'button';
-  var reset = el('button', 'submit secondary', 'Сбросить HWID'); reset.type = 'button';
+  var cancel = el('button', 'submit secondary', 'Отменить'); cancel.type = 'button';
   var row = el('div', 'btn-row');
-  row.appendChild(save); row.appendChild(reset);
+  row.appendChild(save); row.appendChild(cancel);
   c.appendChild(row);
   var msg = el('p', 'hint');
   c.appendChild(msg);
-  var alive = viewGuard();
-  var subs = [];
 
-  function busy(on) { save.disabled = on; reset.disabled = on; }
+  var alive = viewGuard();
+  var loaded = {}, subs = [], picked = 'own', manualOn = false;
+
+  function cur() { return { os: inputs.os.value.trim(), os_ver: inputs.os_ver.value.trim(), model: inputs.model.value.trim() }; }
+  function drawChips() {
+    clearNode(chips);
+    DEVICE_PRESETS.concat([{ id: 'own', label: 'Свой' }]).forEach(function (p) {
+      var b = el('button', 'device-chip' + (p.id === picked ? ' on' : ''), p.label);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', p.id === picked ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        picked = p.id;
+        if (p.id !== 'own') { inputs.os.value = p.os; inputs.os_ver.value = p.os_ver; inputs.model.value = p.model; }
+        else { inputs.model.focus(); }
+        drawChips(); drawPreview();
+      });
+      chips.appendChild(b);
+    });
+  }
+  function line(name, value) {
+    var d = el('div');
+    d.appendChild(el('b', null, name + ': '));
+    d.appendChild(document.createTextNode(value || '-'));
+    return d;
+  }
+  function drawPreview() {
+    clearNode(preview);
+    var v = cur();
+    preview.appendChild(el('div', 'device-preview-title', 'Так провайдер увидит роутер'));
+    preview.appendChild(line('Платформа', v.os));
+    preview.appendChild(line('Модель', v.model));
+    preview.appendChild(line('Версия ОС', v.os_ver));
+    preview.appendChild(el('div', 'hint', 'Приложение провайдер берёт из User-Agent подписки (его подбирает «Определить» в конструкторе).'));
+  }
+  function setManual(on) {
+    manualOn = on;
+    hwInput.hidden = !on; hwVal.hidden = on;
+    manual.textContent = on ? 'Не вводить' : 'Ввести вручную';
+    if (on) { hwInput.value = loaded.hwid || ''; hwInput.focus(); }
+    hwHint.className = 'hint';
+    hwHint.textContent = on
+      ? 'Свой HWID: 10-64 символа - латиница, цифры, «=» и «-». Пригодится, чтобы вернуть прежний HWID после переустановки, не занимая новый слот.'
+      : 'Создаётся один раз и у каждого роутера свой. Новый HWID провайдер считает новым устройством: займётся ещё один слот лимита.';
+  }
   function show(d) {
+    loaded = d;
     subs = d.subs || [];
     hwVal.textContent = d.hwid || 'ещё не создан - появится, когда подписке понадобится';
-    reset.hidden = !d.hwid;
+    regen.hidden = !d.hwid;
     inputs.os.value = d.os || ''; inputs.os_ver.value = d.os_ver || ''; inputs.model.value = d.model || '';
+    picked = devicePresetOf(cur());
+    setManual(false);
+    drawChips(); drawPreview();
     status.textContent = subs.length
       ? 'HWID сейчас получают подписки: ' + subs.join(', ') + '.'
       : 'Сейчас ни одна подписка не отправляет HWID.';
   }
+  function busy(on) { [save, cancel, manual, regen].forEach(function (b) { b.disabled = on; }); }
   function load() {
     return fetchJson('/api/constructor/device').then(function (d) { if (alive()) { show(d); } })['catch'](function (err) {
       if (alive()) { status.textContent = 'Не удалось загрузить данные устройства: ' + deviceErrText(err); }
     });
   }
-  function send(withReset) {
+  function fail(text) { msg.className = 'msg-err'; msg.textContent = text; }
+  function send(hwMode) {
+    var v = cur();
+    var bad = DEVICE_FIELDS.filter(function (f) { return !DEVICE_TEXT_RE.test(v[f[0]]); })[0];
+    if (bad) { fail(bad[1] + ': от 1 до 64 символов, без кавычек и обратной косой черты.'); inputs[bad[0]].focus(); return; }
+    var hwLine = '';
+    if (hwMode === 'reset') { hwLine = 'reset'; }
+    if (hwMode === 'manual') {
+      var h = hwInput.value.trim();
+      if (!HWID_RE.test(h)) { fail('HWID: 10-64 символа - латиница, цифры, «=» и «-», без пробелов. Иначе панель его не примет.'); hwInput.focus(); return; }
+      if (h !== loaded.hwid) { hwLine = 'set:' + h; }
+    }
     var applyNote = subs.length ? 'Данные обновятся в конфиге у подписок: ' + subs.join(', ') + '. Конфиг будет проверен, ядро mihomo перезапустится.' : '';
-    if (withReset && !window.confirm('Создать новый HWID? Провайдеры увидят новое устройство и займут ещё один слот лимита; старое устройство можно удалить у провайдера. ' + applyNote)) { return; }
-    if (!withReset && applyNote && !window.confirm(applyNote + ' Продолжить?')) { return; }
+    var hwNote = hwLine ? 'Провайдеры увидят новое устройство и займут ещё один слот лимита; старое можно удалить у провайдера. ' : '';
+    if ((hwNote || applyNote) && !window.confirm((hwNote + applyNote + ' Продолжить?').trim())) { return; }
     busy(true);
     msg.className = 'hint';
     msg.textContent = applyNote ? 'Применяю конфиг...' : 'Сохраняю...';
-    var body = [inputs.os.value.trim(), inputs.os_ver.value.trim(), inputs.model.value.trim(), withReset ? 'reset' : ''].join('\n');
+    var body = [v.os, v.os_ver, v.model, hwLine].join('\n');
     fetchJson('/api/constructor/device', { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }).then(function (r) {
       if (!alive()) { return; }
       msg.className = 'msg-ok';
@@ -621,16 +709,19 @@ function buildDeviceCard() {
         : (r.restarted ? 'Сохранено: конфиг применён, ядро перезапущено.' : 'Сохранено: конфиг записан, перезапустите ядро вручную.');
       return load();
     }, function (err) {
-      if (!alive()) { return; }
-      msg.className = 'msg-err';
-      msg.textContent = 'Не удалось сохранить: ' + deviceErrText(err);
+      if (alive()) { fail('Не удалось сохранить: ' + deviceErrText(err)); }
     }).then(function () { busy(false); });
   }
-  save.addEventListener('click', function () { send(false); });
-  reset.addEventListener('click', function () { send(true); });
+  save.addEventListener('click', function () { send(manualOn ? 'manual' : ''); });
+  regen.addEventListener('click', function () { send('reset'); });
+  manual.addEventListener('click', function () { setManual(!manualOn); });
+  cancel.addEventListener('click', function () { msg.textContent = ''; msg.className = 'hint'; show(loaded); });
+  drawChips(); drawPreview();
   load();
   return c;
 }
+
+function clearNode(n) { while (n.firstChild) { n.removeChild(n.firstChild); } }
 
 // Полный сброс статистики: сводка прогонов, история нод-победителей и
 // доступность нод (лента и таблица) (reset_node_stats() в stats_cgi.sh).

@@ -391,7 +391,13 @@ assert_contains 'Status: 200' "$out"
 hw2=$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")
 [ -n "$hw2" ] && [ "$hw2" != "$hw" ] || fail "16b: сброс HWID"
 grep -q "^        - \"$hw2\"\$" "$M/config.yaml" || fail "16b: новый HWID в config.yaml"
-for bad in 'i"OS\n1\nm\n\n' 'Android\n\nm\n\n' 'Android\n1\nm\nбыть\n' 'Android\n1\nm\n\nлишняя\n'; do
+# свой HWID: set:<HWID>, проверка как в Remnawave
+out=$(printf 'Android\n14\nPixel 8\nset:MyOwn-Hwid=42\n' | cgi device POST '')
+assert_contains 'Status: 200' "$out"
+[ "$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")" = "MyOwn-Hwid=42" ] || fail "16b: свой HWID сохранён"
+grep -q '^        - "MyOwn-Hwid=42"$' "$M/config.yaml" || fail "16b: свой HWID в config.yaml"
+hw2=MyOwn-Hwid=42
+for bad in 'Android\n1\nm\nset:short\n' 'Android\n1\nm\nset:with space1\n' 'Android\n1\nm\nset:\n' 'i"OS\n1\nm\n\n' 'Android\n\nm\n\n' 'Android\n1\nm\nбыть\n' 'Android\n1\nm\n\nлишняя\n'; do
   assert_contains 'Status: 400' "$(printf "$bad" | cgi device POST '')"
 done
 [ "$(sed -n 's/^SUB_HWID=//p' "$DIR/sub-device.env")" = "$hw2" ] || fail "16b: отказ не меняет файл"

@@ -31,7 +31,8 @@
 #                   "hwid" (пусто - ещё не создан),"os","os_ver","model",
 #                   "subs":[имена подписок с x-hwid в config.yaml]}.
 #            POST - сохранить: тело - ОС, версия ОС, модель и "reset"
-#                   (новый HWID) или пустая строка, по строке. Есть подписки
+#                   (новый HWID), "set:<HWID>" (свой, проверяется как в
+#                   Remnawave) или пустая строка, по строке. Есть подписки
 #                   с HWID - их заголовки обновляются в config.yaml обычным
 #                   применением (mihomo -t, бэкап, перезапуск, откат), файл
 #                   устройства пишется после успеха; нет - только файл:
@@ -327,13 +328,20 @@ case $action:$method in
     dv_reset=$(sed -n '4p' "$WORK/body" | tr -d '\r')
     dv_extra=$(sed -n '5,$p' "$WORK/body" | tr -d '[:space:]')
     [ -z "$dv_extra" ] || fail_json 400 bad_body "Лишние строки в запросе"
-    case $dv_reset in ''|reset) ;; *) fail_json 400 bad_body "Четвёртая строка - reset или пусто" ;; esac
+    dv_set=""
+    case $dv_reset in
+      ''|reset) ;;
+      set:*) dv_set=${dv_reset#set:}; dv_reset=""; sub_device_hwid_ok "$dv_set" || fail_json 400 bad_hwid "HWID: 10-64 символа - латиница, цифры, = и -" ;;
+      *) fail_json 400 bad_body "Четвёртая строка - reset, set:<HWID> или пусто" ;;
+    esac
     sub_device_text_ok "$dv_os" || fail_json 400 bad_os "ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_text_ok "$dv_ver" || fail_json 400 bad_os_ver "Версия ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_text_ok "$dv_model" || fail_json 400 bad_model "Модель: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_peek
     SUB_DEVICE_OS=$dv_os SUB_OS_VER=$dv_ver SUB_DEVICE_MODEL=$dv_model
-    if [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
+    if [ -n "$dv_set" ]; then
+      SUB_HWID=$dv_set
+    elif [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
       SUB_HWID=$(sub_device_new_hwid) || fail_json 500 no_hwid "Не удалось сгенерировать HWID устройства"
     fi
     target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
