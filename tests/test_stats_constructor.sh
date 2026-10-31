@@ -416,6 +416,23 @@ grep -q '^SUB_DEVICE_MODEL=iPhone 15$' "$DIR/sub-device.env" || fail "16b: фа�
 cmp -s "$D/config.example.yaml" "$M/config.yaml" || fail "16b: config.yaml не тронут"
 cp "$TMP/config.before-device" "$M/config.yaml"
 
+# --- 16c: флажок HWID подписки переживает применение и чтение
+cp "$M/config.yaml" "$TMP/config.before-hwid"
+rm -rf "$ST"
+cp "$D/config.example.yaml" "$M/config.yaml"
+b0=$(cgi read GET '' </dev/null | jget '["base"]')
+sb="### MST-STATE services.tsv${NL}del	spotify${NL}### MST-STATE subscriptions.tsv${NL}https://h.test/KEY	FlClashX/0.3.2	hw	1${NL}https://p.test/KEY	clash.meta	plain${NL}"
+out=$(printf '%s' "$sb" | cgi apply POST "base=$b0")
+assert_contains 'Status: 200' "$out"
+[ "$(grep -c '^      x-hwid:$' "$M/config.yaml")" = 1 ] || fail "16c: x-hwid в config.yaml: $(grep -n 'hw:' -A9 "$M/config.yaml")"
+grep -q "$(printf 'hw\t1')" "$ST/subscriptions.tsv" || fail "16c: признак в сохранённом состоянии: $(cat "$ST/subscriptions.tsv")"
+out=$(cgi read GET '' </dev/null)
+printf '%s' "$out" | jget '["subscriptions"]' | grep -q "$(printf 'hw\t1')" || fail "16c: признак в ответе чтения: $(printf '%s' "$out" | jget '["subscriptions"]')"
+rm -rf "$ST"
+out=$(cgi read GET '' </dev/null)
+printf '%s' "$out" | jget '["subscriptions"]' | grep -q "$(printf 'hw\t1')" || fail "16c: признак при переносе из config.yaml"
+cp "$TMP/config.before-hwid" "$M/config.yaml"
+
 # --- 17: проверка нод подписки (ядро - заглушка с API и строками Reality)
 cat > "$TMP/fakecore" <<'EOF_CORE'
 #!/usr/bin/env python3

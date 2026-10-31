@@ -438,7 +438,11 @@ var CUSTOM_UA = '__custom__';
 // hwidBox (необязательно) - флажок «HWID устройства» (hwidCheck): подбор
 // отмечает его, если панель без данных устройства отдала заглушку, и
 // проверка нод идёт с ними.
-export function uaField(value, getUrl, hwidBox) {
+// extra (необязательно): noteHost - куда выводить итоги подбора (иначе в
+// само поле), button - своя кнопка подбора вместо встроенной «Определить»,
+// onDone(d) - после подбора (d - ответ detect-ua или null при сбое).
+// wrap.detect() запускает подбор.
+export function uaField(value, getUrl, hwidBox, extra) {
   var wrap = el('span', 'cx-ua');
   var sel = el('select');
   sel.setAttribute('aria-label', 'User-Agent');
@@ -457,7 +461,7 @@ export function uaField(value, getUrl, hwidBox) {
   set(value);
   wrap.appendChild(sel); wrap.appendChild(custom);
   wrap.value = function () { return sel.value === CUSTOM_UA ? custom.value.trim() : sel.value; };
-  if (getUrl) { addDetect(wrap, getUrl, set, hwidBox); }
+  if (getUrl) { wrap.detect = addDetect(wrap, getUrl, set, hwidBox, extra || {}); }
   return wrap;
 }
 
@@ -478,13 +482,18 @@ export function hwidCheck(checked) {
 // отвечают ли ноды выбранным UA (подписка качается ещё раз, ноды проверяет
 // временное ядро); кнопка занята, пока идёт то и другое. Адрес уходит телом
 // POST - ключ доступа не попадает в строку запроса и журналы.
-function addDetect(wrap, getUrl, setUa, hwidBox) {
-  var btn = button('Определить', 'small muted');
+function addDetect(wrap, getUrl, setUa, hwidBox, opts) {
+  var own = !opts.button;
+  var btn = opts.button || button('Определить', 'small muted');
+  var btnText = btn.textContent;
   btn.title = 'Проверить адрес под разными User-Agent, выбрать подходящий и проверить, отвечают ли ноды';
   var note = el('div', 'hint cx-ua-note');
   var probe = el('div', 'hint cx-ua-note');
   note.hidden = true; probe.hidden = true;
-  wrap.appendChild(btn); wrap.appendChild(note); wrap.appendChild(probe);
+  var host = opts.noteHost || wrap;
+  if (own) { wrap.appendChild(btn); }
+  host.appendChild(note); host.appendChild(probe);
+  var done = opts.onDone || function () {};
 
   function put(node, text, kind) {
     clear(node);
@@ -516,12 +525,14 @@ function addDetect(wrap, getUrl, setUa, hwidBox) {
     }
   }
 
-  btn.addEventListener('click', function () {
+  function run() {
     var url = (getUrl() || '').trim();
     if (!url) { say('Сначала введите адрес подписки.', 'msg-err-text'); return; }
+    var found = null;
     btn.disabled = true; btn.textContent = 'Проверяю...';
     say('Перебираю User-Agent, это может занять до нескольких минут.', '');
     post('/api/constructor/detect-ua', url).then(function (d) {
+      found = d;
       var tried = d.tried || [];
       if (!d.ua) {
         if (d.reason === 'unreachable') {
@@ -533,20 +544,29 @@ function addDetect(wrap, getUrl, setUa, hwidBox) {
         return null;
       }
       setUa(d.ua);
-      if (hwidBox) { hwidBox.box.checked = !!d.hwid; }
+      // Подбор только включает HWID, когда панель его требует; отметку,
+      // поставленную вручную, не снимает.
+      if (hwidBox && d.hwid) { hwidBox.box.checked = true; }
       var hw = d.hwid ? ' Панель требует HWID устройства - включён.' : '';
       say((d.quality === 'short'
         ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
         : 'Выбран ' + d.ua + ': ' + d.kind + '.') + hw, d.quality === 'short' ? '' : 'msg-ok-text');
       put(probe, 'Проверяю, отвечают ли ноды...', '');
       // Сбой самой проверки нод не отменяет найденный User-Agent.
-      return post('/api/constructor/probe-nodes', url + '\n' + d.ua + (d.hwid ? '\nhwid' : '')).then(verdict, function (err) {
+      var withHwid = d.hwid || (hwidBox && hwidBox.box.checked);
+      return post('/api/constructor/probe-nodes', url + '\n' + d.ua + (withHwid ? '\nhwid' : '')).then(verdict, function (err) {
         put(probe, 'Проверить, отвечают ли ноды, не удалось: ' + errText(err), '');
       });
     }, function (err) {
       say('Не удалось определить: ' + errText(err), 'msg-err-text');
-    }).then(function () { btn.disabled = false; btn.textContent = 'Определить'; });
-  });
+    }).then(function () {
+      btn.disabled = false;
+      if (own) { btn.textContent = btnText; }
+      done(found);
+    });
+  }
+  if (own) { btn.addEventListener('click', run); }
+  return run;
 }
 
 // ----- устройство для панелей подписок с лимитом устройств (HWID) -----
@@ -826,21 +846,42 @@ export function createModuleCards(ctx) {
     list.forEach(function (s) { rows.appendChild(subRow(s)); });
     if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Подписок нет.')); }
     subsHost.appendChild(rows);
-    var add = el('div', 'cx-editor');
+    // Новая подписка: сначала «Определить» (основная кнопка), после
+    // подбора - успешного или нет - она становится «Добавить подписку»;
+    // новый адрес снова требует подбора, но добавить можно и без него
+    // («Добавить без проверки»).
+    var add = el('div', 'cx-editor cx-sub-add');
     var url = el('input'); url.type = 'text'; url.placeholder = 'https://...'; url.setAttribute('aria-label', 'Адрес новой подписки');
     var name = el('input'); name.type = 'text'; name.placeholder = 'имя (необязательно)'; name.setAttribute('aria-label', 'Имя подписки');
     var hw = hwidCheck(false);
-    var ua = uaField(UA_PRESETS[0], function () { return url.value; }, hw);
-    var btn = button('Добавить подписку', 'submit');
-    btn.addEventListener('click', function () {
-      ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value, hw.box.checked); });
+    var main = button('Определить', 'submit');
+    var skip = button('Добавить без проверки', 'small muted');
+    var notes = el('div', 'cx-sub-add-notes');
+    var detected = false;
+    function stage(isDetected) {
+      detected = isDetected;
+      main.textContent = detected ? 'Добавить подписку' : 'Определить';
+      main.title = detected ? '' : 'Роутер проверит адрес под разными User-Agent, выберет подходящий и проверит, отвечают ли ноды';
+      skip.hidden = detected;
+    }
+    var ua = uaField(UA_PRESETS[0], function () { return url.value; }, hw, {
+      button: main, noteHost: notes, onDone: function () { stage(true); }
     });
-    url.addEventListener('keydown', function (e) { if (e.key === 'Enter') { btn.click(); } });
+    function doAdd() { ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value, hw.box.checked); }); }
+    main.addEventListener('click', function () { if (detected) { doAdd(); } else { ua.detect(); } });
+    skip.addEventListener('click', doAdd);
+    url.addEventListener('input', function () { if (detected) { stage(false); } });
+    url.addEventListener('keydown', function (e) { if (e.key === 'Enter') { main.click(); } });
     add.appendChild(el('div', 'geo-group-title', 'Новая подписка'));
     add.appendChild(url);
-    var row = el('div', 'xk-add');
-    row.appendChild(name); row.appendChild(ua); row.appendChild(hw); row.appendChild(btn);
+    var row = el('div', 'xk-add cx-sub-add-row');
+    row.appendChild(name); row.appendChild(ua); row.appendChild(hw);
     add.appendChild(row);
+    add.appendChild(notes);
+    var acts = el('div', 'xk-add cx-sub-add-acts');
+    acts.appendChild(main); acts.appendChild(skip);
+    add.appendChild(acts);
+    stage(false);
     subsHost.appendChild(add);
   }
 
