@@ -642,4 +642,185 @@ assert_contains 'no_config' "$(cgi reset POST '' </dev/null)"
 # GET не разрешён
 assert_contains 'Status: 405' "$(cgi reset GET '' </dev/null)"
 
+# --- 19: восстановление бэкапа синхронизирует собственные ноды конструктора
+M3=$TMP/mihomo19; D3=$TMP/dir19; mkdir -p "$M3" "$D3"
+for f in "$D"/*; do [ -f "$f" ] && cp "$f" "$D3/"; done
+cp "$D3/config.example.yaml" "$M3/config.yaml"
+cgi3() {
+  body=$(cat)
+  printf '%s' "$body" | DIR="$D3" MIHOMO_DIR="$M3" CONFIG="$M3/config.yaml" \
+    CONFIG_STATE_DIR="$D3/config-state" MST_CONSTRUCTOR_ACTION=$1 REQUEST_METHOD=$2 QUERY_STRING=$3 \
+    CONTENT_LENGTH=$(printf '%s' "$body" | wc -c | tr -d ' ') sh "$SCRIPT"
+}
+cfg3() {
+  body=$(cat)
+  printf '%s' "$body" | DIR="$D3" MIHOMO_DIR="$M3" CONFIG="$M3/config.yaml" \
+    CONFIG_STATE_DIR="$D3/config-state" MST_CONFIG_ACTION=$1 REQUEST_METHOD=$2 QUERY_STRING=$3 \
+    CONTENT_LENGTH=$(printf '%s' "$body" | wc -c | tr -d ' ') sh "$D3/stats_config.sh"
+}
+state_body() {
+  python3 -c 'import json,sys
+d=json.loads(sys.stdin.read().split("\n\n",1)[1])
+for key,name in (("services","services.tsv"),("geofilter","geofilter.txt"),("user_rules","user-rules.txt"),("subscriptions","subscriptions.tsv"),("proxies","proxies.yaml")):
+    value=d.get(key)
+    if value is not None and (value or name == "services.tsv"):
+        print("### MST-STATE " + name)
+        print(value, end="" if value.endswith("\n") else "\n")'
+}
+proxies19="  - name: 'AWG backup'${NL}    type: wireguard${NL}    server: 192.0.2.10${NL}    port: 51820${NL}    ip: 10.0.0.2${NL}    private-key: SECRET-AWG-PRIVATE${NL}    public-key: PUBLIC${NL}    mtu: 1400${NL}  - name: 'TT backup'${NL}    type: trusttunnel${NL}    server: 192.0.2.20${NL}    port: 443${NL}    username: test${NL}    password: SECRET-TT-PASSWORD${NL}    sni: tt.example${NL}    quic: true${NL}"
+out=$(cgi3 read GET '' </dev/null)
+base19=$(printf '%s' "$out" | jget '["base"]')
+body19="### MST-STATE services.tsv${NL}### MST-STATE proxies.yaml${NL}$proxies19"
+out=$(printf '%s' "$body19" | cgi3 apply POST "base=$base19")
+assert_contains 'Status: 200' "$out"
+read19=$(cgi3 read GET '' </dev/null)
+base19=$(printf '%s' "$read19" | jget '["base"]')
+printf '%s' "$read19" | state_body | sed -e 's/mtu: 1400/mtu: 1280/' -e 's/quic: true/quic: false/' > "$TMP/state19.txt"
+out=$(cgi3 apply POST "base=$base19" < "$TMP/state19.txt")
+assert_contains 'Status: 200' "$out"
+backup19=$(printf '%s' "$out" | jget '["backup"]')
+grep -q 'mtu: 1400' "$M3/config-backups/$backup19" || fail "19: в бэкапе нет mtu 1400"
+grep -q 'quic: true' "$M3/config-backups/$backup19" || fail "19: в бэкапе нет quic true"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(cfg3 restore POST "kind=edit&name=$backup19&base=$base19" </dev/null)
+assert_contains 'Status: 200' "$out"
+restore19=$out
+read19=$(cgi3 read GET '' </dev/null)
+[ "$(printf '%s' "$read19" | jget '["imported"]')" = True ] || fail "19: REVIEW должен запускать повторный перенос: $restore19"
+assert_contains 'base-proxies' "$(printf '%s' "$read19" | jget '["report"]')"
+printf '%s' "$read19" | state_body > "$TMP/state19.txt"
+base19=$(printf '%s' "$read19" | jget '["base"]')
+out=$(cgi3 apply POST "base=$base19" < "$TMP/state19.txt")
+assert_contains 'Status: 200' "$out"
+grep -q 'mtu: 1400' "$M3/config.yaml" || fail "19: конструктор вернул старый mtu после восстановления"
+grep -q 'quic: true' "$M3/config.yaml" || fail "19: конструктор вернул старый quic после восстановления"
+[ "$(printf '%s' "$restore19" | jget '["state_sync"]')" = reimport_required ] || fail "19: state_sync после восстановления с REVIEW"
+lg=$(cfg3 log GET '' </dev/null | jget '["text"]')
+assert_not_contains 'SECRET-AWG-PRIVATE' "$lg"
+assert_not_contains 'SECRET-TT-PASSWORD' "$lg"
+assert_not_contains 'SECRET-AWG-PRIVATE' "$(cat "$D3/config-state/managed.sig")"
+assert_not_contains 'SECRET-TT-PASSWORD' "$(cat "$D3/config-state/managed.sig")"
+
+# --- 20: непредставимый бэкап применяется, старое состояние блокируется
+awk '{print} /^proxy-providers:/ && !done {print "  local-file:"; print "    type: file"; print "    path: /tmp/nodes.yaml"; done=1}' \
+  "$M3/config.yaml" > "$M3/config-backups/config.yaml.2026-11-03_100000.bak"
+cp "$D3/config-state/services.tsv" "$TMP/services20.before"
+cp "$D3/config-state/proxies.yaml" "$TMP/proxies20.before"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100000.bak&base=$base19" </dev/null)
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["ok"]')" = True ] || fail "20: конфиг с REVIEW не восстановлен"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = reimport_required ] || fail "20: state_sync REVIEW: $out"
+[ -f "$D3/config-state.needs-reimport" ] || fail "20: нет маркера повторного переноса"
+cmp -s "$D3/config-state/services.tsv" "$TMP/services20.before" || fail "20: прежнее состояние перезаписано"
+mv "$D3/config-state" "$D3/config-state.old"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(printf 'BROKEN\n' | cfg3 save POST "base=$base19")
+assert_contains 'Status: 422' "$out"
+assert_not_contains '"state_sync"' "$out"
+[ -f "$D3/config-state.needs-reimport" ] && [ -d "$D3/config-state.old" ] || fail "20: ошибка проверки сняла маркер"
+read19=$(cgi3 read GET '' </dev/null)
+[ "$(printf '%s' "$read19" | jget '["imported"]')" = True ] || fail "20: чтение не использует фактический конфиг"
+assert_contains 'file-provider-dropped' "$(printf '%s' "$read19" | jget '["report"]')"
+[ -d "$D3/config-state.old" ] && [ ! -e "$D3/config-state" ] || fail "20: recover_state вернул .old при маркере"
+printf '%s' "$read19" | state_body > "$TMP/state20.txt"
+base19=$(printf '%s' "$read19" | jget '["base"]')
+out=$(cgi3 apply POST "base=$base19" < "$TMP/state20.txt")
+assert_contains 'Status: 200' "$out"
+grep -q 'mtu: 1400' "$M3/config.yaml" || fail "20: повторный перенос потерял mtu"
+grep -q 'quic: true' "$M3/config.yaml" || fail "20: повторный перенос потерял quic"
+[ ! -e "$D3/config-state.needs-reimport" ] || fail "20: маркер не снят после сохранения состояния"
+
+# --- 21: ошибка контрольной сборки не отменяет восстановление
+cp "$M3/config.yaml" "$M3/config-backups/config.yaml.2026-11-03_100100.bak"
+sed -e 's/mtu: 1400/mtu: 1500/' -e 's/quic: true/quic: false/' "$M3/config-backups/config.yaml.2026-11-03_100100.bak" > "$TMP/c21" && cat "$TMP/c21" > "$M3/config-backups/config.yaml.2026-11-03_100100.bak"
+mv "$D3/constructor_build.sh" "$D3/constructor_build.sh.ok"
+printf '#!/bin/sh\necho "ERROR: controlled" >&2\nexit 1\n' > "$D3/constructor_build.sh"
+chmod +x "$D3/constructor_build.sh"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100100.bak&base=$base19" </dev/null)
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = reimport_required ] || fail "21: ошибка сборки не требует перенос"
+grep -q 'mtu: 1500' "$M3/config.yaml" && grep -q 'quic: false' "$M3/config.yaml" || fail "21: конфиг не применён"
+cmp -s "$D3/config-state/proxies.yaml" "$TMP/proxies20.before" || fail "21: прежние ноды перезаписаны"
+read19=$(cgi3 read GET '' </dev/null)
+[ "$(printf '%s' "$read19" | jget '["imported"]')" = True ] || fail "21: чтение вернуло старое состояние"
+mv "$D3/constructor_build.sh.ok" "$D3/constructor_build.sh"
+printf '%s' "$read19" | state_body > "$TMP/state21.txt"
+base19=$(printf '%s' "$read19" | jget '["base"]')
+out=$(cgi3 apply POST "base=$base19" < "$TMP/state21.txt")
+assert_contains 'Status: 200' "$out"
+grep -q 'mtu: 1500' "$M3/config.yaml" && grep -q 'quic: false' "$M3/config.yaml" || fail "21: применение после переноса потеряло параметры"
+
+# --- 22: ошибка persist_state оставляет маркер, ошибка маркера - failed
+# Контрольная сборка здесь намеренно успешна, чтобы отказ относился именно
+# к записи состояния, а не к REVIEW базовых групп из предыдущих фикстур.
+mv "$D3/constructor_build.sh" "$D3/constructor_build.sh.real22"
+mv "$D3/config_to_state.awk" "$D3/config_to_state.awk.real22"
+cat > "$D3/constructor_build.sh" <<'EOF_BUILD22'
+#!/bin/sh
+while [ $# -gt 0 ]; do
+  case $1 in
+    --source) src=$2; shift 2 ;;
+    --output) out=$2; shift 2 ;;
+    --report) rep=$2; shift 2 ;;
+    --state) shift 2 ;;
+    *) shift ;;
+  esac
+done
+cp "$src" "$out"
+: > "$rep"
+EOF_BUILD22
+chmod +x "$D3/constructor_build.sh"
+sed 's/rep("REVIEW"/rep("IMPORTED"/g' "$D3/config_to_state.awk.real22" > "$D3/config_to_state.awk"
+cp "$M3/config.yaml" "$M3/config-backups/config.yaml.2026-11-03_100200.bak"
+sed -e 's/mtu: 1500/mtu: 1400/' -e 's/quic: false/quic: true/' "$M3/config-backups/config.yaml.2026-11-03_100200.bak" > "$TMP/c22" && cat "$TMP/c22" > "$M3/config-backups/config.yaml.2026-11-03_100200.bak"
+mkdir -p "$D3/config-state.old/blocker"
+printf 'keep\n' > "$D3/config-state.old/blocker/file"
+chmod 500 "$D3/config-state.old/blocker" "$D3/config-state.old"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100200.bak&base=$base19" </dev/null 2>"$TMP/stderr22.persist")
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = reimport_required ] || fail "22: ошибка persist_state не требует перенос: $out"
+[ -f "$D3/config-state.needs-reimport" ] || fail "22: ошибка persist_state не оставила маркер"
+grep -q 'mtu: 1400' "$M3/config.yaml" && grep -q 'quic: true' "$M3/config.yaml" || fail "22: конфиг после ошибки состояния"
+chmod 700 "$D3/config-state.old" "$D3/config-state.old/blocker"
+rm -rf "$D3/config-state.old"
+read19=$(cgi3 read GET '' </dev/null)
+printf '%s' "$read19" | state_body > "$TMP/state22.txt"
+base19=$(printf '%s' "$read19" | jget '["base"]')
+out=$(cgi3 apply POST "base=$base19" < "$TMP/state22.txt")
+assert_contains 'Status: 200' "$out"
+
+cp "$M3/config.yaml" "$M3/config-backups/config.yaml.2026-11-03_100300.bak"
+sed -e 's/mtu: 1400/mtu: 1280/' -e 's/quic: true/quic: false/' "$M3/config-backups/config.yaml.2026-11-03_100300.bak" > "$TMP/c23" && cat "$TMP/c23" > "$M3/config-backups/config.yaml.2026-11-03_100300.bak"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+chmod 500 "$D3"
+out=$(cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100300.bak&base=$base19" </dev/null 2>"$TMP/stderr22.marker")
+chmod 700 "$D3"
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["ok"]')" = True ] || fail "22: ошибка маркера отменила конфиг"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = failed ] || fail "22: ошибка маркера не вернула failed: $out"
+[ ! -e "$D3/config-state.needs-reimport" ] || fail "22: неожиданный маркер в read-only каталоге"
+grep -q 'mtu: 1280' "$M3/config.yaml" && grep -q 'quic: false' "$M3/config.yaml" || fail "22: конфиг при failed не применён"
+
+# Повтор того же отката - unchanged, состояние всё равно синхронизируется.
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$(cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100300.bak&base=$base19" </dev/null)
+[ "$(printf '%s' "$out" | jget '["unchanged"]')" = True ] || fail "22: повтор не unchanged"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = ok ] || fail "22: unchanged не синхронизировал состояние"
+read19=$(cgi3 read GET '' </dev/null)
+[ "$(printf '%s' "$read19" | jget '["imported"]')" = False ] || fail "22: после unchanged состояние не сохранено"
+
+# --- 23: успех без XKeen тоже синхронизирует состояние
+cp "$M3/config.yaml" "$M3/config-backups/config.yaml.2026-11-03_100400.bak"
+printf '# no xkeen fixture\n' >> "$M3/config-backups/config.yaml.2026-11-03_100400.bak"
+base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
+out=$( (export XKEEN_BIN=$TMP/no-xkeen; cfg3 restore POST "kind=edit&name=config.yaml.2026-11-03_100400.bak&base=$base19" </dev/null) )
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["restarted"]')" = False ] || fail "23: ожидался restarted:false"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = ok ] || fail "23: restarted:false не синхронизировал состояние"
+mv "$D3/constructor_build.sh.real22" "$D3/constructor_build.sh"
+mv "$D3/config_to_state.awk.real22" "$D3/config_to_state.awk"
+
 echo "test_stats_constructor.sh: OK"

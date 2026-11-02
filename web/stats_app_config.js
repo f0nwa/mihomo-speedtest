@@ -1314,11 +1314,23 @@ function renderYaml(bar) {
     }
     function applyText(resp, what) {
       var t = what;
-      if (resp.unchanged) { return 'Конфиг не изменился, перезапуск не нужен.'; }
-      if (resp.restarted === false) { t += ' XKeen не найден - перезапустите ядро вручную.'; }
-      else { t += ' Ядро перезапущено.'; }
-      if (resp.backup) { t += ' Предыдущая версия сохранена в бэкап ' + fmtBackupName(resp.backup) + '.'; }
+      if (resp.unchanged) { t = 'Конфиг не изменился, перезапуск не нужен.'; }
+      else {
+        if (resp.restarted === false) { t += ' XKeen не найден - перезапустите ядро вручную.'; }
+        else { t += ' Ядро перезапущено.'; }
+        if (resp.backup) { t += ' Предыдущая версия сохранена в бэкап ' + fmtBackupName(resp.backup) + '.'; }
+      }
+      if (resp.state_sync === 'reimport_required') {
+        t += ' Состояние конструктора не сохранено: при следующем открытии появится результат повторного переноса из фактического config.yaml со строками REVIEW.';
+      } else if (resp.state_sync === 'failed') {
+        t += ' Конфиг применён, но устаревшее состояние конструктора не заблокировано. Не применяйте конструктор: удалите config-state по SSH либо восстановите права записи и повторите перенос из фактического конфига.';
+      }
       return t;
+    }
+    function applyKind(resp) {
+      if (resp.state_sync === 'failed') { return 'err'; }
+      if (resp.state_sync === 'reimport_required') { return 'warn'; }
+      return 'ok';
     }
     // keepEditor - не трогать текст в редакторе (после автоотката правки
     // пользователя не должны пропасть), только обновить base/сохранённое.
@@ -1355,7 +1367,7 @@ function renderYaml(bar) {
       busy(true);
       startApplyLog();
       var p = body === null ? fetchJson(url, { method: 'POST' }) : postText(url, body);
-      return p.then(function (resp) { reload(applyText(resp, typeof what === 'function' ? what(resp) : what)); })
+      return p.then(function (resp) { reload(applyText(resp, typeof what === 'function' ? what(resp) : what), applyKind(resp)); })
         ['catch'](handleApplyError)
         .then(function () { busy(false); return stopApplyLog(); });
     }

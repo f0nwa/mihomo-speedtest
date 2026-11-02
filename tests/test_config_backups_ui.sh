@@ -42,6 +42,27 @@ function el(tag, className, text) {
 }
 const { filterBackups, createBackupBrowser } = new Function('el', src.slice(a, b) +
   '\nreturn { filterBackups, createBackupBrowser };')(el);
+
+const applyStart = src.indexOf('function applyText');
+const applyEnd = src.indexOf('// keepEditor', applyStart);
+assert(applyStart >= 0 && applyEnd > applyStart, 'не найден блок сообщений применения');
+const applyBlock = src.slice(applyStart, applyEnd);
+assert(applyBlock.includes('state_sync'), 'сообщение применения не учитывает state_sync');
+const { applyText, applyKind } = new Function('fmtBackupName', applyBlock +
+  '\nreturn { applyText, applyKind };')(name => name);
+let applyResp = { unchanged: true, state_sync: 'reimport_required' };
+let applyMsg = applyText(applyResp, 'Конфиг восстановлен.');
+assert(applyMsg.includes('Конфиг не изменился'), 'ветка unchanged потеряла исходное сообщение');
+assert(applyMsg.includes('повторного переноса') && applyMsg.includes('REVIEW'), 'нет предупреждения о повторном переносе');
+assert(applyKind(applyResp) !== 'err', 'reimport_required не должен отменять успех конфига');
+applyResp = { restarted: false, state_sync: 'failed', backup: 'config.yaml.2026-11-02_134400.bak' };
+applyMsg = applyText(applyResp, 'Конфиг восстановлен.');
+assert(applyMsg.includes('XKeen не найден'), 'ветка restarted:false потеряла предупреждение о перезапуске');
+assert(applyMsg.includes('Не применяйте конструктор') && applyMsg.includes('SSH'), 'failed не блокирует старый конструктор в инструкции');
+assert(applyMsg.includes('устаревшее состояние') && applyMsg.includes('не заблокировано'), 'failed обещает автоматическую блокировку или скрывает ошибку');
+assert(applyKind(applyResp) === 'err', 'failed должен показываться как ошибка');
+assert(applyKind({ restarted: true, state_sync: 'ok' }) === 'ok', 'обычный успех изменил тип сообщения');
+
 function all(node, match) { return (match(node) ? [node] : []).concat(node.children.flatMap(child => all(child, match))); }
 function one(node, match, message) { const found = all(node, match)[0]; assert(found, message); return found; }
 function field(body, label) { return one(body, n => n.attrs['aria-label'] === label, 'нет поля ' + label); }

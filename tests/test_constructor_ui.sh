@@ -26,6 +26,9 @@ grep -q "/api/constructor/preview" "$UI" || fail "нет предпросмот�
 grep -q "/api/constructor/apply?base=" "$UI" || fail "применение без base"
 grep -q "import=1" "$UI" || fail "нет «Перенести в конструктор»"
 grep -q "Проверить и применить" "$UI" || fail "нет кнопки применения"
+grep -q 'state_sync' "$UI" || fail "конструктор не сообщает результат синхронизации состояния"
+grep -q 'flashKind' "$UI" || fail "ошибка state_sync показывается как обычный успех"
+grep -q 'Не применяйте конструктор' "$UI" || fail "state_sync failed не запрещает применение устаревшего состояния"
 
 # ревью порции 3
 grep -q "if (configDirty())" "$CFG" || fail "beforeunload не учитывает правки конструктора"

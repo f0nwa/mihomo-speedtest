@@ -402,6 +402,7 @@ assert_contains 'Status: 200' "$out"
 base=$(cgi14 read GET '' </dev/null | jget '["base"]')
 out=$(cgi14 save POST "base=$base&schema=1" < "$TMP/mig14.yaml")
 assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["state_sync"]')" = ok ] || fail "14: представимое состояние не синхронизировано: $out"
 [ -f "$TMP/cstate14/services.tsv" ] || fail "14: состояние не сохранено после миграции"
 [ -f "$TMP/cstate14/managed.sig" ] || fail "14: нет managed.sig"
 [ -f "$TMP/cstate14/subscriptions.tsv" ] || fail "14: подписки не в состоянии"
