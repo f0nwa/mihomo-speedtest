@@ -380,8 +380,10 @@ var REPAIR_FIX_LABELS = {
 };
 
 function fmtBackupName(name) {
-  var m = /^config\.yaml\.(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(name || '');
-  return m ? (m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + m[6]) : (name || '');
+  var m = /^config\.yaml\.(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)(?:-(\d+))?\.bak$/.exec(name || '');
+  if (!m) { return name || ''; }
+  return m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + m[6] +
+    (m[7] ? ' · копия ' + m[7] : '') + ' · ' + name;
 }
 
 // GET /api/config* с проверкой, что пришёл именно JSON редактора.

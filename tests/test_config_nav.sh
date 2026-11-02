@@ -1,8 +1,8 @@
 #!/bin/sh
 # Вкладка «Конфиг» (YAML): навигатор разделов, поиск и полноэкранный режим
-# (createConfigNav() в web/stats_app_config.js). Проводка проверяется grep-ом,
-# разбор разделов, «хлебные крошки» и поиск - node на шаблоне конфига.
-# Нет node - часть с поведением пропускается (на роутере его нет).
+# (createConfigNav() в web/stats_app_config.js), подписи бэкапов. Проводка
+# проверяется grep-ом, разбор разделов, «хлебные крошки», поиск и подписи -
+# node на шаблоне конфига. Нет node - поведение пропускается (на роутере его нет).
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 JS=$ROOT/web/stats_app_config.js
@@ -28,6 +28,16 @@ if (a < 0 || b < a) { console.error('FAIL: не найден блок функц
 const code = src.slice(a, b).replace(/^export /gm, '');
 const { yamlSections, yamlCrumbs, findAllText } = new Function(code + '\nreturn { yamlSections, yamlCrumbs, findAllText };')();
 function eq(x, y, what) { if (JSON.stringify(x) !== JSON.stringify(y)) { console.error('FAIL: ' + what + ': ' + JSON.stringify(x) + ' != ' + JSON.stringify(y)); process.exit(1); } }
+const fmtMatch = src.match(/function fmtBackupName\(name\) \{[\s\S]*?\n\}/);
+if (!fmtMatch) { console.error('FAIL: не найдена fmtBackupName'); process.exit(1); }
+const fmtBackupName = new Function(fmtMatch[0] + '\nreturn fmtBackupName;')();
+eq(fmtBackupName('config.yaml.2026-11-02_134400.bak'),
+  '02.11.2026 13:44:00 · config.yaml.2026-11-02_134400.bak', 'полное имя первой копии');
+eq(fmtBackupName('config.yaml.2026-11-02_134400-2.bak'),
+  '02.11.2026 13:44:00 · копия 2 · config.yaml.2026-11-02_134400-2.bak', 'номер второй копии');
+eq(fmtBackupName('config.yaml.2026-11-02_134400-10.bak'),
+  '02.11.2026 13:44:00 · копия 10 · config.yaml.2026-11-02_134400-10.bak', 'номер десятой копии');
+eq(fmtBackupName('config.yaml.not-a-date.bak'), 'config.yaml.not-a-date.bak', 'неизвестное имя');
 
 const doc = [
   '# комментарий',

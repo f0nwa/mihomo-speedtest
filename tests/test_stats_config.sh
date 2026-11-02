@@ -118,10 +118,75 @@ assert_contains 'xkeen: core started' "$lg"
 assert_not_contains 'old line' "$lg"
 printf 'mixed-port: 7891\n' > "$M/config.yaml"
 
-# --- 7: список бэкапов содержит свои и setup.sh, от старых к новым
-out=$(cgi backups GET '' </dev/null)
-list=$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read().split("\n\n",1)[1]); print(" ".join(b["kind"] for b in d["backups"]))')
-[ "$list" = "setup edit edit edit" ] || fail "7: order $list"
+# --- 7: хронология бэкапов, автооткат и очистка по дате и номеру копии
+B=$TMP/backup-order; mkdir -p "$B/edit" "$B/setup"
+printf 'working: old\n' > "$B/edit/config.yaml.2026-01-01_000000.bak"
+printf 'working: new\n' > "$B/edit/config.yaml.2026-11-02_134400.bak"
+printf 'BROKEN\n' > "$B/edit/config.yaml.2026-11-02_134400-2.bak"
+printf 'BROKEN newest\n' > "$B/edit/config.yaml.2026-11-02_134400-10.bak"
+printf 'working: setup\n' > "$B/setup/config.yaml.2026-11-02_134400.bak"
+printf 'unknown\n' > "$B/edit/config.yaml.not-a-date.bak"
+printf 'unknown\n' > "$B/edit/config.yaml.2026-02-30_000000.bak"
+printf 'unknown\n' > "$B/edit/config.yaml.2026-11-02_250000.bak"
+expected_newest=$(printf '%s\n' \
+  'edit config.yaml.2026-11-02_134400-10.bak' \
+  'edit config.yaml.2026-11-02_134400-2.bak' \
+  'edit config.yaml.2026-11-02_134400.bak' \
+  'setup config.yaml.2026-11-02_134400.bak' \
+  'edit config.yaml.2026-01-01_000000.bak' \
+  'edit config.yaml.2026-02-30_000000.bak' \
+  'edit config.yaml.2026-11-02_250000.bak' \
+  'edit config.yaml.not-a-date.bak')
+expected_oldest=$(printf '%s\n' \
+  'edit config.yaml.2026-01-01_000000.bak' \
+  'edit config.yaml.2026-11-02_134400.bak' \
+  'setup config.yaml.2026-11-02_134400.bak' \
+  'edit config.yaml.2026-11-02_134400-2.bak' \
+  'edit config.yaml.2026-11-02_134400-10.bak' \
+  'edit config.yaml.2026-02-30_000000.bak' \
+  'edit config.yaml.2026-11-02_250000.bak' \
+  'edit config.yaml.not-a-date.bak')
+actual_newest=$(MST_CONFIG_LIB=1 sh -c '. "$1"; CONFIG_BACKUP_DIR=$2; CONFIG=$3; list_backups newest' _ "$SCRIPT" "$B/edit" "$B/setup/config.yaml" | awk -F '\t' '{print $1 " " $2}')
+actual_default=$(MST_CONFIG_LIB=1 sh -c '. "$1"; CONFIG_BACKUP_DIR=$2; CONFIG=$3; list_backups' _ "$SCRIPT" "$B/edit" "$B/setup/config.yaml" | awk -F '\t' '{print $1 " " $2}')
+actual_oldest=$(MST_CONFIG_LIB=1 sh -c '. "$1"; CONFIG_BACKUP_DIR=$2; CONFIG=$3; list_backups oldest' _ "$SCRIPT" "$B/edit" "$B/setup/config.yaml" | awk -F '\t' '{print $1 " " $2}')
+[ "$actual_newest" = "$expected_newest" ] || fail "7: newest order: $actual_newest"
+[ "$actual_default" = "$expected_newest" ] || fail "7: default order: $actual_default"
+[ "$actual_oldest" = "$expected_oldest" ] || fail "7: oldest order: $actual_oldest"
+out=$( (export CONFIG_BACKUP_DIR="$B/edit" CONFIG="$B/setup/config.yaml"; cgi backups GET '' </dev/null) )
+actual_cgi=$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read().split("\n\n",1)[1]); print("\n".join(b["kind"]+" "+b["name"] for b in d["backups"]))')
+[ "$actual_cgi" = "$expected_newest" ] || fail "7: CGI order: $actual_cgi"
+# Новый сломанный пропущен, совпадающий с текущим не считается попыткой,
+# следующий новый рабочий выбран раньше старого рабочего; лимит сохранён.
+printf 'BROKEN\n' > "$B/setup/config.yaml"
+out=$( (export CONFIG_BACKUP_DIR="$B/edit" CONFIG="$B/setup/config.yaml" RESTORE_WORKING_MAX=1; cgi restore-working POST '' </dev/null) )
+assert_contains 'Status: 404' "$out"
+[ "$(cat "$B/setup/config.yaml")" = BROKEN ] || fail "7: limited restore changed config"
+out=$( (export CONFIG_BACKUP_DIR="$B/edit" CONFIG="$B/setup/config.yaml" RESTORE_WORKING_MAX=2; cgi restore-working POST '' </dev/null) )
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["restored"]')" = config.yaml.2026-11-02_134400.bak ] || fail "7: newest working not selected"
+[ "$(cat "$B/setup/config.yaml")" = 'working: new' ] || fail "7: wrong working config"
+# Очистка удаляет только старые распознанные свои копии. Неизвестные и
+# setup-файлы остаются, ошибка подготовки не меняет текущий конфиг.
+C=$TMP/backup-clean; mkdir -p "$C/edit" "$C/setup"
+for suffix in 2026-01-01_000000 2026-01-02_000000 2026-01-02_000000-2 2026-01-02_000000-10; do
+  printf 'old\n' > "$C/edit/config.yaml.$suffix.bak"
+done
+printf 'unknown\n' > "$C/edit/config.yaml.not-a-date.bak"
+printf 'setup\n' > "$C/setup/config.yaml.2026-01-02_000000.bak"
+printf 'current\n' > "$C/current.yaml"
+new_backup=$(MST_CONFIG_LIB=1 sh -c '. "$1"; CONFIG_BACKUP_DIR=$2; CONFIG_BACKUP_KEEP=2; make_backup "$3"; printf "%s" "$BACKUP_NAME"' _ "$SCRIPT" "$C/edit" "$C/current.yaml")
+[ -f "$C/edit/$new_backup" ] || fail "7: new backup missing"
+[ -f "$C/edit/config.yaml.2026-01-02_000000-10.bak" ] || fail "7: newest numeric suffix removed"
+[ ! -e "$C/edit/config.yaml.2026-01-02_000000-2.bak" ] || fail "7: -2 not removed"
+[ ! -e "$C/edit/config.yaml.2026-01-02_000000.bak" ] || fail "7: base not removed"
+[ ! -e "$C/edit/config.yaml.2026-01-01_000000.bak" ] || fail "7: oldest not removed"
+[ -f "$C/edit/config.yaml.not-a-date.bak" ] || fail "7: unknown removed"
+[ -f "$C/setup/config.yaml.2026-01-02_000000.bak" ] || fail "7: setup removed"
+printf 'not a directory\n' > "$C/not-dir"
+if MST_CONFIG_LIB=1 sh -c '. "$1"; CONFIG_BACKUP_DIR=$2; make_backup "$3"' _ "$SCRIPT" "$C/not-dir" "$C/current.yaml" 2>/dev/null; then
+  fail "7: backup error ignored"
+fi
+[ "$(cat "$C/current.yaml")" = current ] || fail "7: current changed after backup error"
 
 # --- 8: чтение и restore бэкапа setup.sh; неверное имя - 404
 out=$(cgi backup GET 'kind=setup&name=config.yaml.2026-01-01_000000.bak' </dev/null)

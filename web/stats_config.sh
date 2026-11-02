@@ -272,10 +272,11 @@ make_backup() {
   while [ -e "$CONFIG_BACKUP_DIR/$name" ]; do name=$base-$n.bak; n=$((n + 1)); done
   cp "$1" "$CONFIG_BACKUP_DIR/$name.tmp" || { rm -f "$CONFIG_BACKUP_DIR/$name.tmp"; return 1; }
   mv -f "$CONFIG_BACKUP_DIR/$name.tmp" "$CONFIG_BACKUP_DIR/$name" || return 1
-  # Лишние старые свои бэкапы - удаляем (имена сортируются по времени).
-  cnt=$(ls "$CONFIG_BACKUP_DIR" 2>/dev/null | grep -c '^config\.yaml\..*\.bak$' || true)
+  # Лишние старые свои распознанные бэкапы удаляем по общей хронологии.
+  cnt=$(backup_rows | awk -F '\t' '$1 == 1 && $4 == "edit" { n++ } END { print n + 0 }')
   if [ "$cnt" -gt "$CONFIG_BACKUP_KEEP" ]; then
-    ls "$CONFIG_BACKUP_DIR" | grep '^config\.yaml\..*\.bak$' | sort | head -n $((cnt - CONFIG_BACKUP_KEEP)) |
+    sorted_backup_rows oldest | awk -F '\t' -v n=$((cnt - CONFIG_BACKUP_KEEP)) \
+      '$1 == 1 && $4 == "edit" && n > 0 { print $5; n-- }' |
       while read -r old; do rm -f "$CONFIG_BACKUP_DIR/$old"; done
   fi
   BACKUP_NAME=$name
@@ -557,10 +558,9 @@ backup_path() {
   printf '%s\n' "$p"
 }
 
-# Список бэкапов: "kind<TAB>name<TAB>путь", от старых к новым. Сортировка по
-# отметке времени в имени (config.yaml.YYYY-MM-DD_HHMMSS[-N].bak) - она
-# одинаковая у своих бэкапов и у бэкапов setup.sh/uninstall.sh.
-list_backups() {
+# Внутренние поля: распознанность, YYYYMMDDHHMMSS, номер копии, затем
+# "kind<TAB>name<TAB>путь". Отсутствие суффикса означает первую копию.
+backup_rows() {
   {
     for p in "$CONFIG_BACKUP_DIR"/config.yaml.*.bak; do
       [ -f "$p" ] && printf 'edit\t%s\t%s\n' "${p##*/}" "$p"
@@ -568,7 +568,43 @@ list_backups() {
     for p in "$CONFIG".*.bak; do
       [ -f "$p" ] && printf 'setup\t%s\t%s\n' "${p##*/}" "$p"
     done
-  } | LC_ALL=C sort -t "$(printf '\t')" -k2,2
+  } | LC_ALL=C awk -F '\t' '
+    function leap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) }
+    function valid_date(y, m, d, days) {
+      if (y < 1 || m < 1 || m > 12 || d < 1) return 0
+      split("31 28 31 30 31 30 31 31 30 31 30 31", days, " ")
+      if (m == 2) days[m] += leap(y)
+      return d <= days[m]
+    }
+    BEGIN {
+      pattern = "^config\\.yaml\\.[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9](-[0-9]+)?\\.bak$"
+    }
+    {
+      name = $2; known = 0; stamp = 0; sequence = 0
+      if (name ~ pattern) {
+        y = substr(name, 13, 4) + 0; m = substr(name, 18, 2) + 0
+        d = substr(name, 21, 2) + 0; hh = substr(name, 24, 2) + 0
+        mm = substr(name, 26, 2) + 0; ss = substr(name, 28, 2) + 0
+        suffix = substr(name, 30)
+        if (suffix == ".bak") sequence = 1
+        else { sequence = substr(suffix, 2); sub(/\.bak$/, "", sequence); sequence += 0 }
+        if (sequence >= 1 && valid_date(y, m, d) && hh <= 23 && mm <= 59 && ss <= 59) {
+          known = 1; stamp = sprintf("%04d%02d%02d%02d%02d%02d", y, m, d, hh, mm, ss)
+        } else sequence = 0
+      }
+      print known "\t" stamp "\t" sequence "\t" $0
+    }'
+}
+
+sorted_backup_rows() {
+  tab=$(printf '\t')
+  case ${1:-newest} in oldest) direction=n ;; *) direction=nr ;; esac
+  backup_rows | LC_ALL=C sort -t "$tab" -k1,1nr "-k2,2$direction" "-k3,3$direction" -k4,4 -k5,5
+}
+
+# По умолчанию сначала новые. Нераспознанные имена всегда в конце по имени.
+list_backups() {
+  sorted_backup_rows "${1:-newest}" | awk -F '\t' '{ print $4 "\t" $5 "\t" $6 }'
 }
 
 # ----- починка -----
@@ -684,7 +720,7 @@ cmd_restore_working() {
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
   apply_log_start "Откат к рабочему бэкапу"
-  list_backups > "$WORK/list"
+  list_backups newest > "$WORK/list"
   tried=0
   while IFS="$(printf '\t')" read -r kind name path; do
     [ "$tried" -lt "$RESTORE_WORKING_MAX" ] || break
