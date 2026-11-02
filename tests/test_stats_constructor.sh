@@ -202,6 +202,20 @@ conf="### MST-WG DE WG${NL}[Interface]${NL}PrivateKey = AAA=${NL}Address = 10.8.
 out=$(printf '%s' "$conf" | cgi wgconf POST '')
 assert_contains 'Status: 200' "$out"
 assert_contains "name: 'DE WG'" "$(printf '%s' "$out" | jget '["yaml"]')"
+# AWG 3.1 проходит тем же API, все новые поля доходят до конструктора.
+conf="### MST-WG AWG 3.1${NL}[Interface]${NL}PrivateKey = AAA=${NL}Address = 10.8.0.2/32${NL}HeaderProtectionKey = AAA=${NL}ContentPaddingAddition = 50-200${NL}RandomTrailers = on${NL}DisableCookies = off${NL}[Peer]${NL}PublicKey = BBB=${NL}Endpoint = vpn.example.com:443${NL}"
+out=$(printf '%s' "$conf" | cgi wgconf POST '')
+assert_contains 'Status: 200' "$out"
+txt=$(printf '%s' "$out" | jget '["yaml"]')
+assert_contains '      version: 3' "$txt"
+assert_contains "      header-protection-key: 'AAA='" "$txt"
+assert_contains "      content-padding-addition: '50-200'" "$txt"
+assert_contains '      random-trailers: true' "$txt"
+assert_contains '      disable-cookies: false' "$txt"
+[ "$(printf '%s' "$out" | jget '["report"]')" = '[]' ] || fail '12: поля AWG 3.1 пропущены'
+out=$(printf '%s' "$conf" | sed 's/RandomTrailers = on/RandomTrailers = maybe/' | cgi wgconf POST '')
+assert_contains 'Status: 422' "$out"
+assert_contains 'неверное значение: RandomTrailers' "$out"
 out=$(printf '### MST-WG X%s[Interface]%s' "$NL" "$NL" | cgi wgconf POST '')
 assert_contains 'Status: 422' "$out"
 out=$(printf 'мусор%s' "$NL" | cgi wgconf POST '')

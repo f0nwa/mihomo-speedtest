@@ -25,6 +25,15 @@ conf plain '[Interface]' 'PrivateKey = AAA=' 'Address = 10.8.0.2/32, fd00::2/128
 conf awg '[Interface]' 'PrivateKey = AAA=' 'Address = 10.8.0.2/32' 'Jc = 4' 'Jmin = 40' 'Jmax = 70' \
   'S1 = 0' 'S2 = 0' 'H1 = 1' 'H2 = 2-5' 'H3 = 3' 'H4 = 4' 'I1 = <b 0xf6ab>' \
   '[Peer]' 'PublicKey = BBB=' 'Endpoint = 1.2.3.4:443' 'AllowedIPs = 0.0.0.0/0'
+# AWG 3.1: вымышленные данные, все новые параметры из экспорта wg-quick.
+conf awg3 '[Interface]' 'PrivateKey = AAA=' 'Address = 10.8.0.2/32' 'Jc = 9' 'Jmin = 30' 'Jmax = 90' \
+  'S1 = 23' 'S2 = 23' 'S3 = 23' 'S4 = 23' 'H1 = 100-200' 'H2 = 300-400' 'H3 = 500-600' 'H4 = 700-800' \
+  'I1 = <b 0x0003><r 2>' 'I2 = <b 0x0103><r 2>' 'I3 = <b 0x0008><r 2>' \
+  'ContentPaddingAddition = 50-200' 'HeaderProtectionKey = MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+  'RekeyAfterTime = 120' 'RekeyTimeout = 5' 'RejectAfterTime = 180' 'KeepaliveTimeout = 25' \
+  'MaxHandshakeAttempts = 5' 'RandomTrailers = on' 'DisableCookies = off' \
+  '[Peer]' 'PublicKey = BBB=' 'PresharedKey = CCC=' 'Endpoint = vpn.example.com:443' \
+  'AllowedIPs = 0.0.0.0/0, ::/0' 'PersistentKeepalive = 25'
 conf v6ep '[Interface]' 'PrivateKey = AAA=' 'Address = 10.8.0.2/32' \
   '[Peer]' 'PublicKey = BBB=' 'Endpoint = [2001:db8::1]:443' 'AllowedIPs = 0.0.0.0/0'
 printf '\357\273\277# из Windows\r\n[interface]\r\nprivatekey=AAA=\r\n; адрес\r\naddress = 10.8.0.2/32, fd00::2/128\r\nDNS = 1.1.1.1, home.lan\r\nMTU = 1420\r\n[peer]\r\npublickey=BBB=\r\nPresharedKey = CCC=\r\nendpoint = vpn.example.com:51820\r\nAllowedIPs = 0.0.0.0/0, ::/0\r\nPersistentKeepalive = 25\r\n' > "$WORK/win.conf"
@@ -101,6 +110,78 @@ run_convert() {
     python3 -c "import yaml,sys; p=yaml.safe_load(open(sys.argv[1]))['proxies'][0]; assert p['private-key']==\"x'], evil: [1\" and 'evil' not in p, p" "$WORK/evil.yaml" \
       || fail "evil: YAML разобран не так"
   fi
+}
+
+run_awg3() {
+  nodes awg3 awg3
+  [ ! -s "$WORK/rep" ] || fail "AWG 3.1: известные поля не должны пропускаться"
+  [ "$(sed -n '/amnezia-wg-option:/,$p' "$WORK/out" | sed 1d | grep '^      ')" = "      version: 3
+      jc: 9
+      jmin: 30
+      jmax: 90
+      s1: 23
+      s2: 23
+      s3: 23
+      s4: 23
+      h1: 100-200
+      h2: 300-400
+      h3: 500-600
+      h4: 700-800
+      i1: '<b 0x0003><r 2>'
+      i2: '<b 0x0103><r 2>'
+      i3: '<b 0x0008><r 2>'
+      header-protection-key: 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
+      content-padding-addition: '50-200'
+      rekey-after-time: '120'
+      rekey-timeout: '5'
+      reject-after-time: '180'
+      keepalive-timeout: '25'
+      max-handshake-attempts: '5'
+      random-trailers: true
+      disable-cookies: false" ] || fail "AWG 3.1: параметры потерялись или изменились"
+
+  # Любой параметр v3 включает новый движок, даже выключенный флаг.
+  for item in 'HeaderProtectionKey|header-protection-key|AAA=' \
+              'ContentPaddingAddition|content-padding-addition|0-32' \
+              'RekeyAfterTime|rekey-after-time|120-150' 'RekeyTimeout|rekey-timeout|5-10' \
+              'RejectAfterTime|reject-after-time|180-200' 'KeepaliveTimeout|keepalive-timeout|10-25' \
+              'MaxHandshakeAttempts|max-handshake-attempts|5-18'; do
+    key=${item%%|*}; rest=${item#*|}; yamlkey=${rest%%|*}; value=${rest#*|}
+    conf v3key '[Interface]' 'PrivateKey = AAA=' "$key = $value" '[Peer]' 'PublicKey = BBB=' 'Endpoint = host:443'
+    nodes v3key v3key
+    has '      version: 3' "$WORK/out" "$key: версия"
+    has "      $yamlkey: '$value'" "$WORK/out" "$key: значение"
+  done
+  for key in RandomTrailers DisableCookies; do
+    case "$key" in RandomTrailers) yamlkey=random-trailers ;; *) yamlkey=disable-cookies ;; esac
+    for item in on:true OFF:false true:true FALSE:false yes:true NO:false 1:true 0:false; do
+      conf flag '[Interface]' 'PrivateKey = AAA=' "$key = ${item%:*}" '[Peer]' 'PublicKey = BBB=' 'Endpoint = host:443'
+      nodes flag flag
+      has '      version: 3' "$WORK/out" "$key: версия"
+      has "      $yamlkey: ${item#*:}" "$WORK/out" "$key: флаг"
+    done
+  done
+  # Ошибки новых полей не должны давать внешне успешный импорт.
+  for item in 'ContentPaddingAddition|1;evil' 'ContentPaddingAddition|200-50' \
+              'RekeyAfterTime|abc' 'RekeyTimeout|-1' 'RejectAfterTime|1-2-3' \
+              'KeepaliveTimeout|' 'MaxHandshakeAttempts|5: 9' 'HeaderProtectionKey|' \
+              'RandomTrailers|maybe' 'DisableCookies|'; do
+    key=${item%%|*}; value=${item#*|}
+    conf badv3 '[Interface]' 'PrivateKey = AAA=' "$key = $value" '[Peer]' 'PublicKey = BBB=' 'Endpoint = host:443'
+    nodes badv3 badv3
+    [ ! -s "$WORK/out" ] || fail "AWG 3: неверный $key принят"
+    has "ERROR|badv3|неверное значение: $key" "$WORK/rep" "AWG 3: причина"
+  done
+  for key in J1 J2 J3 Itime; do
+    conf mixed '[Interface]' 'PrivateKey = AAA=' 'RandomTrailers = on' "$key = 1" '[Peer]' 'PublicKey = BBB=' 'Endpoint = host:443'
+    nodes mixed mixed
+    [ ! -s "$WORK/out" ] || fail "AWG 3: несовместимый $key принят"
+    has "ERROR|mixed|$key не поддерживается в AmneziaWG 3" "$WORK/rep" "AWG 3: конфликт"
+  done
+  # После v3 обычный AWG не должен получать новый движок.
+  printf '%s\t%s\n' "$WORK/awg3.conf" awg3 "$WORK/awg.conf" awg > "$WORK/list"
+  $AWK -v MODE=nodes -v LIST="$WORK/list" -v REPORT="$WORK/rep" -f "$SCRIPT" /dev/null > "$WORK/out"
+  [ "$(grep -c '      version: 3' "$WORK/out")" = 1 ] || fail "AWG 3: версия перешла на старую ноду"
 }
 
 imp() {  # $1 конфиг, далее пары файл:имя -> $WORK/new, $WORK/rep
@@ -216,7 +297,7 @@ run_review_fixes() {
   cmp -s "$WORK/new" "$WORK/comma.yaml" || fail "R3: имя с запятой дописано повторно"
 }
 
-AWK=awk; run_convert; run_insert; run_review_fixes
-if command -v busybox >/dev/null 2>&1; then AWK="busybox awk"; run_convert; run_insert; run_review_fixes; fi
+AWK=awk; run_convert; run_awg3; run_insert; run_review_fixes
+if command -v busybox >/dev/null 2>&1; then AWK="busybox awk"; run_convert; run_awg3; run_insert; run_review_fixes; fi
 
 [ "$FAILED" = 0 ] && echo "OK: wg_import" || exit 1
