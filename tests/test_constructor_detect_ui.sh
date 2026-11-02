@@ -204,11 +204,35 @@ mockServer({ ok: true, ua: 'FlClashX/0.3.2', quality: 'full', kind: 'clash YAML,
   eq(requests[1].opts.body, 'https://panel.test/limit\nFlClashX/0.3.2\nhwid', 'hwid: проверка нод с данными устройства');
   const note = findAll(f, (n) => /cx-ua-note/.test(n.className))[0];
   if (!/HWID/.test(note.textContent)) { console.error('FAIL: нет пометки про HWID: ' + note.textContent); failed = 1; }
-  // обычная панель снимает флажок
+  // отметку не снимает и обычная панель: её мог поставить человек
   mockServer({ ok: true, ua: 'FlClashX/0.3.2', quality: 'full', kind: 'k', hwid: false, reason: '', tried: [] });
   find(f, (n) => n.tag === 'button').click(); await tick(); await tick();
-  eq(hw.box.checked, false, 'hwid: снят, если панели не нужен');
-  eq(requests[1].opts.body, 'https://panel.test/limit\nFlClashX/0.3.2', 'без hwid - две строки');
+  eq(hw.box.checked, true, 'hwid: ручная отметка не снимается подбором');
+  eq(requests[1].opts.body, 'https://panel.test/limit\nFlClashX/0.3.2\nhwid', 'отмеченный флажок - проверка нод с HWID');
+}
+// без отметки обычная панель HWID не получает
+mockServer({ ok: true, ua: 'FlClashX/0.3.2', quality: 'full', kind: 'k', hwid: false, reason: '', tried: [] });
+{
+  const url = { value: 'https://panel.test/plain' };
+  const hw = M.hwidCheck(false);
+  const f = M.uaField('v2rayNG/1.8.0', () => url.value, hw);
+  find(f, (n) => n.tag === 'button').click(); await tick(); await tick();
+  eq(hw.box.checked, false, 'hwid: не отмечен без нужды');
+  eq(requests[1].opts.body, 'https://panel.test/plain\nFlClashX/0.3.2', 'без hwid - две строки');
+}
+// своя кнопка и место под итоги (форма новой подписки): onDone и после неудачи
+{
+  const url = { value: 'https://panel.test/k' };
+  const own = document.createElement('button'); own.textContent = 'Определить';
+  const host = document.createElement('div');
+  let doneWith = 'нет';
+  const f = M.uaField('v2rayNG/1.8.0', () => url.value, null, { button: own, noteHost: host, onDone: (d) => { doneWith = d; } });
+  eq(find(f, (n) => n.tag === 'button'), null, 'своя кнопка - встроенной нет');
+  mockServer({ ok: true, ua: '', quality: '', kind: '', reason: 'none', tried: [] });
+  f.detect(); await tick(); await tick();
+  eq(doneWith && doneWith.reason, 'none', 'onDone после неудачного подбора');
+  eq(own.disabled, false, 'своя кнопка свободна');
+  eq(host.children.map((n) => n.className), ['hint cx-ua-note msg-err-text', 'hint cx-ua-note'], 'итоги - в своём месте (не в поле UA)');
 }
 process.exit(failed);
 JS
