@@ -34,6 +34,12 @@
 #   ("path: /opt/etc/mihomo/fast.yaml" вместо "path: ./fast.yaml" в
 #   шаблоне) - см. docs/superpowers/specs/
 #   2026-09-25-install-dir-separation-design.md.
+# hwid_file: необязательно - адреса подписок (по строке), которым нужны
+#   данные устройства для панелей с лимитом устройств; таким подпискам в
+#   header: кроме User-Agent пишутся x-hwid (-v hwid), x-device-os
+#   (-v dev_os), x-ver-os (-v os_ver) и x-device-model (-v dev_model).
+#   Значения уже проверены (sub_device_load в detect_ua.sh); пустой hwid при
+#   отмеченной подписке - отказ с кодом 4.
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
 # Разделитель списка: "" перед первым элементом, ", " перед остальными (не
 # "x (n++ ? ...)": busybox awk читает "имя (" как вызов функции).
@@ -73,6 +79,10 @@ function remap_refs(s,  hit, name, start, end, j, ch, quote, escape, token, coun
 }
 BEGIN {
   nprov = 0
+  if (hwid_file != "") {
+    while ((getline line < hwid_file) > 0) if (line != "") need_hwid[line] = 1
+    close(hwid_file)
+  }
   if (providers_file != "") {
     while ((getline line < providers_file) > 0) {
       split(line, f, "\t")
@@ -151,6 +161,13 @@ BEGIN {
     print "    header:"
     print "      User-Agent:"
     printf "        - \"%s\"\n", prov_ua[i]
+    if (prov_url[i] in need_hwid) {
+      if (hwid == "") { print "render_config.awk: нет HWID устройства для подписки " prov_name[i] > "/dev/stderr"; exit 4 }
+      printf "      x-hwid:\n        - \"%s\"\n", hwid
+      printf "      x-device-os:\n        - \"%s\"\n", dev_os
+      printf "      x-ver-os:\n        - \"%s\"\n", os_ver
+      printf "      x-device-model:\n        - \"%s\"\n", dev_model
+    }
     print "    health-check: *gstatic-health-check"
   }
   in_sub = 1

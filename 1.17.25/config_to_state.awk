@@ -17,7 +17,8 @@
 #   (в services.tsv также bset/bmembers/bfirst - отличия базовых групп от
 #   шаблона: type, url, interval, tolerance, lazy, состав групп и первое
 #   значение proxies, см. render_services.awk);
-#   subscriptions.tsv - подписки (если есть): url<TAB>User-Agent<TAB>имя,
+#   subscriptions.tsv - подписки (если есть): url<TAB>User-Agent<TAB>имя
+#     [<TAB>1 - в header: есть x-hwid, подписке нужны данные устройства],
 #                     как providers_file в render_config.awk (type: file и
 #                     fast не берутся);
 #   proxies.yaml    - блок своих нод proxies: без заголовка и комментариев
@@ -81,13 +82,15 @@ function unescape(w,  out, i, c) {
   }
   return out
 }
+# Хвост строки subscriptions.tsv: "<TAB>1" - подписке нужен HWID устройства.
+function hwid_tail(on) { return on ? "\t1" : "" }
 function flush_sub() {
   # type: file подпиской не считается: в состояние не берётся, о нём - в отчёт
   # (printf, а не rep(): busybox awk требует функцию объявлять до вызова)
   if (sub_name != "" && sub_name != "fast" && sub_file) printf "REVIEW|file-provider-dropped|%s\n", sub_name > report
   if (sub_name != "" && sub_name != "fast" && !sub_file && sub_url != "")
-    subs_out = subs_out sub_url "\t" sub_ua "\t" sub_name "\n"
-  sub_name = ""; sub_url = ""; sub_ua = ""; sub_file = 0; in_ua = 0
+    subs_out = subs_out sub_url "\t" sub_ua "\t" sub_name hwid_tail(sub_hwid) "\n"
+  sub_name = ""; sub_url = ""; sub_ua = ""; sub_file = 0; in_ua = 0; sub_hwid = 0
 }
 # Значения списка "proxies: [a, 'b c']" в глобальный PT[1..n] (без кавычек);
 # возвращает n, 0 - списка в строке нет.
@@ -210,6 +213,7 @@ BEGIN {
     } else if (sub_name != "") {
       if (line ~ /^    url:/) { v = line; sub(/^    url:[ ]*/, "", v); sub_url = unq(body(v)) }
       else if (line ~ /^    type:[ ]*file/) sub_file = 1
+      else if (line ~ /^      x-hwid:/) { sub_hwid = 1; in_ua = 0 }
       else if (line ~ /^      User-Agent:[ ]*$/) in_ua = 1
       else if (in_ua && line ~ /^        - /) { v = line; sub(/^        - /, "", v); if (sub_ua == "") sub_ua = unq(body(v)) }
       else if (line !~ /^        /) in_ua = 0

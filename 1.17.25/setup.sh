@@ -16,6 +16,11 @@ TEMPLATE=${TEMPLATE:-$SELFDIR/config.example.yaml}
 # build_provider_specs() - существующий provider с уже настроенным
 # header: {User-Agent: [...]} переносится как есть, без detect_ua.
 TAB=$(printf '\t')
+# Файл с адресами подписок, которым нужен HWID устройства (по строке):
+# перенесённые из старого конфига с x-hwid в header: (existing_config.awk)
+# и те, где подбор UA наткнулся на заглушку панели с лимитом устройств.
+# render_config.awk пишет этим подпискам заголовки устройства. Создаёт main.
+HWID_URLS=${HWID_URLS:-}
 
 . "$SELFDIR/version_check.sh"
 # Значения UI по умолчанию - не часть библиотеки: тесты подключают setup.sh
@@ -58,7 +63,7 @@ collect_subscriptions() {
 
   if [ -f "$CONFIG" ]; then
     imported=$(mktemp "${TMPDIR:-/tmp}/setup_imported.XXXXXX")
-    if awk -v urls_out="$imported" -v proxies_out="" -f "$SELFDIR/existing_config.awk" "$CONFIG" 2>/dev/null && [ -s "$imported" ]; then
+    if awk -v urls_out="$imported" -v proxies_out="" -v hwid_out="$HWID_URLS" -f "$SELFDIR/existing_config.awk" "$CONFIG" 2>/dev/null && [ -s "$imported" ]; then
       # Список - одним блоком (ui_note читает stdin, пишет в stderr);
       # счётчик i внутри конвейера живёт в подоболочке, ниже он обнуляется.
       {
@@ -151,31 +156,15 @@ collect_subscriptions() {
 }
 
 pick_ua() {
-  # $1 = URL. Печатает две строки: выбранный User-Agent и вид ответа
-  # ("full"/"short"). Пустой вывод - ни один UA не подошёл.
-  url=$1
-  tmp=$(mktemp "${TMPDIR:-/tmp}/setup_ua.XXXXXX")
-  found=""
-  fallback=""
-  while IFS= read -r ua; do
-    [ -n "$ua" ] || continue
-    curl -sL --compressed -o "$tmp" -w '%{http_code}' -m 10 -A "$ua" "$url" >/dev/null 2>&1 || true
-    [ -f "$tmp" ] || : > "$tmp"
-    kind=$(classify_body "$tmp")
-    case "$kind" in
-      "clash YAML, полный"*) found=$ua; break ;;
-      "v2ray-подписка"*) found=$ua; break ;;
-      "clash YAML, укороченный"*) [ -z "$fallback" ] && fallback=$ua ;;
-    esac
-  done <<UALIST
-$UA_LIST
-UALIST
-  rm -f "$tmp"
-  if [ -n "$found" ]; then
-    printf '%s\nfull\n' "$found"
-  elif [ -n "$fallback" ]; then
-    printf '%s\nshort\n' "$fallback"
-  fi
+  # $1 = URL. Печатает три строки: выбранный User-Agent, вид ответа
+  # ("full"/"short") и признак HWID ("1" - панели нужны данные устройства,
+  # см. ua_pick в detect_ua.sh). Пустой вывод - ни один UA не подошёл.
+  pu_tmp=$(mktemp "${TMPDIR:-/tmp}/setup_ua.XXXXXX")
+  ua_pick "$1" "$pu_tmp"
+  rm -f "$pu_tmp" "$pu_tmp.hdr"
+  [ -z "$UA_PICK_ERR" ] || ui_warn "Данные устройства для HWID: $UA_PICK_ERR"
+  [ -n "$UA_PICK_UA" ] || return 0
+  printf '%s\n%s\n%s\n' "$UA_PICK_UA" "$UA_PICK_QUALITY" "$UA_PICK_HWID"
 }
 
 build_provider_specs() {
@@ -213,6 +202,7 @@ build_provider_specs() {
     result=$(pick_ua "$url")
     ua=$(printf '%s\n' "$result" | sed -n 1p)
     kind=$(printf '%s\n' "$result" | sed -n 2p)
+    hwid=$(printf '%s\n' "$result" | sed -n 3p)
     if [ -z "$ua" ]; then
       ui_fail "Для $url не подобран рабочий User-Agent - подписка исключена (проверьте вручную: sh detect_ua.sh \"$url\")"
       continue
@@ -221,6 +211,10 @@ build_provider_specs() {
       ui_warn "WARN для $url подошёл только укороченный clash YAML - сверьте набор нод после установки"
     else
       ui_ok "Для $url подобран рабочий User-Agent \"$ua\""
+    fi
+    if [ "$hwid" = 1 ]; then
+      ui_ok "Подписка $url требует HWID устройства - для неё включён"
+      [ -z "$HWID_URLS" ] || printf '%s\n' "$url" >> "$HWID_URLS"
     fi
     printf '%s\t%s\t%s\n' "$url" "$ua" "$name"
   done < "$1"
@@ -466,8 +460,9 @@ main() {
   ui_step 1 4 "Подписки"
 
   subs_file=$(mktemp "${TMPDIR:-/tmp}/setup_urls.XXXXXX")
+  HWID_URLS=$(mktemp "${TMPDIR:-/tmp}/setup_hwid.XXXXXX")
   if ! collect_subscriptions > "$subs_file"; then
-    rm -f "$subs_file"
+    rm -f "$subs_file" "$HWID_URLS"
     return 1
   fi
 
@@ -498,7 +493,7 @@ main() {
       case "$soft_ans" in
         [Nn]*)
           ui_fail "Ни одна подписка не прошла проверку - устанавливать нечего"
-          rm -f "$specs_file"
+          rm -f "$specs_file" "$HWID_URLS"
           return 1
           ;;
       esac
@@ -562,7 +557,7 @@ main() {
     backup="$CONFIG.$(date '+%Y-%m-%d_%H%M%S').bak"
     cp "$CONFIG" "$backup" || {
       ui_fail "Не удалось сохранить бэкап $backup"
-      rm -f "$specs_file"
+      rm -f "$specs_file" "$HWID_URLS"
       [ -z "$static_file" ] || rm -f "$static_file"
       [ -z "$dns_file" ] || rm -f "$dns_file"
       [ -z "$listeners_file" ] || rm -f "$listeners_file"
@@ -573,9 +568,19 @@ main() {
 
   rendered=$(mktemp "${TMPDIR:-/tmp}/setup_config.XXXXXX")
   render_rc=0
+  # Данные устройства - только если хоть одной подписке нужен HWID.
+  SUB_HWID="" SUB_DEVICE_OS="" SUB_OS_VER="" SUB_DEVICE_MODEL=""
+  if [ -s "$HWID_URLS" ] && ! sub_device_load; then
+    ui_fail "Данные устройства для HWID: $SUB_DEVICE_ERR, $CONFIG не тронут"
+    rm -f "$rendered" "$HWID_URLS" "$specs_file"
+    return 1
+  fi
   awk -v providers_file="$specs_file" -v static_file="$static_file" -v dns_file="$dns_file" \
       -v listeners_file="$listeners_file" -v mihomo_dir="$MIHOMO_DIR" \
+      -v hwid_file="$HWID_URLS" -v hwid="$SUB_HWID" -v dev_os="$SUB_DEVICE_OS" \
+      -v os_ver="$SUB_OS_VER" -v dev_model="$SUB_DEVICE_MODEL" \
       -f "$SELFDIR/render_config.awk" "$TEMPLATE" > "$rendered" || render_rc=$?
+  rm -f "$HWID_URLS"
   # Очистка прежних групп FAST-WG и сохранение прямых ссылок на WG-победителей.
   if [ "$render_rc" = 0 ]; then
     awk -f "$SELFDIR/fast_wg.awk" "$rendered" > "$rendered.wg" && mv -f "$rendered.wg" "$rendered" || render_rc=$?
