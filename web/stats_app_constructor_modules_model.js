@@ -524,6 +524,122 @@ function b64decode(s) {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
+function trustTunnelBytes(payload) {
+  // 64 КиБ данных занимают не более 87382 символов Base64url без padding.
+  if (payload.length > 87382) { throw new Error('TrustTunnel: данные ссылки больше 64 КиБ'); }
+  if (!/^[A-Za-z0-9_-]+$/.test(payload) || payload.length % 4 === 1) {
+    throw new Error('TrustTunnel: нужен Base64url без padding, пробелов и посторонних символов');
+  }
+  var standard = payload.replace(/-/g, '+').replace(/_/g, '/');
+  while (standard.length % 4) { standard += '='; }
+  var decoded;
+  try { decoded = atob(standard); } catch (e) { throw new Error('TrustTunnel: не разобрать Base64url'); }
+  if (decoded.length > 65536) { throw new Error('TrustTunnel: данные ссылки больше 64 КиБ'); }
+  var out = new Uint8Array(decoded.length);
+  for (var i = 0; i < decoded.length; i++) { out[i] = decoded.charCodeAt(i); }
+  return out;
+}
+
+function trustTunnelVarint(data, at) {
+  if (at >= data.length) { throw new Error('TrustTunnel: обрезан TLS/QUIC varint'); }
+  var first = data[at++], size = 1 << (first >> 6), value = first & 0x3f;
+  for (var i = 1; i < size; i++) {
+    if (at >= data.length) { throw new Error('TrustTunnel: обрезан TLS/QUIC varint'); }
+    value = value * 256 + data[at++];
+    if (!Number.isSafeInteger(value)) { throw new Error('TrustTunnel: целое вне безопасного диапазона JavaScript'); }
+  }
+  return { value: value, next: at };
+}
+
+export function parseTrustTunnelLink(link) {
+  var m = /^tt:\/\/(\??)(.*)$/i.exec(String(link || ''));
+  if (!m) { throw new Error('TrustTunnel: ссылка должна начинаться с tt://? или tt://'); }
+  var data = trustTunnelBytes(m[2]), at = 0;
+  var utf8 = new TextDecoder('utf-8', { fatal: true });
+  var fields = {
+    version: 0, hostname: '', addresses: [], customSni: '', hasIpv6: true,
+    username: '', password: '', skipVerification: false, certificate: new Uint8Array(0),
+    upstreamProtocol: 1, antiDpi: false, clientRandomPrefix: '', name: '',
+    dnsUpstreams: [], clientRandomAuthKey: ''
+  };
+  var subscription = false;
+  function string(value) {
+    try { return utf8.decode(value); } catch (e) { throw new Error('TrustTunnel: повреждённая строка UTF-8'); }
+  }
+  function bool(value) {
+    if (value.length !== 1 || (value[0] !== 0 && value[0] !== 1)) {
+      throw new Error('TrustTunnel: Bool должен иметь длину 1 и значение 0x00 или 0x01');
+    }
+    return value[0] === 1;
+  }
+  function strings(value) {
+    var out = [], pos = 0;
+    while (pos < value.length) {
+      var length = trustTunnelVarint(value, pos); pos = length.next;
+      if (length.value > value.length - pos) { throw new Error('TrustTunnel: неверная длина элемента String[]'); }
+      out.push(string(value.subarray(pos, pos + length.value))); pos += length.value;
+    }
+    return out;
+  }
+  while (at < data.length) {
+    var tag = trustTunnelVarint(data, at); at = tag.next;
+    var length = trustTunnelVarint(data, at); at = length.next;
+    if (length.value > data.length - at) { throw new Error('TrustTunnel: неверная длина или обрезанный TLV'); }
+    var value = data.subarray(at, at + length.value); at += length.value;
+    if (tag.value === 0) {
+      if (value.length < 1) { throw new Error('TrustTunnel: пустой varint version'); }
+      fields.version = trustTunnelVarint(value, 0).value;
+      if (trustTunnelVarint(value, 0).next !== value.length) { throw new Error('TrustTunnel: лишние байты в version'); }
+    } else if (tag.value === 1) { fields.hostname = string(value); }
+    else if (tag.value === 2) { fields.addresses.push(string(value)); }
+    else if (tag.value === 3) { fields.customSni = string(value); }
+    else if (tag.value === 4) { fields.hasIpv6 = bool(value); }
+    else if (tag.value === 5) { fields.username = string(value); }
+    else if (tag.value === 6) { fields.password = string(value); }
+    else if (tag.value === 7) { fields.skipVerification = bool(value); }
+    else if (tag.value === 8) { fields.certificate = value; }
+    else if (tag.value === 9) {
+      if (value.length < 1) { throw new Error('TrustTunnel: пустой varint upstream_protocol'); }
+      var protocol = trustTunnelVarint(value, 0);
+      if (protocol.next !== value.length) { throw new Error('TrustTunnel: лишние байты в upstream_protocol'); }
+      fields.upstreamProtocol = protocol.value;
+    } else if (tag.value === 10) { fields.antiDpi = bool(value); }
+    else if (tag.value === 11) { fields.clientRandomPrefix = string(value); }
+    else if (tag.value === 12) { fields.name = string(value); }
+    else if (tag.value === 13) { fields.dnsUpstreams = strings(value); }
+    else if (tag.value === 14) { subscription = true; string(value); }
+    else if (tag.value === 15) { fields.clientRandomAuthKey = string(value); }
+  }
+  if (subscription) { throw new Error('TrustTunnel: ссылки с subscription_url (подписки) не поддерживаются'); }
+  if (fields.version > 2) { throw new Error('TrustTunnel: версия ссылки выше поддерживаемой 2'); }
+  if (!fields.hostname || !fields.username || !fields.password || !fields.addresses.length || !fields.addresses[0]) {
+    throw new Error('TrustTunnel: обязательные hostname, address, username и password должны быть непустыми');
+  }
+  if (fields.addresses.length !== 1) { throw new Error('TrustTunnel: поддерживается ровно один адрес сервера, не несколько'); }
+  if (fields.certificate.length) { throw new Error('TrustTunnel: встроенный сертификат пока не поддерживается импортом'); }
+  if (fields.antiDpi) { throw new Error('TrustTunnel: anti-DPI=true пока не поддерживается импортом'); }
+  if (fields.clientRandomPrefix) { throw new Error('TrustTunnel: client_random_prefix пока не поддерживается импортом'); }
+  if (fields.clientRandomAuthKey) { throw new Error('TrustTunnel: client_random_auth_key пока не поддерживается импортом'); }
+  if (fields.dnsUpstreams.length) { throw new Error('TrustTunnel: непустой список DNS-upstreams пока не поддерживается импортом'); }
+  if (!fields.hasIpv6) { throw new Error('TrustTunnel: has_ipv6=false пока не поддерживается импортом'); }
+  if (fields.upstreamProtocol !== 1 && fields.upstreamProtocol !== 2) {
+    throw new Error('TrustTunnel: неподдерживаемый upstream_protocol, нужен HTTP/2 или HTTP/3');
+  }
+  var address = fields.addresses[0];
+  var parsed = /^\[([A-Za-z0-9._:-]+)\]:(\d+)$/.exec(address) || /^([A-Za-z0-9._-]+):(\d+)$/.exec(address);
+  if (!parsed) { throw new Error('TrustTunnel: адрес должен содержать хост и порт; IPv6 записывается в квадратных скобках'); }
+  var port = Number(parsed[2]);
+  if (!(port >= 1 && port <= 65535)) { throw new Error('TrustTunnel: порт вне диапазона 1-65535'); }
+  noCtl(fields.hostname, 'hostname'); noCtl(fields.username, 'username'); noCtl(fields.password, 'password');
+  var sni = fields.customSni || fields.hostname, name = fields.name || fields.hostname;
+  noCtl(sni, 'SNI'); noCtl(name, 'имя');
+  return {
+    name: name, server: parsed[1], port: port, username: fields.username,
+    password: fields.password, sni: sni, quic: fields.upstreamProtocol === 2,
+    skipCertVerify: fields.skipVerification
+  };
+}
+
 function dec(s) {
   try { return decodeURIComponent(String(s)); } catch (e) { return String(s); }
 }
@@ -583,8 +699,17 @@ function transportLines(net, p, host, sni) {
   return out;
 }
 
-// Ссылка (hy2/hysteria2/vless/trojan/ss/vmess) -> {name, yaml}.
+// Ссылка (hy2/hysteria2/vless/trojan/ss/vmess/tt) -> {name, server, yaml}.
 export function linkToProxy(link) {
+  if (/^tt:/i.test(String(link || ''))) {
+    var tt = parseTrustTunnelLink(link), ttOut = [
+      '    type: trusttunnel', '    server: ' + yq(tt.server), '    port: ' + tt.port,
+      '    username: ' + yq(tt.username), '    password: ' + yq(tt.password),
+      '    sni: ' + yq(tt.sni), '    quic: ' + tt.quic
+    ];
+    if (tt.skipCertVerify) { ttOut.push('    skip-cert-verify: true'); }
+    return { name: tt.name, server: tt.server, yaml: '  - name: ' + yq(tt.name) + '\n' + ttOut.join('\n') + '\n' };
+  }
   var L = parseLink(link), q = L.query, a, out = [], name = L.name, sni;
   function qv(k) { return noCtl(q.get(k) || '', k); }
   var t = L.scheme;
@@ -654,7 +779,7 @@ export function linkToProxy(link) {
     }
     transportLines(qv('type'), { path: qv('path'), service: qv('serviceName') }, qv('host'), sni).forEach(function (l) { out.push(l); });
   } else {
-    throw new Error('Схема ' + t + '://  не поддерживается: hy2, vless, trojan, ss, vmess - или вставьте YAML ноды');
+    throw new Error('Схема ' + t + '://  не поддерживается: hy2, vless, trojan, ss, vmess, tt - или вставьте YAML ноды');
   }
   if (!name) { name = (a ? a.host + ':' + a.port : 'node'); }
   noCtl(name, 'имя');

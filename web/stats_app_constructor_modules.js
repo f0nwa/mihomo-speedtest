@@ -887,7 +887,7 @@ export function createModuleCards(ctx) {
 
   // ----- прокси (ноды, добавленные вручную, не из подписок) -----
   var proxBlk = ctx.layout.add(2, 'Прокси'), proxCard = proxBlk.body;
-  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
+  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, TrustTunnel, WireGuard/AmneziaWG). ' +
     'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются. ' +
     'Поле справа от имени - провайдер ноды в статистике (пусто - по имени до первого «_»); сохраняется сразу, без «Применить». ' +
     'Нескольким нодам сразу - отметьте их галочками и задайте провайдера в строке над списком.'));
@@ -900,7 +900,7 @@ export function createModuleCards(ctx) {
   // имя было занято и изменилось ("hy2 → hy2 nl.example").
   function addPasted(text) {
     var t = String(text || '');
-    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://) или YAML'); }
+    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://, tt://) или YAML'); }
     if (/^\s*-\s/m.test(t) || /^\s*name:/m.test(t)) {
       var orig = proxiesFromYaml(t).map(function (p) { return p.name; });
       var got = mods.addProxyYaml(t);
@@ -1204,7 +1204,7 @@ export function createModuleCards(ctx) {
 
     var area = el('textarea', 'xk-text');
     area.rows = 3;
-    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess:// (по одной в строке) или YAML ноды';
+    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess://, tt:// (по одной в строке) или YAML ноды';
     area.setAttribute('aria-label', 'Ссылки или YAML нод');
     area.value = proxDraft;
     area.addEventListener('input', function () { proxDraft = area.value; });

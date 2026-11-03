@@ -833,4 +833,44 @@ assert_contains 'Status: 200' "$out"
 mv "$D3/constructor_build.sh.real22" "$D3/constructor_build.sh"
 mv "$D3/config_to_state.awk.real22" "$D3/config_to_state.awk"
 
+# --- 24: серверная нода TrustTunnel проходит preview/apply/read/remove/apply
+M4=$TMP/mihomo24; D4=$TMP/dir24; mkdir -p "$M4" "$D4"
+for f in "$D"/*; do [ -f "$f" ] && cp "$f" "$D4/"; done
+cp "$D4/config.example.yaml" "$M4/config.yaml"
+cgi4() {
+  body=$(cat)
+  printf '%s' "$body" | DIR="$D4" MIHOMO_DIR="$M4" CONFIG="$M4/config.yaml" \
+    CONFIG_STATE_DIR="$D4/config-state" MST_CONSTRUCTOR_ACTION=$1 REQUEST_METHOD=$2 QUERY_STRING=$3 \
+    CONTENT_LENGTH=$(printf '%s' "$body" | wc -c | tr -d ' ') sh "$SCRIPT"
+}
+out=$(cgi4 read GET '' </dev/null)
+base24=$(printf '%s' "$out" | jget '["base"]')
+proxies24="  - name: 'TT import'${NL}    type: trusttunnel${NL}    server: 192.0.2.1${NL}    port: 443${NL}    username: test${NL}    password: 'p''~x'${NL}    sni: tt.example${NL}    quic: false${NL}"
+body24="### MST-STATE services.tsv${NL}### MST-STATE proxies.yaml${NL}$proxies24"
+cp "$M4/config.yaml" "$TMP/config24.before"
+out=$(printf '%s' "$body24" | cgi4 preview POST '')
+assert_contains 'Status: 200' "$out"
+[ "$(printf '%s' "$out" | jget '["check"]["ok"]')" = True ] || fail '24: preview TrustTunnel'
+cmp -s "$M4/config.yaml" "$TMP/config24.before" || fail '24: preview записал конфиг'
+[ ! -e "$D4/config-state" ] || fail '24: preview создал состояние'
+out=$(printf '%s' "$body24" | cgi4 apply POST "base=$base24")
+assert_contains 'Status: 200' "$out"
+grep -q "name: 'TT import'" "$M4/config.yaml" || fail '24: нода не применена'
+grep -q "password: 'p''~x'" "$M4/config.yaml" || fail '24: пароль с апострофом и тильдой потерян'
+out=$(cgi4 read GET '' </dev/null)
+assert_contains "name: 'TT import'" "$(printf '%s' "$out" | jget '["proxies"]')"
+base24=$(printf '%s' "$out" | jget '["base"]')
+body24quic="${body24%quic: false*}quic: true"
+out=$(printf '%s' "$body24quic" | cgi4 apply POST "base=$base24")
+assert_contains 'Status: 200' "$out"
+out=$(cgi4 read GET '' </dev/null)
+assert_contains 'quic: true' "$(printf '%s' "$out" | jget '["proxies"]')"
+base24=$(printf '%s' "$out" | jget '["base"]')
+out=$(printf '### MST-STATE services.tsv\n### MST-STATE proxies.yaml\n' | cgi4 apply POST "base=$base24")
+assert_contains 'Status: 200' "$out"
+grep -q "name: 'TT import'" "$M4/config.yaml" && fail '24: нода не удалена'
+out=$(cgi4 read GET '' </dev/null)
+assert_not_contains "name: 'TT import'" "$(printf '%s' "$out" | jget '["proxies"]')"
+[ ! -s "$D4/config-state/proxies.yaml" ] || fail '24: удалённая нода осталась в состоянии'
+
 echo "test_stats_constructor.sh: OK"

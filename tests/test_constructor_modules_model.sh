@@ -88,6 +88,11 @@ m.addProxyLink('hy2://p@l1.example:443#' + longName);
 const longRes = m.addProxyLink('hy2://p@l2.example:443#' + longName);
 eq(Array.from(longRes).length <= 64 && longRes.endsWith('l2.example') && longRes !== longName, true, 'длинное имя при повторе укладывается в 64');
 ['🇳🇱 NL nl2.example', '🇳🇱 NL-2', '🇳🇱 NL-3', 'hy2', 'hy2 b.example', 'c.example:443', 'c.example:443-2', longName, longRes].forEach(n => m.removeProxy(n));
+// TrustTunnel: существующая точка входа linkToProxy принимает tt://.
+const ttBase = 'tt://?AQp0dC5leGFtcGxlAg0xOTIuMC4yLjE6NDQzBQR0ZXN0BgNwfngMB1RUIHRlc3Q';
+let tt = M.linkToProxy(ttBase);
+eq(tt, { name: 'TT test', server: '192.0.2.1', yaml: "  - name: 'TT test'\n    type: trusttunnel\n    server: '192.0.2.1'\n    port: 443\n    username: 'test'\n    password: 'p~x'\n    sni: 'tt.example'\n    quic: false\n" }, 'tt -> YAML через общий интерфейс');
+throws(() => M.linkToProxy('tt://?A'), /base64|данн/i, 'битая tt-ссылка');
 // vless reality
 let r = M.linkToProxy('vless://11111111-2222-3333-4444-555555555555@v.example:443?type=tcp&security=reality&sni=sni.example&fp=chrome&pbk=PUB&sid=ab&flow=xtls-rprx-vision#R1');
 eq(r.yaml, "  - name: 'R1'\n    type: vless\n    server: 'v.example'\n    port: 443\n    uuid: '11111111-2222-3333-4444-555555555555'\n    flow: 'xtls-rprx-vision'\n    udp: true\n    tls: true\n    servername: 'sni.example'\n    client-fingerprint: 'chrome'\n    reality-opts: { public-key: 'PUB', short-id: 'ab' }\n    network: tcp\n", 'vless reality');

@@ -35,10 +35,21 @@ globalThis.document = {
   createTextNode(text) { const n = new Element('#text'); n.textContent = text; return n; },
 };
 const requests = [];
-globalThis.fetch = async (url, opts) => {
-  requests.push({ url, method: (opts && opts.method) || 'GET' });
+const consoleMessages = [];
+const originalLog = console.log, originalError = console.error;
+console.log = (...args) => { consoleMessages.push(args.join(' ')); originalLog(...args); };
+console.error = (...args) => { consoleMessages.push(args.join(' ')); originalError(...args); };
+const storageCalls = [];
+globalThis.localStorage = {
+  getItem(key) { storageCalls.push('get:' + key); return null; },
+  setItem(key, value) { storageCalls.push('set:' + key); },
+  removeItem(key) { storageCalls.push('remove:' + key); }
+};
+const recordingFetch = async (url, opts) => {
+  requests.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
   return { ok: true, status: 200, json: async () => ({ manual: {} }) };
 };
+globalThis.fetch = recordingFetch;
 const { createModuleCards } = await import(pathToFileURL(process.argv[2]).href);
 const { createModules } = await import(pathToFileURL(process.argv[3]).href);
 const WG = "  - name: 'WG test'\n    type: wireguard\n    server: 192.0.2.1\n    port: 51820\n    ip: 10.0.0.2\n    private-key: 'SECRET-WG-PRIVATE'\n    mtu: 1400\n    persistent-keepalive: 0\n    amnezia-wg-option:\n      jc: 3\n";
@@ -59,7 +70,7 @@ function setup(source) {
     mods, model: { ownScope: () => false, baseGroups: () => [], routes: () => [] }, savedWords: [],
     layout: { add(num) { const body = new Element('div'); bodies[num] = body; return { body, summary() {}, changed() {} }; } },
     edit(fn) { try { fn(); } catch (e) { messages.push(e.message); } cards.render(); },
-    msg(text, kind) { messages.push(kind + ':' + text); }, redraw() {}, changed() {},
+    msg(text, kind) { messages.push(kind + ':' + text); }, redraw() { cards.render(); }, changed() {},
   };
   cards = createModuleCards(ctx);
   cards.render();
@@ -214,6 +225,64 @@ byLabel(form, 'MTU ноды WG test').value = '1280';
 providerResolve();
 await new Promise(resolve => setTimeout(resolve, 0));
 assert(byLabel(pending.root, 'MTU ноды WG test').value === '1280', 'фоновый ответ провайдеров не стирает несохранённый MTU');
+
+// Вставка tt:// -> нода -> редактор QUIC -> удаление. Исходная ссылка и
+// реквизиты не уходят в fetch/localStorage, сообщения или консоль.
+const ttLink = "tt://?AQp0dC5leGFtcGxlAg0xOTIuMC4yLjE6NDQzBQR0ZXN0BgRwJ354DAdUVCB0ZXN0";
+globalThis.fetch = recordingFetch;
+const requestsBeforeImportSetup = requests.length;
+const imported = setup('');
+assert(requests.length === requestsBeforeImportSetup + 1, 'после отложенного ответа fetch снова записывает запросы');
+const requestsBeforeImport = requests.length;
+let paste = byLabel(imported.root, 'Ссылки или YAML нод');
+assert(paste.placeholder.includes('tt://'), 'подсказка называет tt://');
+paste.value = ttLink; paste.fire('input');
+assert(requests.length === requestsBeforeImport, 'вставка ссылки не создаёт сетевых запросов');
+byButton(imported.root, 'Добавить').click();
+assert(requests.length === requestsBeforeImport, 'добавление ссылки не создаёт сетевых запросов');
+assert(imported.mods.getProxyYaml('TT test').includes("password: 'p''~x'"), 'ссылка TrustTunnel добавлена с экранированным паролем');
+assert(byLabel(imported.root, 'Ссылки или YAML нод').value === '', 'после успеха исходная ссылка удалена из поля');
+form = edit(imported, 'TT test');
+byLabel(form, 'Транспорт TrustTunnel').value = 'h3'; byLabel(form, 'Транспорт TrustTunnel').fire('change');
+byButton(form, 'Готово').click();
+assert(imported.mods.getProxyYaml('TT test').includes('quic: true'), 'импортированная нода переключается на QUIC');
+assert(!imported.mods.getProxyYaml('TT test').includes('client-fingerprint') && !imported.mods.getProxyYaml('TT test').includes('alpn:'), 'импорт не выдумывает fingerprint и ALPN');
+byLabel(imported.root, 'Убрать TT test').click();
+assert(!imported.mods.serialize().proxies.includes('TT test'), 'импортированную ноду можно удалить');
+
+const duplicates = setup('');
+for (let i = 0; i < 2; i++) {
+  paste = byLabel(duplicates.root, 'Ссылки или YAML нод'); paste.value = ttLink; paste.fire('input');
+  byButton(duplicates.root, 'Добавить').click();
+}
+assert(duplicates.mods.proxies().map(p => p.name).join(',') === 'TT test,TT test 192.0.2.1', 'DOM-импорт разрешает повтор имени');
+
+const subscriptionLink = 'tt://?AQp0dC5leGFtcGxlAg0xOTIuMC4yLjE6NDQzBQR0ZXN0BgNwfngMB1RUIHRlc3QOMWh0dHBzOi8vdXNlcjpTVUJTQ1JJUFRJT04tU0VDUkVUQHN1Yi5leGFtcGxlL2ZlZWQ';
+const rejected = setup('');
+paste = byLabel(rejected.root, 'Ссылки или YAML нод'); paste.value = subscriptionLink; paste.fire('input');
+byButton(rejected.root, 'Добавить').click();
+assert(rejected.mods.proxies().length === 0, 'subscription_url не превращается в статическую ноду');
+assert(rejected.messages.some(x => /подпис/i.test(x)), 'UI сообщает об отсутствии поддержки подписок');
+const publicOutput = [...imported.messages, ...duplicates.messages, ...rejected.messages, ...consoleMessages].join('\n');
+[ttLink, subscriptionLink, 'SUBSCRIPTION-SECRET', 'sub.example', "p'~x", 'p~x', 'username'].forEach(secret => {
+  assert(!publicOutput.includes(secret), 'в сообщениях и консоли нет реквизита или ссылки: ' + secret);
+});
+// Отдельно от сообщений о переименовании: там «test» является частью имени,
+// а не раскрытием логина.
+[...imported.messages, ...rejected.messages, ...consoleMessages].forEach(text => assert(!/(?:^|[^A-Za-z])test(?:[^A-Za-z]|$)/.test(text), 'логин не попал в ошибку, toast или консоль'));
+assert(storageCalls.length === 0, 'импорт не использует localStorage');
+assert(requests.every(r => r.method === 'GET'), 'редактор не отправляет записи до общего применения');
+const forbiddenNetworkData = [
+  ttLink, subscriptionLink, 'https://user:SUBSCRIPTION-SECRET@sub.example/feed',
+  'SUBSCRIPTION-SECRET', 'sub.example', 'tt.example', '192.0.2.1', 'test', "p'~x", 'p~x'
+];
+requests.forEach(request => {
+  const requestData = String(request.url) + '\n' + String(request.body ?? '');
+  forbiddenNetworkData.forEach(secret => {
+    assert(!requestData.includes(secret), 'URL или тело запроса содержат ссылку либо реквизиты TrustTunnel');
+  });
+});
+console.log = originalLog; console.error = originalError;
 
 console.log('OK test_constructor_proxy_edit_ui');
 JS
