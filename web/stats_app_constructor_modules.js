@@ -1052,7 +1052,7 @@ export function createModuleCards(ctx) {
       r.appendChild(el('p', 'hint', 'В Mihomo 1.19.32 fingerprint используется для HTTP/2 и не применяется к QUIC. При переходе на QUIC сохранённый профиль остаётся в YAML. ALPN форма не меняет: для HTTP/2 нужен h2, для QUIC - h3.'));
     }
 
-    var simpleNodes = r.children.slice(simpleStart);
+    var simpleNodes = Array.prototype.slice.call(r.children, simpleStart);
     var yamlHint = el('p', 'hint', 'Одна блочная запись, name первым ключом. Разрешены вложенные блоки, однострочные flow-коллекции и скаляры |/>. Anchors, aliases, теги, директивы и повторы ключей не поддерживаются.');
     yamlHint.hidden = true; r.appendChild(yamlHint);
     var yaml = el('textarea', 'xk-text cx-proxy-yaml');

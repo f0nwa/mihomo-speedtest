@@ -13,21 +13,23 @@ import { pathToFileURL } from 'node:url';
 
 class Element {
   constructor(tag) {
-    this.tag = tag; this.children = []; this.listeners = {}; this.attrs = {};
+    this.tag = tag; this._children = []; this.listeners = {}; this.attrs = {};
     this.className = ''; this.value = ''; this.hidden = false; this.disabled = false; this._text = '';
     this.checked = false; this.type = ''; this.classList = { toggle: () => {} };
   }
-  get firstChild() { return this.children[0] || null; }
-  appendChild(child) { this.children.push(child); return child; }
-  removeChild(child) { this.children.splice(this.children.indexOf(child), 1); return child; }
+  // В браузере children - HTMLCollection, а не массив с методами slice/map.
+  get children() { return Object.assign({ length: this._children.length }, this._children); }
+  get firstChild() { return this._children[0] || null; }
+  appendChild(child) { this._children.push(child); return child; }
+  removeChild(child) { this._children.splice(this._children.indexOf(child), 1); return child; }
   setAttribute(key, value) { this.attrs[key] = String(value); }
   addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
   fire(type) { (this.listeners[type] || []).forEach(listener => listener({ preventDefault() {}, key: '' })); }
   click() { if (!this.disabled) { this.fire('click'); } }
   focus() {}
   blur() { this.fire('change'); }
-  set textContent(value) { this._text = String(value); this.children = []; }
-  get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+  set textContent(value) { this._text = String(value); this._children = []; }
+  get textContent() { return this._text + this._children.map(child => child.textContent).join(''); }
 }
 globalThis.document = {
   getElementById() { return null; },
@@ -55,12 +57,12 @@ const { createModules } = await import(pathToFileURL(process.argv[3]).href);
 const WG = "  - name: 'WG test'\n    type: wireguard\n    server: 192.0.2.1\n    port: 51820\n    ip: 10.0.0.2\n    private-key: 'SECRET-WG-PRIVATE'\n    mtu: 1400\n    persistent-keepalive: 0\n    amnezia-wg-option:\n      jc: 3\n";
 const TT = "  - name: 'TT test'\n    type: trusttunnel\n    server: 192.0.2.2\n    port: 443\n    username: test\n    password: 'SECRET-TT-PASSWORD'\n    sni: tt.example\n    quic: false\n    client-fingerprint: firefox\n    alpn: ['h2', 'h3']\n";
 const SOURCE = WG + TT;
-function findAll(node, match) { return (match(node) ? [node] : []).concat(node.children.flatMap(child => findAll(child, match))); }
+function findAll(node, match) { return (match(node) ? [node] : []).concat(Array.from(node.children).flatMap(child => findAll(child, match))); }
 function assert(value, message) { if (!value) { throw new Error(message); } }
 function one(root, match, message) { const found = findAll(root, match); assert(found.length === 1, message + ': найдено ' + found.length); return found[0]; }
 function byLabel(root, label) { return one(root, n => n.attrs['aria-label'] === label, 'элемент ' + label); }
 function byButton(root, text) { return one(root, n => n.tag === 'button' && n.textContent === text, 'кнопка ' + text); }
-function visibleText(node) { return node.hidden ? '' : node._text + (node.tag === 'textarea' ? node.value : '') + node.children.map(child => visibleText(child)).join(''); }
+function visibleText(node) { return node.hidden ? '' : node._text + (node.tag === 'textarea' ? node.value : '') + Array.from(node.children).map(child => visibleText(child)).join(''); }
 
 function setup(source) {
   const mods = createModules({ subscriptions: '', proxies: source, geofilter: null, geofilter_default: '' });
