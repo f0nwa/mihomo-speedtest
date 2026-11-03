@@ -18,6 +18,7 @@ assert(a >= 0 && b > a, 'не найден блок форматирования
 assert(src.slice(a, b).includes('function filterBackups'), 'нет filterBackups()');
 assert(src.slice(a, b).includes('function createBackupBrowser'), 'нет createBackupBrowser()');
 
+let focused = null;
 class Element {
   constructor(tag) {
     this.tag = tag; this.children = []; this.listeners = {}; this.attrs = {};
@@ -31,6 +32,7 @@ class Element {
   addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
   fire(type) { (this.listeners[type] || []).forEach(listener => listener({ preventDefault() {} })); }
   click() { this.fire('click'); }
+  focus() { focused = this; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
 }
@@ -66,7 +68,7 @@ assert(applyKind({ restarted: true, state_sync: 'ok' }) === 'ok', 'обычны�
 function all(node, match) { return (match(node) ? [node] : []).concat(node.children.flatMap(child => all(child, match))); }
 function one(node, match, message) { const found = all(node, match)[0]; assert(found, message); return found; }
 function field(body, label) { return one(body, n => n.attrs['aria-label'] === label, 'нет поля ' + label); }
-function rows(body) { return all(body, n => n.tag === 'tr'); }
+function rows(body) { return all(body, n => n.tag === 'tr' && n.children.some(child => child.tag === 'td')); }
 function action(body, text) {
   return one(rows(body)[0], n => n.tag === 'button' && n.textContent === text, 'нет кнопки ' + text);
 }
@@ -152,6 +154,45 @@ async function main() {
   await empty.load();
   assert(emptyBody.textContent.includes('Бэкапов пока нет'), 'пустой исходный список имеет своё сообщение');
   assert(!emptyBody.textContent.includes('Нет подходящих бэкапов'), 'пустой исходный список не сообщает о фильтрах');
+
+  // Сервер отдаёт бэкапы от новых к старым; неизвестные даты всегда в конце.
+  const ordered = [
+    { kind: 'edit', name: 'config.yaml.2026-11-02_134400-10.bak', size: 1 },
+    { kind: 'edit', name: 'config.yaml.2026-11-02_134400-2.bak', size: 1 },
+    { kind: 'setup', name: 'config.yaml.2026-11-02_134400.bak', size: 1 },
+    { kind: 'edit', name: 'config.yaml.2026-11-01_235959.bak', size: 1 },
+    { kind: 'edit', name: 'config.yaml.not-a-date.bak', size: 1 }
+  ];
+  const sortBody = new Element('div'), sortCompared = [];
+  let sortLoads = 0;
+  const sortable = createBackupBrowser({
+    body: sortBody,
+    load() { sortLoads++; return Promise.resolve({ backups: ordered, keep: 20 }); },
+    compare(b) { sortCompared.push(b); }, edit() {}, restore() {}, error() {}
+  });
+  await sortable.load();
+  function sortHeader() { return one(sortBody, n => n.tag === 'th' && n.attrs['aria-sort'], 'нет заголовка сортировки'); }
+  function sortButton() { return field(sortBody, 'Сортировать по дате'); }
+  function order() { return rows(sortBody).map(row => row.children[0].textContent); }
+  assert(order()[0].includes(ordered[0].name), 'по умолчанию сначала новые, с учётом номера копии');
+  eq(sortHeader().attrs['aria-sort'], 'descending', 'направление новых доступно скринридеру');
+  sortButton().click();
+  assert(focused === sortButton(), 'фокус сохраняется на кнопке после переключения');
+  eq(sortHeader().attrs['aria-sort'], 'ascending', 'направление старых доступно скринридеру');
+  [ordered[3], ordered[2], ordered[1], ordered[0], ordered[4]].forEach((b, i) => {
+    assert(order()[i].includes(b.name), 'сортировка от старых к новым, строка ' + i);
+  });
+  action(sortBody, 'Сравнить').click();
+  assert(sortCompared[0] === ordered[3], 'после сортировки действие относится к видимой строке');
+  eq(sortLoads, 1, 'смена сортировки не вызывает сетевого запроса');
+  field(sortBody, 'Источник').value = 'edit'; field(sortBody, 'Источник').fire('change');
+  assert(order()[0].includes(ordered[3].name) && order()[3].includes(ordered[4].name), 'сортировка сохраняется при фильтрации');
+  await sortable.load();
+  assert(order()[0].includes(ordered[3].name), 'сортировка сохраняется при обновлении списка');
+  sortButton().click();
+  eq(sortHeader().attrs['aria-sort'], 'descending', 'направление снова от новых');
+  assert(order()[0].includes(ordered[0].name) && order()[3].includes(ordered[4].name), 'новые снова сверху, неизвестные в конце');
+  assert(!ordered[0].name.includes('not-a-date'), 'сортировка не изменила исходный список');
   console.log('OK test_config_backups_ui');
 }
 main().catch(error => { console.error('FAIL: ' + error.message); process.exit(1); });

@@ -418,7 +418,7 @@ function createBackupBrowser(opts) {
   var filterBox = el('div', 'config-backup-filters');
   var listBox = el('div');
   body.appendChild(filterBox); body.appendChild(listBox);
-  var list = [], keep = 20;
+  var list = [], keep = 20, newestFirst = true, sortControl = null;
 
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function dateField(label, aria) {
@@ -455,6 +455,7 @@ function createBackupBrowser(opts) {
   function filters() { return { from: from.value, to: to.value, kind: kind.value, query: query.value }; }
   function render() {
     clear(listBox);
+    sortControl = null;
     if (!list.length) {
       filterBox.hidden = true;
       listBox.appendChild(el('p', 'hint', 'Бэкапов пока нет.'));
@@ -474,7 +475,31 @@ function createBackupBrowser(opts) {
       listBox.appendChild(el('p', 'hint', 'Нет подходящих бэкапов.'));
       return;
     }
+    // API отдаёт распознанные даты от новых к старым, неизвестные - в конце.
+    // При обратной сортировке неизвестные даты всё равно остаются в конце.
+    var known = [], unknown = [];
+    filtered.forEach(function (b) { (backupDate(b.name) ? known : unknown).push(b); });
+    if (!newestFirst) { known.reverse(); }
+    filtered = known.concat(unknown);
     var table = el('table', 'config-backups');
+    var head = el('thead'), header = el('tr'), dateHead = el('th');
+    dateHead.setAttribute('scope', 'col');
+    dateHead.setAttribute('aria-sort', newestFirst ? 'descending' : 'ascending');
+    var sort = el('button', 'config-backup-sort', newestFirst ? 'Дата ↓' : 'Дата ↑');
+    sort.type = 'button'; sort.setAttribute('aria-label', 'Сортировать по дате');
+    sort.title = newestFirst ? 'Сначала новые. Нажмите, чтобы показать старые первыми' :
+      'Сначала старые. Нажмите, чтобы показать новые первыми';
+    sort.addEventListener('click', function () {
+      newestFirst = !newestFirst; render();
+      if (sortControl) { sortControl.focus(); }
+    });
+    sortControl = sort;
+    dateHead.appendChild(sort); header.appendChild(dateHead);
+    ['Источник', 'Размер', 'Действия'].forEach(function (label) {
+      var th = el('th', null, label); th.setAttribute('scope', 'col'); header.appendChild(th);
+    });
+    head.appendChild(header); table.appendChild(head);
+    var tbody = el('tbody');
     filtered.forEach(function (b) {
       var tr = el('tr');
       tr.appendChild(el('td', null, fmtBackupName(b.name)));
@@ -488,8 +513,9 @@ function createBackupBrowser(opts) {
       act('Сравнить', opts.compare);
       act('В редактор', opts.edit);
       act('Откатить', opts.restore);
-      tr.appendChild(td); table.appendChild(tr);
+      tr.appendChild(td); tbody.appendChild(tr);
     });
+    table.appendChild(tbody);
     listBox.appendChild(table);
   }
   function load() {
