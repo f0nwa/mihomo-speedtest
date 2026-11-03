@@ -960,7 +960,13 @@ export function createModuleCards(ctx) {
     var opts = mods.proxyOptions(p.name);
     var mtu, mtuRemove, keepOn, keep, transport, fingerprint;
     r.appendChild(el('div', 'geo-group-title', 'Изменение ноды ' + p.name));
-    r.appendChild(el('p', 'hint', 'Меняются только поля ниже. Ключи, адрес, параметры провайдера и неизвестные поля сохраняются. «Готово» меняет черновик, применение конфига остаётся общим.'));
+    r.appendChild(el('p', 'hint', 'Обычная форма меняет только перечисленные поля и сохраняет остальной YAML. Расширенный редактор принимает одну запись с прежними name и type. «Готово» меняет черновик, применение конфига остаётся общим.'));
+    var activeTab = 'simple';
+    var tabs = el('div', 'xk-mode cx-proxy-tabs');
+    var simpleTab = button('Обычные поля'), yamlTab = button('Расширенный YAML');
+    simpleTab.setAttribute('aria-pressed', 'true'); yamlTab.setAttribute('aria-pressed', 'false');
+    tabs.appendChild(simpleTab); tabs.appendChild(yamlTab); r.appendChild(tabs);
+    var simpleStart = r.children.length;
 
     if (p.type === 'wireguard') {
       r.appendChild(el('label', null, 'MTU'));
@@ -1046,9 +1052,31 @@ export function createModuleCards(ctx) {
       r.appendChild(el('p', 'hint', 'В Mihomo 1.19.32 fingerprint используется для HTTP/2 и не применяется к QUIC. При переходе на QUIC сохранённый профиль остаётся в YAML. ALPN форма не меняет: для HTTP/2 нужен h2, для QUIC - h3.'));
     }
 
+    var simpleNodes = r.children.slice(simpleStart);
+    var yamlHint = el('p', 'hint', 'Одна блочная запись, name первым ключом. Разрешены вложенные блоки, однострочные flow-коллекции и скаляры |/>. Anchors, aliases, теги, директивы и повторы ключей не поддерживаются.');
+    yamlHint.hidden = true; r.appendChild(yamlHint);
+    var yaml = el('textarea', 'xk-text cx-proxy-yaml');
+    yaml.rows = 18; yaml.spellcheck = false; yaml.hidden = true;
+    yaml.value = mods.getProxyYaml(p.name);
+    yaml.setAttribute('aria-label', 'YAML ноды ' + p.name);
+    r.appendChild(yaml);
+    function showTab(advanced) {
+      activeTab = advanced ? 'yaml' : 'simple';
+      simpleNodes.forEach(function (node) { node.hidden = advanced; });
+      yamlHint.hidden = !advanced; yaml.hidden = !advanced;
+      simpleTab.setAttribute('aria-pressed', advanced ? 'false' : 'true');
+      yamlTab.setAttribute('aria-pressed', advanced ? 'true' : 'false');
+    }
+    simpleTab.addEventListener('click', function () { showTab(false); });
+    yamlTab.addEventListener('click', function () { showTab(true); });
+
     var actions = el('div', 'xk-add');
     var done = button('Готово', 'submit'), cancel = button('Отмена', 'submit secondary');
     done.addEventListener('click', function () {
+      if (activeTab === 'yaml') {
+        ctx.edit(function () { mods.replaceProxyYaml(p.name, yaml.value, { advanced: true }); editingProxy = null; });
+        return;
+      }
       var patch = {};
       try {
         if (p.type === 'wireguard') {

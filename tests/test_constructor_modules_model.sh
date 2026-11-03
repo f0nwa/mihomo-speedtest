@@ -235,6 +235,118 @@ eq(em6.proxyOptions('WG test').ipv6, true, 'форма видит локальн
 { const x = editorModel(); const before = x.serialize().proxies; throws(() => x.updateProxyOptions('WG test', { server: '192.0.2.99' }), /поле|поддерж/, 'обычная форма не меняет сервер'); throws(() => x.updateProxyOptions('Missing', { mtu: 1280 }), /Нет ноды/, 'редактор отсутствующей ноды'); x.removeProxy('WG test'); throws(() => x.getProxyYaml('WG test'), /Нет ноды/, 'убранная нода недоступна редактору'); throws(() => x.updateProxyOptions('WG test', { mtu: 1280 }), /Нет ноды/, 'убранную ноду нельзя менять'); eq(x.serialize().proxies.includes('SECRET-WG-PRIVATE'), false, 'ошибки редактора не возвращают убранную ноду'); eq(before.includes('SECRET-WG-PRIVATE'), true, 'исходная фикстура содержит контрольный секрет'); }
 { const source = "  - name: Same\n    type: wireguard\n  - name: Same\n    type: wireguard\n"; const x = editorModel(source); throws(() => x.getProxyYaml('Same'), /несколько|уникаль/, 'неуникальная запись не редактируется'); }
 
+// ----- расширенный YAML одной ноды -----
+// Ломающие изменения: замена без полной проверки, потеря вложенных строк,
+// принятие второй записи или смены протокола, значения секретов в сводке.
+{
+  const x = editorModel(), before = x.serialize().proxies;
+  throws(() => x.replaceProxyYaml('WG test', WG_BLOCK), /advanced|расширен/i, 'замена разрешена только из расширенного редактора');
+  throws(() => x.replaceProxyYaml('WG test', WG_BLOCK, { advanced: false }), /advanced|расширен/i, 'advanced:false не разрешает замену');
+  eq(x.serialize().proxies, before, 'отсутствие advanced не меняет модель');
+  x.replaceProxyYaml('WG test', WG_BLOCK, { advanced: true });
+  eq(x.serialize().proxies, before, 'полностью неизменный YAML возвращается побайтно');
+  eq(x.summary({ subscriptions: '', proxies: before, geofilter: '' }), [], 'no-op расширенного YAML не попадает в сводку');
+  x.replaceProxyYaml('WG test', WG_BLOCK.replace("  - name: 'WG test'", '  - name: "WG test"').replace('    type: wireguard', "    type: 'wireguard'"), { advanced: true });
+  eq(x.getProxyYaml('WG test'), WG_BLOCK.replace("  - name: 'WG test'", '  - name: "WG test"').replace('    type: wireguard', "    type: 'wireguard'"), 'эквивалентная смена кавычек name/type допустима');
+}
+{
+  const source = WG_BLOCK.replace('    # параметры провайдера не трогаем\n\n', '# provider comment\n   \n');
+  const x = editorModel(source), before = x.getProxyYaml('WG test');
+  x.replaceProxyYaml('WG test', before, { advanced: true });
+  eq(x.getProxyYaml('WG test'), before, 'no-op не меняет комментарий без отступа и whitespace-only строку');
+}
+{
+  const x = editorModel();
+  const changed = WG_BLOCK + String.raw`    option: ["a\\", "b"]
+    escaped: ["a\"b", 'c'] # комментарий после flow
+`;
+  x.replaceProxyYaml('WG test', changed, { advanced: true });
+  eq(x.getProxyYaml('WG test'), changed, 'double-quoted flow учитывает чётность слэшей и escaped-кавычки');
+}
+{
+  const x = editorModel();
+  const changed = WG_BLOCK
+    .replace('server: 192.0.2.1', 'server: 192.0.2.99')
+    .replace('mtu: 1400', 'mtu: 1280')
+    .replace('      jc: 3', '      jc: 4')
+    .replace('        <b 0x01>', '        <b 0x01>\n        ---\n        &anchor *alias !tag\n        - name: содержимое, не вторая нода') +
+    "    note: '--- &anchor *alias !tag {flow: [1, 2]}'\n" +
+    "    provider-option: { mode: new, list: [one, 'two'] }\n";
+  x.replaceProxyYaml('WG test', changed, { advanced: true });
+  eq(x.getProxyYaml('WG test'), changed, 'расширенный YAML сохраняет вложенные поля, flow, комментарии и block scalar');
+  eq(x.proxyRows().filter(p => p.name === 'WG test')[0].server, '192.0.2.99', 'после замены обновляется адрес в списке нод');
+  eq(x.getProxyYaml('Neighbor'), "  - name: Neighbor\n    type: ss\n    server: neighbor.example\n    password: 'NEIGHBOR-SECRET'\n", 'расширенная замена не трогает соседнюю ноду');
+  eq(x.serialize().proxies.startsWith(changed + "  - name: 'TT test'\n"), true, 'порядок нод и границы записи сохранены');
+  eq(x.summary({ subscriptions: '', proxies: EDITOR_PROX, geofilter: '' }), ['Нода WG test: изменены server, mtu, amnezia-wg-option, note, provider-option'], 'сводка перечисляет только изменённые верхнеуровневые поля');
+  const summary = x.summary({ subscriptions: '', proxies: EDITOR_PROX, geofilter: '' }).join('\n');
+  ['192.0.2.99', '1280', 'SECRET-WG-PRIVATE', 'содержимое, не вторая нода', "mode: new"].forEach(secret => eq(summary.includes(secret), false, 'в сводку не попадает значение: ' + secret));
+}
+{
+  const source = EDITOR_PROX.replace("    private-key: 'SECRET-WG-PRIVATE'\n", "    private-key: 'SECRET-WG-PRIVATE'\n    header-protection-key: 'OLD-HEADER-SECRET'\n");
+  const x = editorModel(source);
+  const changed = x.getProxyYaml('WG test')
+    .replace("    private-key: 'SECRET-WG-PRIVATE'\n", "    private-key: 'NEW-WG-SECRET'\n    password: 'NEW-PASSWORD-SECRET'\n")
+    .replace("    header-protection-key: 'OLD-HEADER-SECRET'\n", '');
+  x.replaceProxyYaml('WG test', changed, { advanced: true });
+  const summary = x.summary({ subscriptions: '', proxies: source, geofilter: '' }).join('\n');
+  eq(summary, 'Нода WG test: изменены private-key, header-protection-key, password', 'сводка называет добавленные, изменённые и удалённые секретные поля');
+  ['SECRET-WG-PRIVATE', 'OLD-HEADER-SECRET', 'NEW-WG-SECRET', 'NEW-PASSWORD-SECRET'].forEach(secret => eq(summary.includes(secret), false, 'сводка не раскрывает секрет ' + secret));
+}
+{
+  const x = editorModel();
+  x.updateProxyOptions('WG test', { mtu: 1280 });
+  eq(x.summary({ subscriptions: '', proxies: EDITOR_PROX, geofilter: '' }), ['Нода WG test: изменены mtu'], 'обычная форма использует ту же безопасную сводку полей');
+}
+{
+  const x = editorModel();
+  const changed = WG_BLOCK +
+    "    allowed-ips:\n      - '0.0.0.0/0'\n      - ::/0\n" +
+    "    nested:\n      - key: one\n        value: two\n      - key: three\n        value: { flow: [one, two] }\n";
+  x.replaceProxyYaml('WG test', changed, { advanced: true });
+  eq(x.getProxyYaml('WG test'), changed, 'вложенные блочные последовательности и их отображения сохраняются');
+}
+{
+  const invalid = [
+    ['смена name', WG_BLOCK.replace("name: 'WG test'", "name: 'Other'"), /name|имя/i],
+    ['смена type', WG_BLOCK.replace('type: wireguard', 'type: trusttunnel'), /type|протокол/i],
+    ['name не первым', WG_BLOCK.replace("  - name: 'WG test'\n    type: wireguard", "  - type: wireguard\n    name: 'WG test'"), /name|перв/i],
+    ['две записи', WG_BLOCK + "  - name: Other\n    type: ss\n", /одн|несколько|запис/i],
+    ['верхнеуровневый раздел', 'proxies:\n' + WG_BLOCK, /раздел|одн|запис|name/i],
+    ['директива', '%YAML 1.2\n' + WG_BLOCK, /директив|документ|%YAML/i],
+    ['начало документа', '---\n' + WG_BLOCK, /документ|---/i],
+    ['конец документа', WG_BLOCK + '...\n', /документ|\.\.\./i],
+    ['flow-запись всей ноды', "  - { name: 'WG test', type: wireguard }\n", /flow|запис|name/i],
+    ['многострочная flow-коллекция', WG_BLOCK + "    allowed-ips: [\n      '10.0.0.0/8',\n      '192.168.0.0/16'\n    ]\n", /flow|многостроч|скоб/i],
+    ['незакрытая flow-коллекция', WG_BLOCK + "    allowed-ips: ['10.0.0.0/8'\n", /flow|скоб/i],
+    ['вложенная скобка в plain flow-последовательности', WG_BLOCK + '    option: [a[b]\n', /flow|скоб/i],
+    ['вложенная скобка в plain flow-отображении', WG_BLOCK + '    option: {one: a{b}\n', /flow|скоб/i],
+    ['повтор в flow-отображении', WG_BLOCK + "    custom: { one: 1, two: 2, one: 3 }\n", /повтор|дубликат|one/i],
+    ['повтор в отображении последовательности', WG_BLOCK + "    nested:\n      - key: one\n        key: two\n", /повтор|дубликат|key/i],
+    ['табуляция', WG_BLOCK.replace('    mtu: 1400', '\tmtu: 1400'), /табуляц/i],
+    ['anchor', WG_BLOCK.replace('mtu: 1400', 'mtu: &mtu 1400'), /anchor|якор|&/i],
+    ['alias', WG_BLOCK + '    copy: *mtu\n', /alias|псевдоним|\*/i],
+    ['merge', WG_BLOCK + '    <<: *defaults\n', /merge|<<|alias/i],
+    ['явный тег', WG_BLOCK.replace('mtu: 1400', 'mtu: !!int 1400'), /тег|!!/i],
+    ['повтор верхнеуровневого ключа', WG_BLOCK + '    mtu: 1500\n', /повтор|дубликат|mtu/i],
+    ['повтор вложенного ключа', WG_BLOCK.replace('      jc: 3', '      jc: 3\n      jc: 4'), /повтор|дубликат|jc/i],
+    ['неверный отступ', WG_BLOCK.replace('      jc: 3', '     jc: 3'), /отступ/i],
+    ['базовый отступ один пробел', WG_BLOCK.replace(/^ /gm, ''), /отступ/i],
+    ['многострочный name', WG_BLOCK.replace("  - name: 'WG test'", '  - name: |\n      WG test'), /name|одностроч/i],
+    ['многострочный type', WG_BLOCK.replace('    type: wireguard', '    type: >-\n      wireguard'), /type|одностроч/i],
+    ['нескалярная строка', WG_BLOCK + '      просто продолжение\n', /строк|отступ|скаляр/i]
+  ];
+  invalid.forEach(([what, text, re]) => {
+    const x = editorModel(), before = x.serialize().proxies;
+    throws(() => x.replaceProxyYaml('WG test', text, { advanced: true }), re, 'отклонён: ' + what);
+    eq(x.serialize().proxies, before, 'атомарность после ошибки: ' + what);
+  });
+  const x = editorModel(), before = x.serialize().proxies;
+  throws(() => x.replaceProxyYaml('Missing', WG_BLOCK, { advanced: true }), /Нет ноды/, 'расширенный редактор отсутствующей ноды');
+  x.removeProxy('WG test');
+  throws(() => x.replaceProxyYaml('WG test', WG_BLOCK, { advanced: true }), /Нет ноды/, 'расширенный редактор убранной ноды');
+  eq(before.includes('SECRET-WG-PRIVATE'), true, 'контрольная фикстура не потеряна до проверок ошибок');
+}
+
 // ----- исключения нод -----
 eq(m.words(), ['RU', 'Moscow'], 'слова по умолчанию - из шаблона');
 eq(m.isDefaultWords(), true, 'по умолчанию');

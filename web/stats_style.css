@@ -493,6 +493,8 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-proxy-editor input[type=number],.cx-proxy-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
 .cx-proxy-editor .hint{margin:0}
 .cx-proxy-editor .xk-add{margin-top:4px}
+.cx-proxy-yaml{width:100%;box-sizing:border-box;resize:vertical;margin:0}
+.cx-proxy-tabs{align-self:flex-start;margin:2px 0 4px}
 .cx-ua{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
 .cx-ua-note{flex:1 1 100%;margin:0}

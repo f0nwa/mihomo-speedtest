@@ -49,6 +49,7 @@ function assert(value, message) { if (!value) { throw new Error(message); } }
 function one(root, match, message) { const found = findAll(root, match); assert(found.length === 1, message + ': найдено ' + found.length); return found[0]; }
 function byLabel(root, label) { return one(root, n => n.attrs['aria-label'] === label, 'элемент ' + label); }
 function byButton(root, text) { return one(root, n => n.tag === 'button' && n.textContent === text, 'кнопка ' + text); }
+function visibleText(node) { return node.hidden ? '' : node._text + (node.tag === 'textarea' ? node.value : '') + node.children.map(child => visibleText(child)).join(''); }
 
 function setup(source) {
   const mods = createModules({ subscriptions: '', proxies: source, geofilter: null, geofilter_default: '' });
@@ -67,7 +68,7 @@ function setup(source) {
 function edit(app, name) { byLabel(app.root, 'Изменить ноду ' + name).click(); assert(app.root.textContent.includes(name), 'редактор ноды ' + name); return one(app.root, n => n.className.includes('cx-proxy-editor'), 'форма редактора'); }
 
 const app = setup(SOURCE);
-assert(!app.root.textContent.includes('SECRET-WG-PRIVATE') && !app.root.textContent.includes('SECRET-TT-PASSWORD'), 'секреты не видны в списке');
+assert(!visibleText(app.root).includes('SECRET-WG-PRIVATE') && !visibleText(app.root).includes('SECRET-TT-PASSWORD'), 'секреты не видны в списке');
 let form = edit(app, 'WG test');
 const mtu = byLabel(form, 'MTU ноды WG test');
 assert(mtu.value === '1400', 'MTU прочитано из YAML');
@@ -77,7 +78,7 @@ assert(app.mods.getProxyYaml('WG test').includes('mtu: 1280'), 'Готово м�
 assert(app.mods.getProxyYaml('WG test').includes('persistent-keepalive: 0'), 'no-op существующего keepalive 0');
 assert(!app.mods.getProxyYaml('WG test').includes('client-fingerprint'), 'форма не добавляет чужие defaults');
 assert(app.mods.getProxyYaml('WG test').includes('amnezia-wg-option:\n      jc: 3'), 'вложенные AWG-поля сохранены');
-assert(app.mods.summary(app.initial).join('\n') === 'Нода WG test изменена', 'безопасная общая сводка');
+assert(app.mods.summary(app.initial).join('\n') === 'Нода WG test: изменены mtu', 'сводка называет изменённое поле без значения');
 assert(!app.mods.summary(app.initial).join('\n').includes('SECRET'), 'секреты не попадают в сводку');
 
 form = edit(app, 'WG test');
@@ -139,7 +140,7 @@ assert(!app.mods.serialize().proxies.includes('WG test'), 'ноду можно �
 byLabel(app.root, 'Вернуть WG test').click();
 assert(app.mods.getProxyYaml('WG test').includes('persistent-keepalive') === false, 'возврат сохраняет отредактированный черновик');
 assert(requests.every(r => r.method === 'GET'), 'редактор не отправляет записи до общего применения');
-assert(!app.messages.join('\n').includes('SECRET') && !app.root.textContent.includes('SECRET'), 'секреты не попадают в сообщения и DOM');
+assert(!app.messages.join('\n').includes('SECRET') && !visibleText(app.root).includes('SECRET'), 'секреты не попадают в сообщения и видимый DOM');
 
 const incompatible = setup(SOURCE.replace("alpn: ['h2', 'h3']", "alpn: ['h2']"));
 form = edit(incompatible, 'TT test');
@@ -160,6 +161,47 @@ form = edit(unsupported, 'WG test');
 assert(byLabel(form, 'MTU ноды WG test').disabled, 'сложный MTU недоступен в обычной форме');
 byButton(form, 'Готово').click();
 assert(unsupported.mods.getProxyYaml('WG test').includes('mtu: { value: 1400 }'), 'неподдерживаемое поле не переписывается');
+
+const advanced = setup(SOURCE);
+form = edit(advanced, 'WG test');
+assert(!visibleText(form).includes('SECRET-WG-PRIVATE'), 'обычная вкладка не показывает секреты');
+byLabel(form, 'MTU ноды WG test').value = '576';
+byButton(form, 'Расширенный YAML').click();
+let yaml = byLabel(form, 'YAML ноды WG test');
+assert(yaml.value === WG, 'расширенная вкладка показывает полный исходный блок');
+assert(visibleText(form).includes('SECRET-WG-PRIVATE'), 'секрет виден только после явного открытия YAML');
+const changedYaml = WG.replace('mtu: 1400', 'mtu: 1280').replace('jc: 3', 'jc: 4').replace('SECRET-WG-PRIVATE', 'NEW-YAML-SECRET');
+yaml.value = changedYaml;
+byButton(form, 'Обычные поля').click();
+assert(byLabel(form, 'MTU ноды WG test').value === '576', 'переключение вкладок не стирает черновик обычной формы');
+byButton(form, 'Расширенный YAML').click();
+assert(byLabel(form, 'YAML ноды WG test').value === changedYaml, 'переключение вкладок не стирает черновик YAML');
+byButton(form, 'Готово').click();
+assert(advanced.mods.getProxyYaml('WG test') === changedYaml, 'Готово сохраняет расширенный YAML атомарно');
+const advancedSummary = advanced.mods.summary(advanced.initial).join('\n');
+assert(advancedSummary === 'Нода WG test: изменены private-key, mtu, amnezia-wg-option', 'DOM-сводка содержит только имена полей');
+assert(!advancedSummary.includes('SECRET') && !advancedSummary.includes('1280') && !advancedSummary.includes('jc: 4'), 'DOM-сводка не содержит значений');
+assert(!advanced.messages.join('\n').includes('SECRET'), 'значения секретов не попадают в сообщения');
+
+form = edit(advanced, 'WG test');
+byButton(form, 'Расширенный YAML').click();
+yaml = byLabel(form, 'YAML ноды WG test');
+assert(yaml.value === changedYaml, 'повторное открытие показывает сохранённый расширенный черновик');
+yaml.value = changedYaml.replace('mtu: 1280', 'mtu: 1500');
+byButton(form, 'Отмена').click();
+assert(advanced.mods.getProxyYaml('WG test') === changedYaml, 'Отмена не применяет несохранённый YAML');
+assert(!visibleText(advanced.root).includes('SECRET'), 'после закрытия редактора секреты исчезают из видимого DOM');
+
+form = edit(advanced, 'WG test');
+byButton(form, 'Расширенный YAML').click();
+yaml = byLabel(form, 'YAML ноды WG test');
+yaml.value = changedYaml.replace('type: wireguard', 'type: trusttunnel');
+byButton(form, 'Готово').click();
+assert(advanced.mods.getProxyYaml('WG test') === changedYaml, 'ошибочный YAML не меняет модель');
+assert(advanced.messages.some(x => /type|протокол/i.test(x)), 'смена type отклонена с понятным сообщением');
+form = one(advanced.root, n => n.className.includes('cx-proxy-editor'), 'расширенный редактор остаётся после ошибки');
+byButton(form, 'Отмена').click();
+assert(requests.every(r => r.method === 'GET'), 'расширенный редактор не отправляет записи до общего применения');
 
 // Ответ фонового GET не должен стереть поля открытого редактора.
 let providerResolve;

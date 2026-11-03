@@ -667,7 +667,7 @@ for key,name in (("services","services.tsv"),("geofilter","geofilter.txt"),("use
         print("### MST-STATE " + name)
         print(value, end="" if value.endswith("\n") else "\n")'
 }
-proxies19="  - name: 'AWG backup'${NL}    type: wireguard${NL}    server: 192.0.2.10${NL}    port: 51820${NL}    ip: 10.0.0.2${NL}    private-key: SECRET-AWG-PRIVATE${NL}    public-key: PUBLIC${NL}    mtu: 1400${NL}  - name: 'TT backup'${NL}    type: trusttunnel${NL}    server: 192.0.2.20${NL}    port: 443${NL}    username: test${NL}    password: SECRET-TT-PASSWORD${NL}    sni: tt.example${NL}    quic: true${NL}"
+proxies19="  - name: 'AWG backup'${NL}    type: wireguard${NL}    server: 192.0.2.10${NL}    port: 51820${NL}    ip: 10.0.0.2${NL}    private-key: SECRET-AWG-PRIVATE${NL}    public-key: PUBLIC${NL}    mtu: 1400${NL}    amnezia-wg-option:${NL}      jc: 3${NL}      I1: |${NL}        <b 0x01>${NL}    allowed-ips: ['0.0.0.0/0', '::/0']${NL}  - name: 'TT backup'${NL}    type: trusttunnel${NL}    server: 192.0.2.20${NL}    port: 443${NL}    username: test${NL}    password: SECRET-TT-PASSWORD${NL}    sni: tt.example${NL}    quic: true${NL}"
 out=$(cgi3 read GET '' </dev/null)
 base19=$(printf '%s' "$out" | jget '["base"]')
 body19="### MST-STATE services.tsv${NL}### MST-STATE proxies.yaml${NL}$proxies19"
@@ -675,12 +675,18 @@ out=$(printf '%s' "$body19" | cgi3 apply POST "base=$base19")
 assert_contains 'Status: 200' "$out"
 read19=$(cgi3 read GET '' </dev/null)
 base19=$(printf '%s' "$read19" | jget '["base"]')
-printf '%s' "$read19" | state_body | sed -e 's/mtu: 1400/mtu: 1280/' -e 's/quic: true/quic: false/' > "$TMP/state19.txt"
+printf '%s' "$read19" | state_body > "$TMP/state19.initial"
+grep -q 'amnezia-wg-option:' "$TMP/state19.initial" || fail "19: повторное чтение потеряло вложенное AWG-отображение"
+grep -q '<b 0x01>' "$TMP/state19.initial" || fail "19: повторное чтение потеряло block scalar"
+grep -Fq "allowed-ips: ['0.0.0.0/0', '::/0']" "$TMP/state19.initial" || fail "19: повторное чтение потеряло flow-коллекцию"
+sed -e 's/mtu: 1400/mtu: 1280/' -e 's/quic: true/quic: false/' "$TMP/state19.initial" > "$TMP/state19.txt"
 out=$(cgi3 apply POST "base=$base19" < "$TMP/state19.txt")
 assert_contains 'Status: 200' "$out"
 backup19=$(printf '%s' "$out" | jget '["backup"]')
 grep -q 'mtu: 1400' "$M3/config-backups/$backup19" || fail "19: в бэкапе нет mtu 1400"
 grep -q 'quic: true' "$M3/config-backups/$backup19" || fail "19: в бэкапе нет quic true"
+grep -q '<b 0x01>' "$M3/config-backups/$backup19" || fail "19: бэкап потерял block scalar"
+grep -Fq "allowed-ips: ['0.0.0.0/0', '::/0']" "$M3/config-backups/$backup19" || fail "19: бэкап потерял flow-коллекцию"
 base19=$(cfg3 read GET '' </dev/null | jget '["base"]')
 out=$(cfg3 restore POST "kind=edit&name=$backup19&base=$base19" </dev/null)
 assert_contains 'Status: 200' "$out"
@@ -689,11 +695,15 @@ read19=$(cgi3 read GET '' </dev/null)
 [ "$(printf '%s' "$read19" | jget '["imported"]')" = True ] || fail "19: REVIEW должен запускать повторный перенос: $restore19"
 assert_contains 'base-proxies' "$(printf '%s' "$read19" | jget '["report"]')"
 printf '%s' "$read19" | state_body > "$TMP/state19.txt"
+grep -q '<b 0x01>' "$TMP/state19.txt" || fail "19: восстановление потеряло block scalar в состоянии"
+grep -Fq "allowed-ips: ['0.0.0.0/0', '::/0']" "$TMP/state19.txt" || fail "19: восстановление потеряло flow в состоянии"
 base19=$(printf '%s' "$read19" | jget '["base"]')
 out=$(cgi3 apply POST "base=$base19" < "$TMP/state19.txt")
 assert_contains 'Status: 200' "$out"
 grep -q 'mtu: 1400' "$M3/config.yaml" || fail "19: конструктор вернул старый mtu после восстановления"
 grep -q 'quic: true' "$M3/config.yaml" || fail "19: конструктор вернул старый quic после восстановления"
+grep -q '<b 0x01>' "$M3/config.yaml" || fail "19: восстановленный конфиг потерял block scalar"
+grep -Fq "allowed-ips: ['0.0.0.0/0', '::/0']" "$M3/config.yaml" || fail "19: восстановленный конфиг потерял flow"
 [ "$(printf '%s' "$restore19" | jget '["state_sync"]')" = reimport_required ] || fail "19: state_sync после восстановления с REVIEW"
 lg=$(cfg3 log GET '' </dev/null | jget '["text"]')
 assert_not_contains 'SECRET-AWG-PRIVATE' "$lg"

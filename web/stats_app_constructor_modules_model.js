@@ -227,6 +227,295 @@ export function proxiesFromYaml(text) {
   return list;
 }
 
+function yamlEscaped(raw, index) {
+  var count = 0;
+  for (var i = index - 1; i >= 0 && raw[i] === '\\'; i--) { count++; }
+  return count % 2 === 1;
+}
+
+function yamlComment(raw) {
+  var single = false, double = false;
+  for (var i = 0; i < raw.length; i++) {
+    var c = raw[i];
+    if (single && c === "'" && raw[i + 1] === "'") { i++; continue; }
+    if (c === "'" && !double) { single = !single; continue; }
+    if (c === '"' && !single) {
+      if (double && yamlEscaped(raw, i)) { continue; }
+      double = !double; continue;
+    }
+    if (c === '#' && !single && !double && (!i || /\s/.test(raw[i - 1]))) { return raw.slice(0, i); }
+  }
+  return raw;
+}
+
+function yamlMarkers(raw) {
+  var single = false, double = false;
+  for (var i = 0; i < raw.length; i++) {
+    var c = raw[i];
+    if (single && c === "'" && raw[i + 1] === "'") { i++; continue; }
+    if (c === "'" && !double) { single = !single; continue; }
+    if (c === '"' && !single) {
+      if (double && yamlEscaped(raw, i)) { continue; }
+      double = !double; continue;
+    }
+    if (!single && !double && (c === '&' || c === '*' || c === '!') && (!i || /[\s\[{,:]/.test(raw[i - 1]))) {
+      throw new Error('YAML anchors, aliases и явные теги не поддерживаются');
+    }
+  }
+}
+
+function yamlScalar(raw) {
+  var v = yamlComment(String(raw)).trim();
+  if (!v) { throw new Error('Пустой скаляр YAML не поддерживается'); }
+  if (v[0] === "'") {
+    if (!/^'(?:[^']|'')*'$/.test(v)) { throw new Error('Незакрытая одиночная кавычка в YAML'); }
+    return v.slice(1, -1).replace(/''/g, "'");
+  }
+  if (v[0] === '"') {
+    var decoded;
+    try { decoded = JSON.parse(v); } catch (e) { throw new Error('Некорректная двойная кавычка или escape в YAML'); }
+    if (typeof decoded !== 'string') { throw new Error('name и type должны быть строками'); }
+    return decoded;
+  }
+  yamlMarkers(v);
+  if (/^(?:---|\.\.\.|%)/.test(v)) { throw new Error('Директивы и маркеры документов YAML не поддерживаются'); }
+  if (/:\s/.test(v)) { throw new Error('Неподдерживаемый многострочный или составной скаляр YAML'); }
+  return v;
+}
+
+function yamlFlow(raw) {
+  var text = yamlComment(raw).trim(), at = 0;
+  function spaces() { while (/\s/.test(text[at] || '')) { at++; } }
+  function quoted() {
+    var quote = text[at], start = at++;
+    while (at < text.length) {
+      if (quote === "'" && text[at] === "'" && text[at + 1] === "'") { at += 2; continue; }
+      if (text[at] === quote && (quote === "'" || !yamlEscaped(text, at))) { at++; return yamlScalar(text.slice(start, at)); }
+      at++;
+    }
+    throw new Error('Незакрытая кавычка в flow-коллекции YAML');
+  }
+  function plain(stop) {
+    var start = at;
+    while (at < text.length && stop.indexOf(text[at]) < 0) { at++; }
+    var value = text.slice(start, at).trim();
+    if (/[\[\]{}]/.test(value)) { throw new Error('Скобки внутри plain-скаляра flow-коллекции YAML не поддерживаются'); }
+    return yamlScalar(value);
+  }
+  function value() {
+    spaces();
+    if (text[at] === '[') { return list(); }
+    if (text[at] === '{') { return map(); }
+    if (text[at] === "'" || text[at] === '"') { return quoted(); }
+    return plain(',]}');
+  }
+  function list() {
+    at++; spaces();
+    if (text[at] === ']') { at++; return; }
+    while (at < text.length) {
+      value(); spaces();
+      if (text[at] === ']') { at++; return; }
+      if (text[at] !== ',') { throw new Error('В flow-последовательности YAML нужна запятая или закрывающая скобка'); }
+      at++; spaces();
+      if (text[at] === ']') { at++; return; }
+    }
+    throw new Error('Незакрытая flow-последовательность YAML');
+  }
+  function map() {
+    var keys = Object.create(null);
+    at++; spaces();
+    if (text[at] === '}') { at++; return; }
+    while (at < text.length) {
+      var key = text[at] === "'" || text[at] === '"' ? quoted() : plain(':');
+      if (!key || key === '<<') { throw new Error('Пустой ключ или merge в flow-отображении YAML не поддерживается'); }
+      if (keys[key]) { throw new Error('Повтор ключа ' + key + ' в flow-отображении YAML'); }
+      keys[key] = true;
+      spaces();
+      if (text[at] !== ':') { throw new Error('В flow-отображении YAML после ключа нужно двоеточие'); }
+      at++; value(); spaces();
+      if (text[at] === '}') { at++; return; }
+      if (text[at] !== ',') { throw new Error('В flow-отображении YAML нужна запятая или закрывающая скобка'); }
+      at++; spaces();
+      if (text[at] === '}') { at++; return; }
+    }
+    throw new Error('Незакрытое flow-отображение YAML');
+  }
+  if (!text || (text[0] !== '[' && text[0] !== '{')) { throw new Error('Некорректная flow-коллекция YAML'); }
+  value(); spaces();
+  if (at !== text.length) { throw new Error('Лишний текст после flow-коллекции YAML'); }
+}
+
+function yamlValue(raw) {
+  var v = yamlComment(raw).trim();
+  if (v[0] === '[' || v[0] === '{') { yamlFlow(v); return; }
+  yamlScalar(v);
+}
+
+function yamlEntry(content) {
+  var single = false, double = false, colon = -1;
+  for (var i = 0; i < content.length; i++) {
+    var c = content[i];
+    if (single && c === "'" && content[i + 1] === "'") { i++; continue; }
+    if (c === "'" && !double) { single = !single; continue; }
+    if (c === '"' && !single) {
+      if (double && yamlEscaped(content, i)) { continue; }
+      double = !double; continue;
+    }
+    if (c === ':' && !single && !double && (i + 1 === content.length || /\s/.test(content[i + 1]))) { colon = i; break; }
+  }
+  if (colon < 0) { throw new Error('В отображении YAML нужна строка «ключ: значение»'); }
+  var key = content.slice(0, colon).trim();
+  if (key === '<<') { throw new Error('YAML merge << не поддерживается'); }
+  if (!/^[A-Za-z0-9_.-]+$/.test(key)) { throw new Error('Ключи YAML должны быть простыми: латиница, цифры, точка, дефис и подчёркивание'); }
+  return { key: key, value: content.slice(colon + 1).trim() };
+}
+
+function advancedProxyFromYaml(text, expectedName, expectedType) {
+  var raw = lines(String(text == null ? '' : text));
+  if (raw.length && raw[raw.length - 1] === '') { raw.pop(); }
+  if (!raw.length) { throw new Error('Вставьте одну запись ноды YAML'); }
+  raw.forEach(function (line) {
+    if (/\t/.test(line)) { throw new Error('Табуляция в YAML недопустима - только пробелы'); }
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(line)) { throw new Error('Управляющие символы в YAML недопустимы'); }
+  });
+  if (/^(?:---|\.\.\.|%)/.test(raw[0])) { throw new Error('Директивы и маркеры документов YAML не поддерживаются'); }
+  var first = /^( {0,2})- (.*)$/.exec(raw[0]);
+  if (!first) { throw new Error('Нужна ровно одна блочная запись «- name: ...», без верхнеуровневых разделов'); }
+  if (first[1].length === 1) { throw new Error('Базовый отступ записи YAML должен быть 0 или 2 пробела'); }
+  var base = first[1].length;
+  var src = raw.map(function (line) {
+    if (!line.trim()) { return ''; }
+    var cut = Math.min(base, line.length - line.replace(/^ +/, '').length);
+    return '  ' + line.slice(cut);
+  });
+  var pos = 0;
+  function info(index) {
+    var line = src[index], indent = (line.match(/^ */) || [''])[0].length;
+    return { line: line, indent: indent, content: line.slice(indent) };
+  }
+  function soft(index) { return !src[index].trim() || /^\s*#/.test(src[index]); }
+  function nextSignificant() {
+    var at = pos;
+    while (at < src.length && soft(at)) { at++; }
+    return at;
+  }
+  function marker(cur) {
+    if (/^(?:---|\.\.\.|%)/.test(cur.content)) { throw new Error('Директивы и маркеры документов YAML не поддерживаются'); }
+  }
+  function block(parentIndent) {
+    var contentIndent = -1;
+    while (pos < src.length) {
+      if (!src[pos].trim()) { pos++; continue; }
+      var cur = info(pos);
+      if (cur.indent <= parentIndent) { return; }
+      if (contentIndent < 0) { contentIndent = cur.indent; }
+      else if (cur.indent < contentIndent) { throw new Error('Неверный отступ содержимого блочного скаляра YAML'); }
+      pos++;
+    }
+  }
+  function entry(content, mapIndent, keys) {
+    var item = yamlEntry(content);
+    if (keys[item.key]) { throw new Error('Повтор ключа ' + item.key + ' в одном отображении YAML'); }
+    keys[item.key] = true;
+    if (!item.value) {
+      pos++;
+      var next = nextSignificant();
+      if (next < src.length && info(next).indent > mapIndent) { pos = next; node(info(next).indent); }
+      return item;
+    }
+    if (/^(?:\||>)(?:-|\+)?(?:\s+#.*)?$/.test(item.value)) {
+      pos++; block(mapIndent);
+    } else {
+      yamlValue(item.value); pos++;
+    }
+    return item;
+  }
+  function map(indent, keys, root) {
+    while (pos < src.length) {
+      if (soft(pos)) { pos++; continue; }
+      var cur = info(pos); marker(cur);
+      if (cur.indent < indent) { return; }
+      if (cur.indent > indent) { throw new Error('Неверный отступ вложенного отображения YAML'); }
+      if (/^-(?:\s|$)/.test(cur.content)) { return; }
+      var item = entry(cur.content, indent, keys);
+      if (root && item.key === 'type') {
+        if (!item.value || /^(?:\||>)/.test(item.value) || yamlScalar(item.value) !== expectedType) { throw new Error('Поле type должно остаться однострочным и сохранить прежнее значение'); }
+      }
+    }
+  }
+  function sequence(indent) {
+    while (pos < src.length) {
+      if (soft(pos)) { pos++; continue; }
+      var cur = info(pos); marker(cur);
+      if (cur.indent < indent) { return; }
+      if (cur.indent > indent) { throw new Error('Неверный отступ вложенной последовательности YAML'); }
+      if (!/^-(?:\s|$)/.test(cur.content)) { throw new Error('Строка не принадлежит вложенной последовательности YAML'); }
+      var item = cur.content.slice(1).trim();
+      if (!item) {
+        pos++;
+        var next = nextSignificant();
+        if (next < src.length && info(next).indent > indent) { pos = next; node(info(next).indent); }
+      } else if (item[0] === '[' || item[0] === '{') {
+        yamlFlow(item); pos++;
+      } else if (/^(?:\||>)(?:-|\+)?(?:\s+#.*)?$/.test(item)) {
+        pos++; block(indent);
+      } else {
+        var candidate;
+        try { candidate = yamlEntry(item); } catch (e) { candidate = null; }
+        if (candidate) {
+          var keys = Object.create(null);
+          entry(item, indent + 2, keys);
+          map(indent + 2, keys, false);
+        } else { yamlValue(item); pos++; }
+      }
+    }
+  }
+  function node(indent) {
+    var cur = info(pos);
+    if (cur.indent !== indent) { throw new Error('Неверный отступ вложенной конструкции YAML'); }
+    if (/^-(?:\s|$)/.test(cur.content)) { sequence(indent); } else { map(indent, Object.create(null), false); }
+  }
+  var root = info(0);
+  if (root.indent !== 2 || !/^- /.test(root.content)) { throw new Error('Нужна одна блочная запись ноды YAML'); }
+  if (/^[\[{]/.test(root.content.slice(2))) { throw new Error('Flow-запись всей ноды не поддерживается'); }
+  var rootEntry = yamlEntry(root.content.slice(2));
+  if (rootEntry.key !== 'name') { throw new Error('Первым ключом ноды должен идти name'); }
+  if (!rootEntry.value || /^(?:\||>)/.test(rootEntry.value) || yamlScalar(rootEntry.value) !== expectedName) {
+    throw new Error('Поле name должно остаться однострочным и сохранить прежнее значение');
+  }
+  pos = 1;
+  var rootKeys = Object.create(null); rootKeys.name = true;
+  map(4, rootKeys, true);
+  while (pos < src.length && soft(pos)) { pos++; }
+  if (pos < src.length) {
+    marker(info(pos));
+    throw new Error('Нужна ровно одна запись ноды, без второй записи или верхнеуровнего раздела');
+  }
+  if (!rootKeys.type) { throw new Error('У ноды нет type'); }
+  return src;
+}
+
+function proxyFieldGroups(p) {
+  var groups = Object.create(null), order = [], current = null;
+  p.lines.forEach(function (line) {
+    var m = /^(?:  - |    )([A-Za-z0-9_.-]+):/.exec(line);
+    if (m) {
+      current = m[1];
+      if (!groups[current]) { groups[current] = []; order.push(current); }
+      groups[current].push(line);
+    } else if (current) { groups[current].push(line); }
+  });
+  return { groups: groups, order: order };
+}
+
+function changedProxyFields(oldProxy, newProxy) {
+  var before = proxyFieldGroups(oldProxy), after = proxyFieldGroups(newProxy), out = [];
+  before.order.concat(after.order.filter(function (key) { return before.order.indexOf(key) < 0; })).forEach(function (key) {
+    if ((before.groups[key] || []).join('\n') !== (after.groups[key] || []).join('\n')) { out.push(key); }
+  });
+  return out;
+}
+
 function b64decode(s) {
   var t = String(s).replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
   while (t.length % 4) { t += '='; }
@@ -523,6 +812,15 @@ export function createModules(data) {
     getProxyYaml: function (name) { return editableProxy(name).lines.join('\n') + '\n'; },
     proxyOptions: function (name) { return proxyOptionsOf(editableProxy(name)); },
     updateProxyOptions: function (name, patch) { updateProxy(editableProxy(name), patch); },
+    replaceProxyYaml: function (name, text, options) {
+      if (!options || options.advanced !== true) { throw new Error('Замена YAML доступна только в расширенном редакторе'); }
+      var p = editableProxy(name);
+      if (String(text == null ? '' : text) === p.lines.join('\n') + '\n') { return; }
+      var next = advancedProxyFromYaml(text, p.name, p.type);
+      p.lines = next;
+      p.server = fieldOf(p, 'server');
+      p.port = fieldOf(p, 'port');
+    },
     // Ссылка -> нода; возвращает итоговое имя (при занятом оно получает адрес
     // сервера или номер, см. uniqueProxyName).
     addProxyLink: function (link) {
@@ -630,7 +928,10 @@ export function createModules(data) {
         if (pn0.indexOf(p.name) < 0) { res.push('+ нода ' + p.name); }
         else {
           var old = p0.filter(function (x) { return x.name === p.name; })[0];
-          if (old.lines.join('\n') !== p.lines.join('\n')) { res.push('Нода ' + p.name + ' изменена'); }
+          if (old.lines.join('\n') !== p.lines.join('\n')) {
+            var fields = changedProxyFields(old, p);
+            res.push('Нода ' + p.name + (fields.length ? ': изменены ' + fields.join(', ') : ': изменён YAML'));
+          }
         }
       });
       pn0.forEach(function (n) { if (proxyNames().indexOf(n) < 0) { res.push('Убрать ноду ' + n); } });
