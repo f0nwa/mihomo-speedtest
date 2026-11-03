@@ -179,13 +179,22 @@ sync_block() {
 # Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
 # stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
+  STATE_SYNC=ok
+  [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] || STATE_SYNC=reimport_required
   # Новые данные устройства (device:POST) - на диск только после того, как
   # конфиг с ними принят: иначе файл и config.yaml разошлись бы.
   if [ "${DEVICE_PENDING:-0}" = 1 ]; then
     if sub_device_save; then alog "Данные устройства сохранены"; else alog "ОШИБКА: не удалось сохранить $SUB_DEVICE_FILE"; fi
   fi
   [ -n "${NEW_STATE:-}" ] || return 0
-  if persist_state "$NEW_STATE"; then sync_block; fi
+  if persist_state "$NEW_STATE"; then
+    STATE_SYNC=ok
+    sync_block
+  elif mark_state_reimport; then
+    STATE_SYNC=reimport_required
+  else
+    STATE_SYNC=failed
+  fi
   return 0
 }
 
@@ -208,9 +217,9 @@ case $action:$method in
     awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$imp" \
         -v report="$WORK/imp.report" -f "$CONFIG_TO_STATE_AWK" "$target" 2> "$WORK/err" \
       || fail_json 422 import_failed "Не удалось разобрать config.yaml: $(head -n 1 "$WORK/err")"
-    # ?import=1 - «Перенести в конструктор»: перенос из config.yaml даже при
-    # сохранённом состоянии (оно заменится только при применении).
-    if [ "$(query_param import)" != 1 ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
+    # ?import=1 или маркер после отката: перенос из фактического config.yaml;
+    # прежнее состояние и .old не используются даже при наличии файлов.
+    if [ "$(query_param import)" != 1 ] && [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
       st=$CONFIG_STATE_DIR
       if [ -f "$st/managed.sig" ] && [ "$(cat "$st/managed.sig")" != "$(managed_sig "$target")" ]; then manual=true; fi
     else

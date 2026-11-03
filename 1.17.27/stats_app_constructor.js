@@ -7,13 +7,29 @@
 
 import { app, card, clearApp, el, fetchJson, nextView, setLoading, showError, viewGuard } from './app-core.js';
 import { createModules, parseWords } from './app-constructor-modules-model.js';
-import { createLayout, createModuleCards, plural } from './app-constructor-modules.js';
+import { buildDevice, createLayout, createModuleCards, plural } from './app-constructor-modules.js';
 import { ROUTES, createModel, parseTemplateBase, parseCatalog, parseCatalogDate, searchCatalog, parseIconCatalog, searchIcons, stateBody } from './app-constructor-model.js';
 
 var view = null;   // {dirty:bool}
 var catalogPromise = null;   // каталог наборов правил грузится один раз
 var catalogDate = '';        // дата сборки каталога (шапка файла)
 var iconCatalogPromise = null; // каталог иконок загружается только после выбора набора
+
+function constructorApplyResult(r) {
+  var text = r.unchanged
+    ? (r.state_sync === 'ok' ? 'Конфиг не изменился, настройки конструктора сохранены.' : 'Конфиг не изменился.')
+    : ('Применено' + (r.restarted === false ? ' (ядро не перезапускалось - перезапустите XKeen вручную)' : ', ядро перезапущено') +
+       (r.backup ? '. Бэкап прежнего конфига: ' + r.backup : '') + '.');
+  var kind = 'ok';
+  if (r.state_sync === 'reimport_required') {
+    kind = 'warn';
+    text += ' При следующем открытии конструктора появится результат повторного переноса из фактического config.yaml со строками REVIEW.';
+  } else if (r.state_sync === 'failed') {
+    kind = 'err';
+    text += ' Конфиг применён, но устаревшее состояние конструктора не заблокировано. Не применяйте конструктор: удалите config-state по SSH либо восстановите права записи и повторите перенос.';
+  }
+  return { text: text, kind: kind };
+}
 
 function loadCatalog() {
   if (!catalogPromise) {
@@ -116,7 +132,7 @@ export function renderConstructor(modeBar, opts) {
       'Перед применением конфиг собирается на роутере и проверяется mihomo -t, текущая версия уходит в бэкап.'));
     var msgBox = el('div');
     head.appendChild(msgBox);
-    if (opts.flash) { msgBox.appendChild(el('p', 'msg-ok', opts.flash)); }
+    if (opts.flash) { msgBox.appendChild(el('p', opts.flashKind === 'err' ? 'msg-err' : (opts.flashKind === 'warn' ? 'hint' : 'msg-ok'), opts.flash)); }
     if (data.manual_edits) {
       var w = el('div', 'geo-warn warn');
       w.appendChild(el('span', 'geo-warn-tag', 'ВНИМАНИЕ'));
@@ -174,8 +190,23 @@ export function renderConstructor(modeBar, opts) {
     head.insertBefore(actions, head.firstChild.nextSibling);   // под заголовком: панель применения - сверху
     app.appendChild(head);
 
-    // слева список модулей, справа выбранный (по умолчанию - первый, «Подписки»)
-    var layout = createLayout(1);
+    // слева список модулей, справа выбранный (по умолчанию «Подписки»;
+    // после сохранения устройства - снова «Устройство»)
+    var layout = createLayout(opts.module != null ? opts.module : 1);
+    // Устройство для панелей подписок с лимитом устройств: своё сохранение,
+    // сразу применяет config.yaml - поэтому только без несохранённых правок
+    // конструктора, а после него страница перечитывается.
+    var devBlk = layout.add(0, 'Устройство');
+    buildDevice(devBlk.body, {
+      summary: devBlk.summary,
+      canSave: function () {
+        return v.dirty ? 'Сначала примените или отмените изменения конструктора: сохранение устройства тоже применяет конфиг.' : '';
+      },
+      saved: function (r, text) {
+        if (r.applied === false) { return; }
+        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true, module: 0, flash: text });
+      }
+    });
     var modCards = createModuleCards({ layout: layout, mods: mods, model: model, savedWords: savedWords, edit: edit, msg: msg,
       redraw: draw, changed: refreshChanges });
 
@@ -896,10 +927,9 @@ export function renderConstructor(modeBar, opts) {
         if (!alive()) { return; }
         v.dirty = false;
         // перечитать состояние с роутера, сообщение - сверху новой страницы
-        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true, flash: r.unchanged
-          ? 'Конфиг не изменился, настройки конструктора сохранены.'
-          : ('Применено' + (r.restarted === false ? ' (ядро не перезапускалось - перезапустите XKeen вручную)' : ', ядро перезапущено') +
-             (r.backup ? '. Бэкап прежнего конфига: ' + r.backup : '') + '.') });
+        var applied = constructorApplyResult(r);
+        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true,
+          flash: applied.text, flashKind: applied.kind });
       })['catch'](function (e) {
         clear(chOut);
         var d = e.data || {};
