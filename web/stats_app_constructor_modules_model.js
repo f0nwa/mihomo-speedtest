@@ -74,9 +74,13 @@ export function suggestSubName(url, taken) {
 
 // Записи блока proxies: с первой строкой "  - ..." и вложенными строками.
 export function parseProxies(text) {
-  var out = [], cur = null;
-  lines(text).forEach(function (l) {
-    if (!l.trim() || /^\s*#/.test(l)) { return; }
+  var out = [], cur = null, src = lines(text);
+  if (src.length && src[src.length - 1] === '') { src.pop(); }
+  src.forEach(function (l) {
+    if (!l.trim() || /^\s*#/.test(l)) {
+      if (cur) { cur.lines.push(l); }
+      return;
+    }
     if (/^  - /.test(l)) {
       cur = { lines: [l] };
       out.push(cur);
@@ -98,13 +102,73 @@ function unq(v) {
   return v;
 }
 
+function fieldEntries(p, key) {
+  var re = new RegExp('^(  - |    )' + key + ':[ ]*(.*)$'), out = [];
+  p.lines.forEach(function (line, index) {
+    var m = re.exec(line);
+    if (m) { out.push({ index: index, prefix: m[1], raw: m[2], value: unq(m[2]) }); }
+  });
+  return out;
+}
+
 function fieldOf(p, key) {
-  var re = new RegExp('^(?:  - |    )' + key + ':[ ]*(.*)$');
-  for (var i = 0; i < p.lines.length; i++) {
-    var m = re.exec(p.lines[i]);
-    if (m) { return unq(m[1]); }
+  var found = fieldEntries(p, key);
+  return found.length ? found[0].value : '';
+}
+
+function simpleScalar(raw) {
+  var v = String(raw).trim();
+  return /^(?:'(?:[^']|'')*'|"(?:[^"\\]|\\.)*"|[A-Za-z0-9._:-]+)(?:\s+#.*)?$/.test(v);
+}
+
+function scalarOption(p, key, valueRe) {
+  var found = fieldEntries(p, key);
+  if (!found.length) { return { present: false, supported: true, value: '' }; }
+  return {
+    present: true,
+    supported: found.length === 1 && simpleScalar(found[0].raw) && valueRe.test(found[0].value),
+    value: found.length === 1 ? found[0].value : ''
+  };
+}
+
+function alpnOption(p) {
+  var found = fieldEntries(p, 'alpn');
+  if (!found.length) { return { present: false, supported: true, values: [] }; }
+  if (found.length !== 1) { return { present: true, supported: false, values: [] }; }
+  var raw = found[0].raw.trim().replace(/\s+#.*$/, ''), values = [];
+  if (/^\[.*\]$/.test(raw)) {
+    var body = raw.slice(1, -1).trim();
+    if (body) {
+      var parts = body.split(',');
+      for (var i = 0; i < parts.length; i++) {
+        if (!simpleScalar(parts[i]) || /[\[\]{}]/.test(parts[i])) { return { present: true, supported: false, values: [] }; }
+        values.push(unq(parts[i]));
+      }
+    }
+    return { present: true, supported: true, values: values };
   }
-  return '';
+  if (raw) { return { present: true, supported: false, values: [] }; }
+  for (var j = found[0].index + 1; j < p.lines.length; j++) {
+    var line = p.lines[j];
+    if (/^(?:  - |    )\S/.test(line)) { break; }
+    if (!line.trim() || /^\s*#/.test(line)) { continue; }
+    var m = /^      - (.*)$/.exec(line);
+    if (!m || !simpleScalar(m[1])) { return { present: true, supported: false, values: [] }; }
+    values.push(unq(m[1]));
+  }
+  return { present: true, supported: true, values: values };
+}
+
+function proxyOptionsOf(p) {
+  var quic = scalarOption(p, 'quic', /^(?:true|false)$/);
+  return {
+    ipv6: fieldEntries(p, 'ipv6').length > 0,
+    mtu: scalarOption(p, 'mtu', /^\d+$/),
+    keepalive: scalarOption(p, 'persistent-keepalive', /^\d+$/),
+    quic: { present: quic.present, supported: quic.supported, value: quic.value === 'true' },
+    fingerprint: scalarOption(p, 'client-fingerprint', /^\S+$/),
+    alpn: alpnOption(p)
+  };
 }
 
 export function serializeProxies(list) {
@@ -351,6 +415,71 @@ export function createModules(data) {
   function activeProxies() { return proxies.filter(function (p) { return !p.removed; }); }
   function proxyNames() { return activeProxies().map(function (p) { return p.name; }); }
   function reservedProxyNames() { return proxies.map(function (p) { return p.name; }); }
+  function editableProxy(name) {
+    var found = proxies.filter(function (p) { return p.name === name; });
+    if (found.length > 1) { throw new Error('Несколько нод с именем ' + name + ': нужна уникальная запись'); }
+    if (!found.length || found[0].removed) { throw new Error('Нет ноды ' + name); }
+    return found[0];
+  }
+  function updateProxy(p, patch) {
+    if (!patch || typeof patch !== 'object') { throw new Error('Некорректные изменения ноды'); }
+    var options = proxyOptionsOf(p), next = p.lines.slice();
+    var allowed = p.type === 'wireguard' ? { mtu: true, 'persistent-keepalive': true }
+      : p.type === 'trusttunnel' ? { quic: true, 'client-fingerprint': true } : {};
+    var keys = Object.keys(patch);
+    keys.forEach(function (key) {
+      if (!allowed[key]) { throw new Error('Поле ' + key + ' не поддерживается обычной формой'); }
+    });
+    function option(key) {
+      return key === 'persistent-keepalive' ? options.keepalive
+        : key === 'client-fingerprint' ? options.fingerprint : options[key];
+    }
+    function remove(key) {
+      var found = fieldEntries({ lines: next }, key);
+      if (found.length) { next.splice(found[0].index, 1); }
+    }
+    function write(key, value) {
+      var temp = { lines: next }, found = fieldEntries(temp, key), line = '    ' + key + ': ' + value;
+      if (found.length) {
+        next[found[0].index] = found[0].prefix + key + ': ' + value;
+      } else {
+        var at = next.length;
+        while (at > 0 && !next[at - 1].trim()) { at--; }
+        next.splice(at, 0, line);
+      }
+    }
+    keys.forEach(function (key) {
+      var value = patch[key], opt = option(key);
+      if (!opt.supported) { throw new Error((key === 'mtu' ? 'MTU' : 'Поле ' + key) + ': неподдерживаемая структура'); }
+      if (value === null) {
+        if (opt.present) { remove(key); }
+        return;
+      }
+      if (key === 'mtu' || key === 'persistent-keepalive') {
+        var label = key === 'mtu' ? 'MTU' : 'persistent-keepalive';
+        if (typeof value !== 'number' || !isFinite(value) || Math.floor(value) !== value) { throw new Error(label + ': нужно целое число'); }
+        var min = key === 'mtu' ? (options.ipv6 ? 1280 : 576) : 1;
+        if (value < min || value > 65535) { throw new Error(label + ': допустимый диапазон ' + min + '-65535'); }
+        if (opt.present && Number(opt.value) === value) { return; }
+        write(key, String(value));
+      } else if (key === 'quic') {
+        if (typeof value !== 'boolean') { throw new Error('QUIC: нужно значение true или false'); }
+        if (opt.present && opt.value === value) { return; }
+        var protocol = value ? 'h3' : 'h2';
+        if (options.alpn.present && (!options.alpn.supported || options.alpn.values.indexOf(protocol) < 0)) {
+          throw new Error('ALPN не содержит ' + protocol + ': измените ALPN отдельно перед сменой транспорта');
+        }
+        write(key, String(value));
+      } else if (key === 'client-fingerprint') {
+        if (opt.present && opt.value === value) { return; }
+        if (['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'].indexOf(value) < 0) {
+          throw new Error('client-fingerprint: выберите одну из предустановок формы');
+        }
+        write(key, value);
+      }
+    });
+    p.lines = next;
+  }
 
   var model = {
     available: function () { return present; },
@@ -391,6 +520,9 @@ export function createModules(data) {
     proxyRows: function () {
       return proxies.map(function (p) { return { name: p.name, type: p.type, server: p.server, port: p.port, removed: !!p.removed }; });
     },
+    getProxyYaml: function (name) { return editableProxy(name).lines.join('\n') + '\n'; },
+    proxyOptions: function (name) { return proxyOptionsOf(editableProxy(name)); },
+    updateProxyOptions: function (name, patch) { updateProxy(editableProxy(name), patch); },
     // Ссылка -> нода; возвращает итоговое имя (при занятом оно получает адрес
     // сервера или номер, см. uniqueProxyName).
     addProxyLink: function (link) {

@@ -142,6 +142,99 @@ const sum2 = m.summary({ subscriptions: SUBS, proxies: PROX, geofilter: '' });
 eq(sum2.includes('+ нода 🇳🇱 NL'), true, 'сводка нод');
 eq(sum2.join('\n').includes('p@ss') || sum2.join('\n').includes('password'), false, 'пароли не попадают в сводку');
 
+// ----- редактор собственных AWG/TrustTunnel -----
+// Ломающие изменения: пересборка всей ноды из известных полей, добавление
+// defaults при правке одного поля, потеря комментариев и вложенных AWG-полей.
+const EDITOR_PROX = "  - name: 'WG test'\n" +
+  "    type: wireguard\n" +
+  "    server: 192.0.2.1\n" +
+  "    port: 51820\n" +
+  "    ip: 10.0.0.2\n" +
+  "    private-key: 'SECRET-WG-PRIVATE'\n" +
+  "    mtu: 1400\n" +
+  "    # параметры провайдера не трогаем\n\n" +
+  "    persistent-keepalive: 0\n" +
+  "    amnezia-wg-option:\n" +
+  "      jc: 3\n" +
+  "      I1: |\n" +
+  "        <b 0x01>\n" +
+  "  - name: 'TT test'\n" +
+  "    type: trusttunnel\n" +
+  "    server: 192.0.2.2\n" +
+  "    port: 443\n" +
+  "    username: test\n" +
+  "    password: 'SECRET-TT-PASSWORD'\n" +
+  "    sni: tt.example\n" +
+  "    quic: false\n" +
+  "    client-fingerprint: firefox\n" +
+  "    alpn: ['h2', 'h3']\n" +
+  "  - name: Neighbor\n" +
+  "    type: ss\n" +
+  "    server: neighbor.example\n" +
+  "    password: 'NEIGHBOR-SECRET'\n";
+const WG_BLOCK = EDITOR_PROX.slice(0, EDITOR_PROX.indexOf("  - name: 'TT test'"));
+function editorModel(source) { return M.createModules({ subscriptions: '', proxies: source || EDITOR_PROX, geofilter: null, geofilter_default: '' }); }
+const em = editorModel();
+eq(em.serialize().proxies, EDITOR_PROX, 'редактор: no-op сохраняет комментарии и пустые строки');
+eq(em.getProxyYaml('WG test'), WG_BLOCK, 'getProxyYaml возвращает полный исходный блок одной ноды');
+eq(em.proxyOptions('WG test'), {
+  ipv6: false,
+  mtu: { present: true, supported: true, value: '1400' },
+  keepalive: { present: true, supported: true, value: '0' },
+  quic: { present: false, supported: true, value: false },
+  fingerprint: { present: false, supported: true, value: '' },
+  alpn: { present: false, supported: true, values: [] }
+}, 'состояние формы AWG');
+eq(em.proxyOptions('TT test'), {
+  ipv6: false,
+  mtu: { present: false, supported: true, value: '' },
+  keepalive: { present: false, supported: true, value: '' },
+  quic: { present: true, supported: true, value: false },
+  fingerprint: { present: true, supported: true, value: 'firefox' },
+  alpn: { present: true, supported: true, values: ['h2', 'h3'] }
+}, 'состояние формы TrustTunnel');
+em.updateProxyOptions('WG test', {});
+eq(em.getProxyYaml('WG test'), WG_BLOCK, 'пустой patch не меняет блок побайтно');
+em.updateProxyOptions('WG test', { mtu: 1280 });
+eq(em.getProxyYaml('WG test'), WG_BLOCK.replace('mtu: 1400', 'mtu: 1280'), 'меняется только mtu');
+eq(em.getProxyYaml('WG test').includes('quic:') || em.getProxyYaml('WG test').includes('client-fingerprint:'), false, 'форма AWG не добавляет defaults TrustTunnel');
+em.updateProxyOptions('WG test', { mtu: null });
+eq(em.getProxyYaml('WG test'), WG_BLOCK.replace('    mtu: 1400\n', ''), 'явное удаление mtu не подставляет 1408');
+const emKeep = editorModel();
+emKeep.updateProxyOptions('WG test', { 'persistent-keepalive': 25 });
+eq(emKeep.getProxyYaml('WG test'), WG_BLOCK.replace('persistent-keepalive: 0', 'persistent-keepalive: 25'), 'keepalive меняется на месте');
+emKeep.updateProxyOptions('WG test', { 'persistent-keepalive': null });
+eq(emKeep.getProxyYaml('WG test').includes('persistent-keepalive:'), false, 'keepalive выключается удалением поля');
+emKeep.updateProxyOptions('WG test', { 'persistent-keepalive': 30 });
+eq(emKeep.getProxyYaml('WG test').endsWith('    persistent-keepalive: 30\n'), true, 'отсутствующий keepalive добавляется верхнеуровневым полем');
+eq(em.getProxyYaml('Neighbor'), "  - name: Neighbor\n    type: ss\n    server: neighbor.example\n    password: 'NEIGHBOR-SECRET'\n", 'соседняя нода не меняется');
+eq(em.getProxyYaml('WG test').includes("private-key: 'SECRET-WG-PRIVATE'") && em.getProxyYaml('WG test').includes('      I1: |\n        <b 0x01>'), true, 'секрет и вложенные AWG-поля сохранены');
+em.updateProxyOptions('TT test', { quic: true });
+eq(em.getProxyYaml('TT test').includes('    quic: true\n    client-fingerprint: firefox\n'), true, 'QUIC не удаляет сохранённый fingerprint');
+em.updateProxyOptions('TT test', { 'client-fingerprint': 'chrome' });
+eq(em.getProxyYaml('TT test').includes('client-fingerprint: chrome'), true, 'fingerprint меняется отдельно');
+em.updateProxyOptions('TT test', { 'client-fingerprint': null });
+eq(em.getProxyYaml('TT test').includes('client-fingerprint:'), false, 'fingerprint можно удалить');
+
+[576, 1279, 1280, 65535].forEach(value => { const x = editorModel(); x.updateProxyOptions('WG test', { mtu: value }); eq(x.proxyOptions('WG test').mtu.value, String(value), 'допустимый MTU ' + value); });
+[0, 575.5, 65536, -1, '1280', NaN].forEach(value => { const x = editorModel(); const before = x.serialize().proxies; throws(() => x.updateProxyOptions('WG test', { mtu: value }), /MTU/, 'недопустимый MTU ' + value); eq(x.serialize().proxies, before, 'ошибка MTU не меняет модель'); });
+const em6 = editorModel(EDITOR_PROX.replace('    ip: 10.0.0.2\n', '    ip: 10.0.0.2\n    ipv6: fd00::2\n'));
+eq(em6.proxyOptions('WG test').ipv6, true, 'форма видит локальный IPv6');
+[1279, 1280].forEach(value => { const x = editorModel(EDITOR_PROX.replace('    ip: 10.0.0.2\n', '    ip: 10.0.0.2\n    ipv6: fd00::2\n')); if (value < 1280) { throws(() => x.updateProxyOptions('WG test', { mtu: value }), /1280/, 'IPv6 поднимает нижнюю границу MTU'); } else { x.updateProxyOptions('WG test', { mtu: value }); eq(x.proxyOptions('WG test').mtu.value, '1280', 'MTU 1280 с IPv6 допустим'); } });
+[1, 65535].forEach(value => { const x = editorModel(); x.updateProxyOptions('WG test', { 'persistent-keepalive': value }); eq(x.proxyOptions('WG test').keepalive.value, String(value), 'допустимый keepalive ' + value); });
+[0, 1.5, 65536, -2, '25'].forEach(value => { const x = editorModel(); throws(() => x.updateProxyOptions('WG test', { 'persistent-keepalive': value }), /keepalive/i, 'недопустимый keepalive ' + value); });
+['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'].forEach(value => { const x = editorModel(); x.updateProxyOptions('TT test', { 'client-fingerprint': value }); eq(x.proxyOptions('TT test').fingerprint.value, value, 'fingerprint ' + value); });
+{ const x = editorModel(); throws(() => x.updateProxyOptions('TT test', { 'client-fingerprint': 'unknown-new' }), /fingerprint/i, 'новый произвольный fingerprint не подставляется'); }
+{ const source = EDITOR_PROX.replace('client-fingerprint: firefox', 'client-fingerprint: provider-custom'); const x = editorModel(source); x.updateProxyOptions('TT test', {}); eq(x.getProxyYaml('TT test').includes('provider-custom'), true, 'пользовательский сохранённый fingerprint не заменяется'); }
+{ const x = editorModel(EDITOR_PROX.replace("alpn: ['h2', 'h3']", "alpn: ['h2']")); const before = x.serialize().proxies; throws(() => x.updateProxyOptions('TT test', { quic: true }), /ALPN.*h3|h3.*ALPN/, 'QUIC запрещён при ALPN только h2'); eq(x.serialize().proxies, before, 'несовместимый ALPN не меняет модель'); x.updateProxyOptions('TT test', { quic: false }); eq(x.serialize().proxies, before, 'no-op транспорта не трогает несовместимый с новым режимом ALPN'); }
+{ const x = editorModel(EDITOR_PROX.replace("alpn: ['h2', 'h3']", "alpn: ['h3']").replace('quic: false', 'quic: true')); throws(() => x.updateProxyOptions('TT test', { quic: false }), /ALPN.*h2|h2.*ALPN/, 'HTTP/2 запрещён при ALPN только h3'); }
+{ const x = editorModel(EDITOR_PROX.replace("    alpn: ['h2', 'h3']\n", '')); x.updateProxyOptions('TT test', { quic: true }); eq(x.proxyOptions('TT test').quic.value, true, 'отсутствие ALPN не превращается в список'); eq(x.getProxyYaml('TT test').includes('alpn:'), false, 'форма не добавляет ALPN'); }
+{ const x = editorModel(EDITOR_PROX.replace("    alpn: ['h2', 'h3']\n", "    alpn:\n      - h2\n      - h3\n")); eq(x.proxyOptions('TT test').alpn.values, ['h2', 'h3'], 'блочный список ALPN'); x.updateProxyOptions('TT test', { quic: true }); eq(x.proxyOptions('TT test').quic.value, true, 'блочный ALPN с h3 совместим с QUIC'); }
+{ const x = editorModel(EDITOR_PROX.replace('    mtu: 1400', '    mtu: { value: 1400 }')); eq(x.proxyOptions('WG test').mtu.supported, false, 'сложный MTU недоступен обычной форме'); throws(() => x.updateProxyOptions('WG test', { mtu: 1280 }), /MTU/, 'сложный MTU не переписывается'); }
+{ const x = editorModel(EDITOR_PROX.replace('    quic: false', '    quic: { enabled: false }')); eq(x.proxyOptions('TT test').quic.supported, false, 'сложный QUIC недоступен форме'); throws(() => x.updateProxyOptions('TT test', { quic: true }), /QUIC|quic/, 'сложный QUIC не переписывается'); }
+{ const x = editorModel(); const before = x.serialize().proxies; throws(() => x.updateProxyOptions('WG test', { server: '192.0.2.99' }), /поле|поддерж/, 'обычная форма не меняет сервер'); throws(() => x.updateProxyOptions('Missing', { mtu: 1280 }), /Нет ноды/, 'редактор отсутствующей ноды'); x.removeProxy('WG test'); throws(() => x.getProxyYaml('WG test'), /Нет ноды/, 'убранная нода недоступна редактору'); throws(() => x.updateProxyOptions('WG test', { mtu: 1280 }), /Нет ноды/, 'убранную ноду нельзя менять'); eq(x.serialize().proxies.includes('SECRET-WG-PRIVATE'), false, 'ошибки редактора не возвращают убранную ноду'); eq(before.includes('SECRET-WG-PRIVATE'), true, 'исходная фикстура содержит контрольный секрет'); }
+{ const source = "  - name: Same\n    type: wireguard\n  - name: Same\n    type: wireguard\n"; const x = editorModel(source); throws(() => x.getProxyYaml('Same'), /несколько|уникаль/, 'неуникальная запись не редактируется'); }
+
 // ----- исключения нод -----
 eq(m.words(), ['RU', 'Moscow'], 'слова по умолчанию - из шаблона');
 eq(m.isDefaultWords(), true, 'по умолчанию');
