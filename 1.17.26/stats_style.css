@@ -276,7 +276,13 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-backups td{padding:6px 8px;border-top:1px solid var(--border);vertical-align:middle}
 .config-backup-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .config-backup-actions .theme-btn{padding:4px 8px;font-size:12px}
-@media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backup-actions{justify-content:flex-start}}
+.config-backup-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin:8px 0}
+.config-backup-filters label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.config-backup-filters input,.config-backup-filters select,.config-backup-filters .theme-btn{font:inherit;font-size:12px}
+.config-backup-query{flex:1 1 200px}
+.config-backup-query input{width:100%;min-width:0}
+.config-backup-count{margin-left:auto;padding-bottom:6px;font-size:12px;color:var(--muted)}
+@media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backup-actions{justify-content:flex-start}.config-backup-count{margin-left:0}}
 /* Вкладка "Конфиг", YAML: навигатор разделов с поиском слева от редактора,
    полноэкранный режим с окном поиска и замены (createConfigNav() в
    stats_app_config.js). Высота редактора - те же 62vh, что и раньше. */
@@ -483,11 +489,22 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-editor{display:flex;flex-direction:column;gap:6px;margin:8px 0;padding:8px;background:var(--bg);border:1px solid var(--border)}
 .cx-editor input[type=text],.cx-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
 .cx-editor .xk-add input,.cx-editor .xk-add select{width:auto}
+.cx-proxy-editor{flex-direction:column;align-items:stretch;gap:6px;padding:10px;border-color:var(--accent)}
+.cx-proxy-editor input[type=number],.cx-proxy-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
+.cx-proxy-editor .hint{margin:0}
+.cx-proxy-editor .xk-add{margin-top:4px}
+.cx-proxy-yaml{width:100%;box-sizing:border-box;resize:vertical;margin:0}
+.cx-proxy-tabs{align-self:flex-start;margin:2px 0 4px}
 .cx-ua{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
 .cx-ua-note{flex:1 1 100%;margin:0}
 .cx-ua-note details{margin-top:4px}
 .cx-hwid{display:inline-flex;gap:4px;align-items:center;font-size:13px;white-space:nowrap;cursor:pointer}
+.cx-hwid input,.xk-add .cx-hwid input{flex:0 0 auto;width:auto;margin:0}
+.cx-sub-add-row{align-items:center}
+.cx-sub-add-notes{display:flex;flex-direction:column;gap:4px}
+.cx-sub-add-notes .cx-ua-note{margin:0}
+.cx-sub-add-acts{align-items:center}
 .msg-ok-text{color:#16a34a}
 .cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
 .cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}
@@ -643,5 +660,25 @@ label.node-select{display:inline-flex;align-items:center;gap:8px;margin:0;font-s
 .cx-provider-all{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)}
 .cx-provider-all input{accent-color:var(--accent)}
 @media(max-width:640px){.xk-row input[type=text].cx-provider{flex-basis:100%;width:100%}}
-.device-hwid{display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);word-break:break-all}
-.device-status{color:var(--text);margin-bottom:12px}
+@media (max-width:620px){.device-grid{grid-template-columns:minmax(0,1fr)}}
+.device-body{display:flex;flex-direction:column;gap:18px;max-width:900px}
+.device-body p{margin:0}
+.device-body label{margin:0}
+.device-body button.submit{margin-top:0}
+.device-status{color:var(--text);font-size:13px}
+.device-group{display:flex;flex-direction:column;gap:10px}
+.device-label{font-size:13px;color:var(--muted)}
+.device-chips{display:flex;flex-wrap:wrap;gap:8px}
+.device-chip{border:1px solid var(--card-border);background:transparent;color:var(--text);border-radius:0;padding:8px 14px;min-height:40px;font:inherit;font-size:13px;cursor:pointer}
+.device-chip:hover{border-color:var(--accent)}
+.device-chip.on{border-color:var(--accent);background:rgba(53,199,199,.14);color:var(--accent)}
+.device-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.device-field{display:flex;flex-direction:column;gap:6px}
+@media (max-width:620px){.device-grid{grid-template-columns:minmax(0,1fr)}}
+.device-preview{border:1px dashed var(--card-border);background:var(--bg);padding:14px 16px;font-size:13px;line-height:1.7;display:flex;flex-direction:column;gap:2px}
+.device-preview .hint{margin-top:6px}
+.device-preview-title{font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.device-hwid-row{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
+.device-hwid-row>*{min-height:40px;box-sizing:border-box}
+.device-hwid{display:inline-flex;align-items:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;padding:0 12px;border:1px solid var(--card-border);background:var(--bg);color:var(--text);word-break:break-all}
+.device-hwid-input{max-width:360px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}

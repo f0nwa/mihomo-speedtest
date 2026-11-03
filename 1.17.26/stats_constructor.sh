@@ -31,7 +31,8 @@
 #                   "hwid" (пусто - ещё не создан),"os","os_ver","model",
 #                   "subs":[имена подписок с x-hwid в config.yaml]}.
 #            POST - сохранить: тело - ОС, версия ОС, модель и "reset"
-#                   (новый HWID) или пустая строка, по строке. Есть подписки
+#                   (новый HWID), "set:<HWID>" (свой, проверяется как в
+#                   Remnawave) или пустая строка, по строке. Есть подписки
 #                   с HWID - их заголовки обновляются в config.yaml обычным
 #                   применением (mihomo -t, бэкап, перезапуск, откат), файл
 #                   устройства пишется после успеха; нет - только файл:
@@ -178,13 +179,22 @@ sync_block() {
 # Новое состояние ($NEW_STATE) - на место $CONFIG_STATE_DIR (persist_state из
 # stats_config.sh); после сохранения фильтр нод уходит в BLOCK спидтеста.
 after_apply_ok() {
+  STATE_SYNC=ok
+  [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] || STATE_SYNC=reimport_required
   # Новые данные устройства (device:POST) - на диск только после того, как
   # конфиг с ними принят: иначе файл и config.yaml разошлись бы.
   if [ "${DEVICE_PENDING:-0}" = 1 ]; then
     if sub_device_save; then alog "Данные устройства сохранены"; else alog "ОШИБКА: не удалось сохранить $SUB_DEVICE_FILE"; fi
   fi
   [ -n "${NEW_STATE:-}" ] || return 0
-  if persist_state "$NEW_STATE"; then sync_block; fi
+  if persist_state "$NEW_STATE"; then
+    STATE_SYNC=ok
+    sync_block
+  elif mark_state_reimport; then
+    STATE_SYNC=reimport_required
+  else
+    STATE_SYNC=failed
+  fi
   return 0
 }
 
@@ -207,9 +217,9 @@ case $action:$method in
     awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$imp" \
         -v report="$WORK/imp.report" -f "$CONFIG_TO_STATE_AWK" "$target" 2> "$WORK/err" \
       || fail_json 422 import_failed "Не удалось разобрать config.yaml: $(head -n 1 "$WORK/err")"
-    # ?import=1 - «Перенести в конструктор»: перенос из config.yaml даже при
-    # сохранённом состоянии (оно заменится только при применении).
-    if [ "$(query_param import)" != 1 ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
+    # ?import=1 или маркер после отката: перенос из фактического config.yaml;
+    # прежнее состояние и .old не используются даже при наличии файлов.
+    if [ "$(query_param import)" != 1 ] && [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] && [ -f "$CONFIG_STATE_DIR/services.tsv" ]; then
       st=$CONFIG_STATE_DIR
       if [ -f "$st/managed.sig" ] && [ "$(cat "$st/managed.sig")" != "$(managed_sig "$target")" ]; then manual=true; fi
     else
@@ -327,13 +337,20 @@ case $action:$method in
     dv_reset=$(sed -n '4p' "$WORK/body" | tr -d '\r')
     dv_extra=$(sed -n '5,$p' "$WORK/body" | tr -d '[:space:]')
     [ -z "$dv_extra" ] || fail_json 400 bad_body "Лишние строки в запросе"
-    case $dv_reset in ''|reset) ;; *) fail_json 400 bad_body "Четвёртая строка - reset или пусто" ;; esac
+    dv_set=""
+    case $dv_reset in
+      ''|reset) ;;
+      set:*) dv_set=${dv_reset#set:}; dv_reset=""; sub_device_hwid_ok "$dv_set" || fail_json 400 bad_hwid "HWID: 10-64 символа - латиница, цифры, = и -" ;;
+      *) fail_json 400 bad_body "Четвёртая строка - reset, set:<HWID> или пусто" ;;
+    esac
     sub_device_text_ok "$dv_os" || fail_json 400 bad_os "ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_text_ok "$dv_ver" || fail_json 400 bad_os_ver "Версия ОС: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_text_ok "$dv_model" || fail_json 400 bad_model "Модель: от 1 до 64 символов, без кавычек и обратной косой черты"
     sub_device_peek
     SUB_DEVICE_OS=$dv_os SUB_OS_VER=$dv_ver SUB_DEVICE_MODEL=$dv_model
-    if [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
+    if [ -n "$dv_set" ]; then
+      SUB_HWID=$dv_set
+    elif [ "$dv_reset" = reset ] || [ -z "$SUB_HWID" ]; then
       SUB_HWID=$(sub_device_new_hwid) || fail_json 500 no_hwid "Не удалось сгенерировать HWID устройства"
     fi
     target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"

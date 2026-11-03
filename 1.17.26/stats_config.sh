@@ -272,10 +272,11 @@ make_backup() {
   while [ -e "$CONFIG_BACKUP_DIR/$name" ]; do name=$base-$n.bak; n=$((n + 1)); done
   cp "$1" "$CONFIG_BACKUP_DIR/$name.tmp" || { rm -f "$CONFIG_BACKUP_DIR/$name.tmp"; return 1; }
   mv -f "$CONFIG_BACKUP_DIR/$name.tmp" "$CONFIG_BACKUP_DIR/$name" || return 1
-  # Лишние старые свои бэкапы - удаляем (имена сортируются по времени).
-  cnt=$(ls "$CONFIG_BACKUP_DIR" 2>/dev/null | grep -c '^config\.yaml\..*\.bak$' || true)
+  # Лишние старые свои распознанные бэкапы удаляем по общей хронологии.
+  cnt=$(backup_rows | awk -F '\t' '$1 == 1 && $4 == "edit" { n++ } END { print n + 0 }')
   if [ "$cnt" -gt "$CONFIG_BACKUP_KEEP" ]; then
-    ls "$CONFIG_BACKUP_DIR" | grep '^config\.yaml\..*\.bak$' | sort | head -n $((cnt - CONFIG_BACKUP_KEEP)) |
+    sorted_backup_rows oldest | awk -F '\t' -v n=$((cnt - CONFIG_BACKUP_KEEP)) \
+      '$1 == 1 && $4 == "edit" && n > 0 { print $5; n-- }' |
       while read -r old; do rm -f "$CONFIG_BACKUP_DIR/$old"; done
   fi
   BACKUP_NAME=$name
@@ -388,7 +389,8 @@ record_schema() {
 }
 
 # Отпечаток управляемых конструктором разделов config.yaml ($1): anchors,
-# proxy-groups, rule-providers, rules (их пересобирает шаблон).
+# proxies, proxy-groups, rule-providers, rules. В отпечаток попадает только
+# необратимый хеш содержимого, значения нод в журнал и ответы не выводятся.
 managed_sig() {
   # Содержимое блоков FAST_WG/FAST_WG_REF ведёт замер скорости (WG-победители),
   # это не ручная правка - маркеры остаются, текст между ними не учитывается.
@@ -396,7 +398,7 @@ managed_sig() {
        /^[ ]*# --- FAST_WG(_REF)?:BEGIN ---($|[ ])/ { print; skip = 1; next }
        /^[ ]*# --- FAST_WG(_REF)?:END ---($|[ ])/ { skip = 0 }
        skip { next }
-       k == "anchors" || k == "proxy-groups" || k == "rule-providers" || k == "rules"' "$1" > "$WORK/managed"
+       k == "anchors" || k == "proxies" || k == "proxy-groups" || k == "rule-providers" || k == "rules"' "$1" > "$WORK/managed"
   fingerprint "$WORK/managed"
 }
 
@@ -407,18 +409,35 @@ state_matches() {
     [ "$(cat "$CONFIG_STATE_DIR/managed.sig")" = "$(managed_sig "$1")" ]
 }
 
-# Замена состояния прервалась между двумя mv (осталась только копия .old) -
-# вернуть её на место. Вызывается перед чтением и перед записью.
+# Пока нужен повторный перенос, прежнее состояние и прерванная замена .old
+# не должны становиться источником следующего применения конструктора.
 recover_state() {
+  [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] || return 0
   if [ ! -d "$CONFIG_STATE_DIR" ] && [ -d "$CONFIG_STATE_DIR.old" ]; then
     mv "$CONFIG_STATE_DIR.old" "$CONFIG_STATE_DIR" 2>/dev/null || true
   fi
 }
 
+# Атомарно заблокировать прежнее состояние после применения конфига, из
+# которого его нельзя безопасно восстановить. Содержимого нод в маркере нет.
+mark_state_reimport() {
+  [ ! -f "$CONFIG_STATE_DIR.needs-reimport" ] || return 0
+  ms_tmp=$CONFIG_STATE_DIR.needs-reimport.tmp.$$
+  if [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] &&
+      printf 'reimport required\n' > "$ms_tmp" 2>/dev/null &&
+      chmod 0600 "$ms_tmp" 2>/dev/null &&
+      mv -f "$ms_tmp" "$CONFIG_STATE_DIR.needs-reimport" 2>/dev/null; then
+    alog "WARN: конфиг применён; конструктор будет перенесён из него заново"
+    return 0
+  fi
+  rm -f "$ms_tmp" 2>/dev/null || true
+  alog "ОШИБКА: конфиг применён, но не удалось заблокировать прежнее состояние конструктора"
+  return 1
+}
+
 # Состояние конструктора из каталога $1 - на место $CONFIG_STATE_DIR:
 # собирается в соседнем .new и меняется местами, managed.sig - от нового
-# config.yaml. 0 - сохранено; сбой - WARN в журнал и 1: конфиг уже применён,
-# ответ должен уйти.
+# config.yaml. Маркер повторного переноса удаляется только после публикации.
 persist_state() {
   recover_state
   ps_new=$CONFIG_STATE_DIR.new
@@ -429,8 +448,12 @@ persist_state() {
     if [ ! -d "$CONFIG_STATE_DIR" ] || mv "$CONFIG_STATE_DIR" "$CONFIG_STATE_DIR.old"; then
       if mv "$ps_new" "$CONFIG_STATE_DIR"; then
         rm -rf "$CONFIG_STATE_DIR.old" 2>/dev/null || true
-        alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
-        return 0
+        if [ ! -e "$CONFIG_STATE_DIR.needs-reimport" ] || rm -f "$CONFIG_STATE_DIR.needs-reimport" 2>/dev/null; then
+          alog "Состояние конструктора сохранено в $CONFIG_STATE_DIR"
+          return 0
+        fi
+        alog "WARN: состояние сохранено, но маркер повторного переноса не удалён"
+        return 1
       fi
       recover_state
     fi
@@ -440,42 +463,50 @@ persist_state() {
   return 1
 }
 
-# Состояния ещё нет, а текст получен «Миграцией к шаблону» (?schema=N):
-# состояние выводится из применённого config.yaml и сохраняется, если сборка
-# из него воспроизводит управляемые разделы. Иначе конструктор при каждом
-# открытии заново выводил бы его из config.yaml и показывал те же правки
-# («Убрать сервис …») несохранёнными.
-adopt_imported_state() {
-  [ -n "$(query_param schema)" ] || return 0
-  [ -f "$CONSTRUCTOR_BUILD" ] && [ -f "$CONFIG_TO_STATE_AWK" ] && [ -f "$CONSTRUCTOR_DEFAULTS" ] || return 0
-  ai_t=$(config_target) || return 0
-  ai_dir=$WORK/adopt
-  rm -rf "$ai_dir"; mkdir "$ai_dir" || return 0
-  awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$ai_dir" \
-      -v report="$WORK/adopt.report" -f "$CONFIG_TO_STATE_AWK" "$ai_t" > /dev/null 2>&1 || return 0
-  sh "$CONSTRUCTOR_BUILD" --state "$ai_dir" --source "$ai_t" --output "$WORK/adopt.yaml" \
-    --report "$WORK/adopt.build.report" > /dev/null 2>&1 || return 0
-  [ "$(managed_sig "$ai_t")" = "$(managed_sig "$WORK/adopt.yaml")" ] || return 0
-  persist_state "$ai_dir" || return 0
+# Разобрать кандидата $1 во временное состояние и убедиться, что контрольная
+# сборка воспроизводит все управляемые разделы, включая собственные ноды.
+prepare_restore_state() {
+  [ -f "$CONSTRUCTOR_BUILD" ] && [ -f "$CONFIG_TO_STATE_AWK" ] && [ -f "$CONSTRUCTOR_DEFAULTS" ] || return 1
+  RESTORE_STATE_DIR=$WORK/restored-state
+  rm -rf "$RESTORE_STATE_DIR"
+  mkdir "$RESTORE_STATE_DIR" || return 1
+  awk -v defaults="$CONSTRUCTOR_DEFAULTS" -v template="$CONFIG_TEMPLATE" -v out_dir="$RESTORE_STATE_DIR" \
+      -v report="$WORK/restored-state.report" -f "$CONFIG_TO_STATE_AWK" "$1" > /dev/null 2>&1 || return 1
+  if grep -q '^REVIEW|' "$WORK/restored-state.report"; then return 1; fi
+  sh "$CONSTRUCTOR_BUILD" --state "$RESTORE_STATE_DIR" --source "$1" --output "$WORK/restored-state.yaml" \
+    --report "$WORK/restored-state.build.report" > /dev/null 2>&1 || return 1
+  [ "$(managed_sig "$1")" = "$(managed_sig "$WORK/restored-state.yaml")" ]
 }
 
-# Вызывается после каждого успешного применения (в том числе "не
-# изменился"), рядом с record_schema. По умолчанию: если состояние
-# конструктора есть и применённый config.yaml совпадает со сборкой из него
-# (например, после "Миграции к шаблону"), managed.sig обновляется - иначе
-# конструктор считал бы такую миграцию ручной правкой. stats_constructor.sh
-# переопределяет (пишет само состояние).
-after_apply_ok() {
-  if [ ! -f "$CONFIG_STATE_DIR/services.tsv" ]; then adopt_imported_state; return 0; fi
-  [ -f "$CONSTRUCTOR_BUILD" ] || return 0
-  aa_t=$(config_target) || return 0
-  sh "$CONSTRUCTOR_BUILD" --state "$CONFIG_STATE_DIR" --source "$aa_t" --output "$WORK/sigcheck.yaml" \
-    --report "$WORK/sigcheck.report" > /dev/null 2>&1 || return 0
-  aa_sig=$(managed_sig "$aa_t")
-  [ "$aa_sig" = "$(managed_sig "$WORK/sigcheck.yaml")" ] || return 0
-  if printf '%s' "$aa_sig" > "$CONFIG_STATE_DIR/managed.sig.new" && mv -f "$CONFIG_STATE_DIR/managed.sig.new" "$CONFIG_STATE_DIR/managed.sig"; then
-    alog "Конфиг совпадает с настройками конструктора"
+# Конфиг уже применён: опубликовать представимое состояние либо запретить
+# чтение прежнего. 0 - ok, 1 - reimport_required, 2 - failed.
+sync_restored_state() {
+  if prepare_restore_state "$1" && persist_state "$RESTORE_STATE_DIR"; then
+    STATE_SYNC=ok
+    return 0
   fi
+  if mark_state_reimport; then
+    STATE_SYNC=reimport_required
+    return 1
+  fi
+  STATE_SYNC=failed
+  return 2
+}
+
+# После restore состояние выводится из фактического конфига всегда. После
+# save - если оно уже было либо текст получен миграцией к шаблону. Обычный
+# save без состояния не создаёт его. stats_constructor.sh пишет NEW_STATE.
+after_apply_ok() {
+  aa_t=$(config_target) || return 0
+  case ${MST_CONFIG_ACTION:-} in
+    restore|restore-working) sync_restored_state "$aa_t" || : ;;
+    *)
+      if [ -f "$CONFIG_STATE_DIR/services.tsv" ] || [ -n "$(query_param schema)" ]; then
+        sync_restored_state "$aa_t" || :
+      else
+        STATE_SYNC=ok
+      fi ;;
+  esac
   return 0
 }
 
@@ -504,7 +535,7 @@ apply_candidate() {
     alog "Конфиг не изменился - запись и перезапуск не нужны"
     record_schema
     after_apply_ok
-    printf '{"ok":true,"unchanged":true,"base":"%s"}\n' "$(fingerprint "$target")" > "$WORK/resp"
+    printf '{"ok":true,"unchanged":true,"state_sync":"%s","base":"%s"}\n' "$STATE_SYNC" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   backup=
@@ -520,7 +551,7 @@ apply_candidate() {
     alog "ГОТОВО: конфиг применён, ядро перезапущено"
     record_schema
     after_apply_ok
-    printf '{"ok":true,"backup":%s,"restarted":true,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
+    printf '{"ok":true,"backup":%s,"restarted":true,"restored":%s,"state_sync":"%s","base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$STATE_SYNC" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   if [ "$rrc" = 2 ]; then
@@ -528,7 +559,7 @@ apply_candidate() {
     alog "ГОТОВО: конфиг записан, ядро не перезапускалось"
     record_schema
     after_apply_ok
-    printf '{"ok":true,"backup":%s,"restarted":false,"restored":%s,"base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$(fingerprint "$target")" > "$WORK/resp"
+    printf '{"ok":true,"backup":%s,"restarted":false,"restored":%s,"state_sync":"%s","base":"%s"}\n' "$(jstr "$backup")" "$(jstr "$RESTORED_NAME")" "$STATE_SYNC" "$(fingerprint "$target")" > "$WORK/resp"
     reply 200 "$WORK/resp"
   fi
   rolled=false
@@ -557,10 +588,9 @@ backup_path() {
   printf '%s\n' "$p"
 }
 
-# Список бэкапов: "kind<TAB>name<TAB>путь", от старых к новым. Сортировка по
-# отметке времени в имени (config.yaml.YYYY-MM-DD_HHMMSS[-N].bak) - она
-# одинаковая у своих бэкапов и у бэкапов setup.sh/uninstall.sh.
-list_backups() {
+# Внутренние поля: распознанность, YYYYMMDDHHMMSS, номер копии, затем
+# "kind<TAB>name<TAB>путь". Отсутствие суффикса означает первую копию.
+backup_rows() {
   {
     for p in "$CONFIG_BACKUP_DIR"/config.yaml.*.bak; do
       [ -f "$p" ] && printf 'edit\t%s\t%s\n' "${p##*/}" "$p"
@@ -568,7 +598,43 @@ list_backups() {
     for p in "$CONFIG".*.bak; do
       [ -f "$p" ] && printf 'setup\t%s\t%s\n' "${p##*/}" "$p"
     done
-  } | LC_ALL=C sort -t "$(printf '\t')" -k2,2
+  } | LC_ALL=C awk -F '\t' '
+    function leap(y) { return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) }
+    function valid_date(y, m, d, days) {
+      if (y < 1 || m < 1 || m > 12 || d < 1) return 0
+      split("31 28 31 30 31 30 31 31 30 31 30 31", days, " ")
+      if (m == 2) days[m] += leap(y)
+      return d <= days[m]
+    }
+    BEGIN {
+      pattern = "^config\\.yaml\\.[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9](-[0-9]+)?\\.bak$"
+    }
+    {
+      name = $2; known = 0; stamp = 0; sequence = 0
+      if (name ~ pattern) {
+        y = substr(name, 13, 4) + 0; m = substr(name, 18, 2) + 0
+        d = substr(name, 21, 2) + 0; hh = substr(name, 24, 2) + 0
+        mm = substr(name, 26, 2) + 0; ss = substr(name, 28, 2) + 0
+        suffix = substr(name, 30)
+        if (suffix == ".bak") sequence = 1
+        else { sequence = substr(suffix, 2); sub(/\.bak$/, "", sequence); sequence += 0 }
+        if (sequence >= 1 && valid_date(y, m, d) && hh <= 23 && mm <= 59 && ss <= 59) {
+          known = 1; stamp = sprintf("%04d%02d%02d%02d%02d%02d", y, m, d, hh, mm, ss)
+        } else sequence = 0
+      }
+      print known "\t" stamp "\t" sequence "\t" $0
+    }'
+}
+
+sorted_backup_rows() {
+  tab=$(printf '\t')
+  case ${1:-newest} in oldest) direction=n ;; *) direction=nr ;; esac
+  backup_rows | LC_ALL=C sort -t "$tab" -k1,1nr "-k2,2$direction" "-k3,3$direction" -k4,4 -k5,5
+}
+
+# По умолчанию сначала новые. Нераспознанные имена всегда в конце по имени.
+list_backups() {
+  sorted_backup_rows "${1:-newest}" | awk -F '\t' '{ print $4 "\t" $5 "\t" $6 }'
 }
 
 # ----- починка -----
@@ -684,7 +750,7 @@ cmd_restore_working() {
   target=$(config_target) || fail_json 500 config_path "Не удалось определить путь конфига"
   acquire_lock
   apply_log_start "Откат к рабочему бэкапу"
-  list_backups > "$WORK/list"
+  list_backups newest > "$WORK/list"
   tried=0
   while IFS="$(printf '\t')" read -r kind name path; do
     [ "$tried" -lt "$RESTORE_WORKING_MAX" ] || break
