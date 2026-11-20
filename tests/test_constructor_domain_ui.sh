@@ -52,7 +52,7 @@ globalThis.document = {
 };
 globalThis.window = { pageYOffset: 0, pageXOffset: 0, scrollTo() {} };
 globalThis.fetch = async () => ({ ok: true, json: async () => ({
-  defaults: 'section\tother\tПрочее\nsvc\tweb\tWeb\tother\n',
+  defaults: 'section\tother\tПрочее\nsvc\tweb\tWeb\tother\nicon\tweb\thttps://example.org/web.svg\nsvc\tempty\tEmpty\tother\n',
   services: 'dom\tweb\tsuffix\tfirst.example\ndom\tweb\tfull\tsecond.example\n',
   user_rules: '', template_base: '', subscriptions: '', proxies: '',
   geofilter: '', geofilter_default: '', block: ''
@@ -66,6 +66,14 @@ function field(value) { return one(app, n => n.tag === 'input' && n.attrs['aria-
 function row(value) { return field(value).parentNode; }
 function action(value, title) { return one(row(value), n => n.tag === 'button' && n.textContent === title, 'нет кнопки ' + title + ' для ' + value); }
 function assert(value, message) { if (!value) { throw new Error(message); } }
+let serviceName = one(app, n => n.className === 'xk-val cx-service-name' && n.textContent === 'Web', 'нет имени сервиса');
+let icon = one(serviceName, n => n.tag === 'img', 'нет иконки сервиса');
+assert(icon.src === 'https://example.org/web.svg' && icon.alt === '', 'иконка берётся из модели и не дублирует имя');
+icon.fire('error');
+assert(icon.hidden, 'ошибка загрузки скрывает изображение');
+assert(serviceName.children[0].className.includes('cx-service-icon'), 'при ошибке остаётся нейтральный значок');
+let emptyName = one(app, n => n.className === 'xk-val cx-service-name' && n.textContent === 'Empty', 'нет сервиса без иконки');
+assert(all(emptyName, n => n.tag === 'img').length === 0 && emptyName.children[0].className.includes('cx-service-icon'), 'сервис без адреса получает нейтральный значок');
 let input = field('first.example');
 assert(input.value === 'first.example', 'существующий домен показан в поле');
 let save = action('first.example', 'Сохранить');

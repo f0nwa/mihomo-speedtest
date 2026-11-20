@@ -466,7 +466,19 @@ export function renderConstructor(modeBar, opts) {
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
       var doms = model.domains(s.id).filter(function (d) { return !d.removed; }).length;
       var rules = model.sources(s.id).length + (s.user ? 0 : model.rules(s.id).filter(function (x) { return !x.removed; }).length);
-      r.appendChild(el('span', 'xk-val', s.name));
+      var name = el('span', 'xk-val cx-service-name');
+      var icon = el('span', 'cx-service-icon');
+      icon.setAttribute('aria-hidden', 'true');
+      var iconUrl = model.serviceIcon(s.id);
+      if (iconUrl) {
+        var img = el('img'); img.alt = '';
+        icon.className += ' has-image';
+        img.addEventListener('error', function () { img.hidden = true; icon.className = 'cx-service-icon'; });
+        img.src = iconUrl; icon.appendChild(img);
+      }
+      name.appendChild(icon);
+      name.appendChild(document.createTextNode(s.name));
+      r.appendChild(name);
       r.appendChild(el('span', 'geo-code', (s.user ? 'свой · ' : '') + 'доменов: ' + doms + ', наборов и правил: ' + rules +
         (model.blockQuic(s.id) ? ' · QUIC заблокирован' : '')));
       if (!s.deleted) {
