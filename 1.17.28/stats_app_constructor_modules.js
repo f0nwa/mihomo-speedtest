@@ -438,7 +438,11 @@ var CUSTOM_UA = '__custom__';
 // hwidBox (необязательно) - флажок «HWID устройства» (hwidCheck): подбор
 // отмечает его, если панель без данных устройства отдала заглушку, и
 // проверка нод идёт с ними.
-export function uaField(value, getUrl, hwidBox) {
+// extra (необязательно): noteHost - куда выводить итоги подбора (иначе в
+// само поле), button - своя кнопка подбора вместо встроенной «Определить»,
+// onDone(d) - после подбора (d - ответ detect-ua или null при сбое).
+// wrap.detect() запускает подбор.
+export function uaField(value, getUrl, hwidBox, extra) {
   var wrap = el('span', 'cx-ua');
   var sel = el('select');
   sel.setAttribute('aria-label', 'User-Agent');
@@ -457,7 +461,7 @@ export function uaField(value, getUrl, hwidBox) {
   set(value);
   wrap.appendChild(sel); wrap.appendChild(custom);
   wrap.value = function () { return sel.value === CUSTOM_UA ? custom.value.trim() : sel.value; };
-  if (getUrl) { addDetect(wrap, getUrl, set, hwidBox); }
+  if (getUrl) { wrap.detect = addDetect(wrap, getUrl, set, hwidBox, extra || {}); }
   return wrap;
 }
 
@@ -478,13 +482,18 @@ export function hwidCheck(checked) {
 // отвечают ли ноды выбранным UA (подписка качается ещё раз, ноды проверяет
 // временное ядро); кнопка занята, пока идёт то и другое. Адрес уходит телом
 // POST - ключ доступа не попадает в строку запроса и журналы.
-function addDetect(wrap, getUrl, setUa, hwidBox) {
-  var btn = button('Определить', 'small muted');
+function addDetect(wrap, getUrl, setUa, hwidBox, opts) {
+  var own = !opts.button;
+  var btn = opts.button || button('Определить', 'small muted');
+  var btnText = btn.textContent;
   btn.title = 'Проверить адрес под разными User-Agent, выбрать подходящий и проверить, отвечают ли ноды';
   var note = el('div', 'hint cx-ua-note');
   var probe = el('div', 'hint cx-ua-note');
   note.hidden = true; probe.hidden = true;
-  wrap.appendChild(btn); wrap.appendChild(note); wrap.appendChild(probe);
+  var host = opts.noteHost || wrap;
+  if (own) { wrap.appendChild(btn); }
+  host.appendChild(note); host.appendChild(probe);
+  var done = opts.onDone || function () {};
 
   function put(node, text, kind) {
     clear(node);
@@ -516,12 +525,14 @@ function addDetect(wrap, getUrl, setUa, hwidBox) {
     }
   }
 
-  btn.addEventListener('click', function () {
+  function run() {
     var url = (getUrl() || '').trim();
     if (!url) { say('Сначала введите адрес подписки.', 'msg-err-text'); return; }
+    var found = null;
     btn.disabled = true; btn.textContent = 'Проверяю...';
     say('Перебираю User-Agent, это может занять до нескольких минут.', '');
     post('/api/constructor/detect-ua', url).then(function (d) {
+      found = d;
       var tried = d.tried || [];
       if (!d.ua) {
         if (d.reason === 'unreachable') {
@@ -533,20 +544,29 @@ function addDetect(wrap, getUrl, setUa, hwidBox) {
         return null;
       }
       setUa(d.ua);
-      if (hwidBox) { hwidBox.box.checked = !!d.hwid; }
+      // Подбор только включает HWID, когда панель его требует; отметку,
+      // поставленную вручную, не снимает.
+      if (hwidBox && d.hwid) { hwidBox.box.checked = true; }
       var hw = d.hwid ? ' Панель требует HWID устройства - включён.' : '';
       say((d.quality === 'short'
         ? 'Выбран ' + d.ua + ': панель отдаёт только укороченный YAML, после применения сверьте набор нод.'
         : 'Выбран ' + d.ua + ': ' + d.kind + '.') + hw, d.quality === 'short' ? '' : 'msg-ok-text');
       put(probe, 'Проверяю, отвечают ли ноды...', '');
       // Сбой самой проверки нод не отменяет найденный User-Agent.
-      return post('/api/constructor/probe-nodes', url + '\n' + d.ua + (d.hwid ? '\nhwid' : '')).then(verdict, function (err) {
+      var withHwid = d.hwid || (hwidBox && hwidBox.box.checked);
+      return post('/api/constructor/probe-nodes', url + '\n' + d.ua + (withHwid ? '\nhwid' : '')).then(verdict, function (err) {
         put(probe, 'Проверить, отвечают ли ноды, не удалось: ' + errText(err), '');
       });
     }, function (err) {
       say('Не удалось определить: ' + errText(err), 'msg-err-text');
-    }).then(function () { btn.disabled = false; btn.textContent = 'Определить'; });
-  });
+    }).then(function () {
+      btn.disabled = false;
+      if (own) { btn.textContent = btnText; }
+      done(found);
+    });
+  }
+  if (own) { btn.addEventListener('click', run); }
+  return run;
 }
 
 // ----- устройство для панелей подписок с лимитом устройств (HWID) -----
@@ -826,27 +846,48 @@ export function createModuleCards(ctx) {
     list.forEach(function (s) { rows.appendChild(subRow(s)); });
     if (!list.length) { rows.appendChild(el('div', 'xk-empty', 'Подписок нет.')); }
     subsHost.appendChild(rows);
-    var add = el('div', 'cx-editor');
+    // Новая подписка: сначала «Определить» (основная кнопка), после
+    // подбора - успешного или нет - она становится «Добавить подписку»;
+    // новый адрес снова требует подбора, но добавить можно и без него
+    // («Добавить без проверки»).
+    var add = el('div', 'cx-editor cx-sub-add');
     var url = el('input'); url.type = 'text'; url.placeholder = 'https://...'; url.setAttribute('aria-label', 'Адрес новой подписки');
     var name = el('input'); name.type = 'text'; name.placeholder = 'имя (необязательно)'; name.setAttribute('aria-label', 'Имя подписки');
     var hw = hwidCheck(false);
-    var ua = uaField(UA_PRESETS[0], function () { return url.value; }, hw);
-    var btn = button('Добавить подписку', 'submit');
-    btn.addEventListener('click', function () {
-      ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value, hw.box.checked); });
+    var main = button('Определить', 'submit');
+    var skip = button('Добавить без проверки', 'small muted');
+    var notes = el('div', 'cx-sub-add-notes');
+    var detected = false;
+    function stage(isDetected) {
+      detected = isDetected;
+      main.textContent = detected ? 'Добавить подписку' : 'Определить';
+      main.title = detected ? '' : 'Роутер проверит адрес под разными User-Agent, выберет подходящий и проверит, отвечают ли ноды';
+      skip.hidden = detected;
+    }
+    var ua = uaField(UA_PRESETS[0], function () { return url.value; }, hw, {
+      button: main, noteHost: notes, onDone: function () { stage(true); }
     });
-    url.addEventListener('keydown', function (e) { if (e.key === 'Enter') { btn.click(); } });
+    function doAdd() { ctx.edit(function () { mods.addSub(url.value, ua.value(), name.value, hw.box.checked); }); }
+    main.addEventListener('click', function () { if (detected) { doAdd(); } else { ua.detect(); } });
+    skip.addEventListener('click', doAdd);
+    url.addEventListener('input', function () { if (detected) { stage(false); } });
+    url.addEventListener('keydown', function (e) { if (e.key === 'Enter') { main.click(); } });
     add.appendChild(el('div', 'geo-group-title', 'Новая подписка'));
     add.appendChild(url);
-    var row = el('div', 'xk-add');
-    row.appendChild(name); row.appendChild(ua); row.appendChild(hw); row.appendChild(btn);
+    var row = el('div', 'xk-add cx-sub-add-row');
+    row.appendChild(name); row.appendChild(ua); row.appendChild(hw);
     add.appendChild(row);
+    add.appendChild(notes);
+    var acts = el('div', 'xk-add cx-sub-add-acts');
+    acts.appendChild(main); acts.appendChild(skip);
+    add.appendChild(acts);
+    stage(false);
     subsHost.appendChild(add);
   }
 
   // ----- прокси (ноды, добавленные вручную, не из подписок) -----
   var proxBlk = ctx.layout.add(2, 'Прокси'), proxCard = proxBlk.body;
-  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
+  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, TrustTunnel, WireGuard/AmneziaWG). ' +
     'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются. ' +
     'Поле справа от имени - провайдер ноды в статистике (пусто - по имени до первого «_»); сохраняется сразу, без «Применить». ' +
     'Нескольким нодам сразу - отметьте их галочками и задайте провайдера в строке над списком.'));
@@ -859,7 +900,7 @@ export function createModuleCards(ctx) {
   // имя было занято и изменилось ("hy2 → hy2 nl.example").
   function addPasted(text) {
     var t = String(text || '');
-    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://) или YAML'); }
+    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://, tt://) или YAML'); }
     if (/^\s*-\s/m.test(t) || /^\s*name:/m.test(t)) {
       var orig = proxiesFromYaml(t).map(function (p) { return p.name; });
       var got = mods.addProxyYaml(t);
@@ -893,7 +934,7 @@ export function createModuleCards(ctx) {
   var provDraft = '';
   fetchJson('/api/node-providers').then(function (r) {
     provManual = (r && r.manual) || {};
-    renderProxies();
+    if (!editingProxy) { renderProxies(); }
   }, function () {});
   function provGuess(name) {
     var i = name.indexOf('_');
@@ -912,6 +953,166 @@ export function createModuleCards(ctx) {
     }, function (e) { ctx.msg('Провайдер не сохранён: ' + errText(e), 'err'); });
   }
 
+  var editingProxy = null;
+
+  function proxyEditor(p) {
+    var r = el('div', 'xk-row cx-row cx-proxy-editor');
+    var opts = mods.proxyOptions(p.name);
+    var mtu, mtuRemove, keepOn, keep, transport, fingerprint;
+    r.appendChild(el('div', 'geo-group-title', 'Изменение ноды ' + p.name));
+    r.appendChild(el('p', 'hint', 'Обычная форма меняет только перечисленные поля и сохраняет остальной YAML. Расширенный редактор принимает одну запись с прежними name и type. «Готово» меняет черновик, применение конфига остаётся общим.'));
+    var activeTab = 'simple';
+    var tabs = el('div', 'xk-mode cx-proxy-tabs');
+    var simpleTab = button('Обычные поля'), yamlTab = button('Расширенный YAML');
+    simpleTab.setAttribute('aria-pressed', 'true'); yamlTab.setAttribute('aria-pressed', 'false');
+    tabs.appendChild(simpleTab); tabs.appendChild(yamlTab); r.appendChild(tabs);
+    var simpleStart = r.children.length;
+
+    if (p.type === 'wireguard') {
+      r.appendChild(el('label', null, 'MTU'));
+      mtu = el('input'); mtu.type = 'number'; mtu.value = opts.mtu.value;
+      mtu.disabled = !opts.mtu.supported;
+      mtu.setAttribute('aria-label', 'MTU ноды ' + p.name);
+      r.appendChild(mtu);
+      var mtuDelete = el('label', 'cx-hwid');
+      mtuRemove = el('input'); mtuRemove.type = 'checkbox';
+      mtuRemove.disabled = !opts.mtu.present || !opts.mtu.supported;
+      mtuRemove.setAttribute('aria-label', 'Удалить поле MTU');
+      mtuRemove.addEventListener('change', function () { mtu.disabled = mtuRemove.checked || !opts.mtu.supported; });
+      mtuDelete.appendChild(mtuRemove);
+      mtuDelete.appendChild(document.createTextNode(' Удалить поле, использовать значение Mihomo по умолчанию'));
+      r.appendChild(mtuDelete);
+      var mtuSaved = button('Как в сохранённом конфиге', 'small muted');
+      mtuSaved.setAttribute('aria-label', 'Вернуть сохранённый MTU');
+      mtuSaved.addEventListener('click', function () {
+        mtu.value = opts.mtu.value; mtuRemove.checked = false; mtu.disabled = !opts.mtu.supported;
+      });
+      r.appendChild(mtuSaved);
+      r.appendChild(el('p', 'hint', opts.mtu.supported
+        ? 'Целое число ' + (opts.ipv6 ? '1280' : '576') + '-65535' + (opts.ipv6 ? ': у ноды есть локальный IPv6.' : '.') + ' Пустое поле не означает удаление.'
+        : 'Поле MTU имеет сложную структуру. Обычная форма его не меняет.'));
+
+      var keepLabel = el('label', 'cx-hwid');
+      keepOn = el('input'); keepOn.type = 'checkbox';
+      keepOn.checked = opts.keepalive.present && opts.keepalive.value !== '0';
+      keepOn.disabled = !opts.keepalive.supported;
+      keepOn.setAttribute('aria-label', 'Включить Persistent Keepalive');
+      keepLabel.appendChild(keepOn);
+      keepLabel.appendChild(document.createTextNode(' Persistent Keepalive'));
+      r.appendChild(keepLabel);
+      keep = el('input'); keep.type = 'number';
+      keep.value = keepOn.checked ? opts.keepalive.value : '';
+      keep.disabled = !keepOn.checked || !opts.keepalive.supported;
+      keep.setAttribute('aria-label', 'Keepalive ноды ' + p.name);
+      keepOn.addEventListener('change', function () { keep.disabled = !keepOn.checked || !opts.keepalive.supported; });
+      r.appendChild(keep);
+      var keepSaved = button('Как в сохранённом конфиге', 'small muted');
+      keepSaved.setAttribute('aria-label', 'Вернуть сохранённый Keepalive');
+      keepSaved.addEventListener('click', function () {
+        keepOn.checked = opts.keepalive.present && opts.keepalive.value !== '0';
+        keep.value = keepOn.checked ? opts.keepalive.value : '';
+        keep.disabled = !keepOn.checked || !opts.keepalive.supported;
+      });
+      r.appendChild(keepSaved);
+      r.appendChild(el('p', 'hint', opts.keepalive.supported
+        ? 'Интервал 1-65535 секунд. Выключение удаляет поле; сохранённый 0 без изменений остаётся как есть.'
+        : 'Поле persistent-keepalive имеет сложную структуру. Обычная форма его не меняет.'));
+    } else if (p.type === 'trusttunnel') {
+      r.appendChild(el('label', null, 'Транспорт'));
+      transport = el('select');
+      transport.disabled = !opts.quic.supported;
+      transport.setAttribute('aria-label', 'Транспорт TrustTunnel');
+      [['h2', 'HTTP/2'], ['h3', 'QUIC (HTTP/3)']].forEach(function (item) {
+        var option = el('option', null, item[1]); option.value = item[0]; transport.appendChild(option);
+      });
+      transport.value = opts.quic.value ? 'h3' : 'h2';
+      r.appendChild(transport);
+
+      r.appendChild(el('label', null, 'Client Fingerprint'));
+      fingerprint = el('select');
+      fingerprint.setAttribute('aria-label', 'Client Fingerprint');
+      function option(value, text) { var item = el('option', null, text); item.value = value; fingerprint.appendChild(item); }
+      option('__saved__', 'Как в сохранённом конфиге');
+      option('__absent__', 'Не задан');
+      var presets = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'];
+      presets.forEach(function (value) { option(value, value); });
+      if (opts.fingerprint.present && opts.fingerprint.supported && presets.indexOf(opts.fingerprint.value) < 0) {
+        option('__custom__', 'Пользовательский: ' + opts.fingerprint.value);
+      }
+      if (!opts.fingerprint.present) { fingerprint.value = '__absent__'; }
+      else if (opts.fingerprint.supported && presets.indexOf(opts.fingerprint.value) >= 0) { fingerprint.value = opts.fingerprint.value; }
+      else if (opts.fingerprint.supported) { fingerprint.value = '__custom__'; }
+      else { fingerprint.value = '__saved__'; }
+      function fingerprintState() {
+        fingerprint.disabled = transport.value === 'h3' || !opts.fingerprint.supported;
+      }
+      transport.addEventListener('change', fingerprintState);
+      fingerprintState();
+      r.appendChild(fingerprint);
+      r.appendChild(el('p', 'hint', 'В Mihomo 1.19.32 fingerprint используется для HTTP/2 и не применяется к QUIC. При переходе на QUIC сохранённый профиль остаётся в YAML. ALPN форма не меняет: для HTTP/2 нужен h2, для QUIC - h3.'));
+    }
+
+    var simpleNodes = Array.prototype.slice.call(r.children, simpleStart);
+    var yamlHint = el('p', 'hint', 'Одна блочная запись, name первым ключом. Разрешены вложенные блоки, однострочные flow-коллекции и скаляры |/>. Anchors, aliases, теги, директивы и повторы ключей не поддерживаются.');
+    yamlHint.hidden = true; r.appendChild(yamlHint);
+    var yaml = el('textarea', 'xk-text cx-proxy-yaml');
+    yaml.rows = 18; yaml.spellcheck = false; yaml.hidden = true;
+    yaml.value = mods.getProxyYaml(p.name);
+    yaml.setAttribute('aria-label', 'YAML ноды ' + p.name);
+    r.appendChild(yaml);
+    function showTab(advanced) {
+      activeTab = advanced ? 'yaml' : 'simple';
+      simpleNodes.forEach(function (node) { node.hidden = advanced; });
+      yamlHint.hidden = !advanced; yaml.hidden = !advanced;
+      simpleTab.setAttribute('aria-pressed', advanced ? 'false' : 'true');
+      yamlTab.setAttribute('aria-pressed', advanced ? 'true' : 'false');
+    }
+    simpleTab.addEventListener('click', function () { showTab(false); });
+    yamlTab.addEventListener('click', function () { showTab(true); });
+
+    var actions = el('div', 'xk-add');
+    var done = button('Готово', 'submit'), cancel = button('Отмена', 'submit secondary');
+    done.addEventListener('click', function () {
+      if (activeTab === 'yaml') {
+        ctx.edit(function () { mods.replaceProxyYaml(p.name, yaml.value, { advanced: true }); editingProxy = null; });
+        return;
+      }
+      var patch = {};
+      try {
+        if (p.type === 'wireguard') {
+          if (opts.mtu.supported) {
+            if (mtuRemove.checked) {
+              if (opts.mtu.present) { patch.mtu = null; }
+            } else if (mtu.value.trim() !== opts.mtu.value) {
+              if (!mtu.value.trim()) { throw new Error('MTU: введите целое число или отметьте удаление поля'); }
+              patch.mtu = Number(mtu.value);
+            }
+          }
+          if (opts.keepalive.supported) {
+            if (keepOn.checked) {
+              if (!keep.value.trim()) { throw new Error('Persistent Keepalive: введите интервал 1-65535 секунд'); }
+              if (!opts.keepalive.present || keep.value.trim() !== opts.keepalive.value) { patch['persistent-keepalive'] = Number(keep.value); }
+            } else if (opts.keepalive.present && opts.keepalive.value !== '0') {
+              patch['persistent-keepalive'] = null;
+            }
+          }
+        } else if (p.type === 'trusttunnel') {
+          var wantQuic = transport.value === 'h3';
+          if (opts.quic.supported && wantQuic !== opts.quic.value) { patch.quic = wantQuic; }
+          if (fingerprint.value === '__absent__') {
+            if (opts.fingerprint.present) { patch['client-fingerprint'] = null; }
+          } else if (fingerprint.value !== '__saved__' && fingerprint.value !== '__custom__' && fingerprint.value !== opts.fingerprint.value) {
+            patch['client-fingerprint'] = fingerprint.value;
+          }
+        }
+      } catch (e) { ctx.msg(e.message, 'err'); return; }
+      ctx.edit(function () { mods.updateProxyOptions(p.name, patch); editingProxy = null; });
+    });
+    cancel.addEventListener('click', function () { editingProxy = null; render(); });
+    actions.appendChild(done); actions.appendChild(cancel); r.appendChild(actions);
+    return r;
+  }
+
   function renderProxies() {
     clear(proxHost);
     var rows = el('div', 'xk-rows');
@@ -922,6 +1123,7 @@ export function createModuleCards(ctx) {
     });
     if (active.length) { proxHost.appendChild(buildProviderBar(active)); }
     list.forEach(function (p) {
+      if (editingProxy === p.name && !p.removed) { rows.appendChild(proxyEditor(p)); return; }
       var r = el('div', 'xk-row cx-row' + (p.removed ? ' cx-proxy-removed' : ''));
       var pick = el('input'); pick.type = 'checkbox'; pick.disabled = p.removed;
       pick.checked = !!provSel[p.name];
@@ -967,6 +1169,12 @@ export function createModuleCards(ctx) {
       r.appendChild(prov);
       r.appendChild(el('span', 'geo-code', (p.type || '?') + (p.server ? ' · ' + p.server + (p.port ? ':' + p.port : '') : '')));
       if (p.removed) { r.appendChild(el('span', 'cx-proxy-removed-note', 'Убрана')); }
+      if (!p.removed && (p.type === 'wireguard' || p.type === 'trusttunnel')) {
+        var edit = button('Изменить', 'small muted');
+        edit.setAttribute('aria-label', 'Изменить ноду ' + p.name);
+        edit.addEventListener('click', function () { editingProxy = p.name; renderProxies(); });
+        r.appendChild(edit);
+      }
       var rm = button(p.removed ? 'Вернуть' : 'Убрать', 'small muted');
       rm.setAttribute('aria-label', (p.removed ? 'Вернуть ' : 'Убрать ') + p.name);
       rm.addEventListener('click', function () { ctx.edit(function () { if (p.removed) { mods.restoreProxy(p.name); } else { mods.removeProxy(p.name); } }); });
@@ -996,7 +1204,7 @@ export function createModuleCards(ctx) {
 
     var area = el('textarea', 'xk-text');
     area.rows = 3;
-    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess:// (по одной в строке) или YAML ноды';
+    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess://, tt:// (по одной в строке) или YAML ноды';
     area.setAttribute('aria-label', 'Ссылки или YAML нод');
     area.value = proxDraft;
     area.addEventListener('input', function () { proxDraft = area.value; });

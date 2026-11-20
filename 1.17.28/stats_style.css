@@ -273,10 +273,22 @@ label.geo-country.on{border-color:var(--accent);background:#35c7c714}
 .config-diff .diff-gap{color:var(--muted)}
 .config-fixes{margin:4px 0 8px;padding-left:20px;font-size:13px}
 .config-backups{width:100%;border-collapse:collapse;font-size:13px}
+.config-backups th{padding:6px 8px;text-align:left;font-size:12px;font-weight:400;color:var(--muted)}
 .config-backups td{padding:6px 8px;border-top:1px solid var(--border);vertical-align:middle}
+.config-backup-sort{border:0;padding:0;background:none;color:var(--text);font:inherit;cursor:pointer}
+.config-backup-sort:hover{color:var(--accent)}
+.config-backup-sort:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .config-backup-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
 .config-backup-actions .theme-btn{padding:4px 8px;font-size:12px}
-@media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backup-actions{justify-content:flex-start}}
+.config-backup-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin:8px 0}
+.config-backup-filters label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.config-backup-filters input,.config-backup-filters select,.config-backup-filters .theme-btn{font:inherit;font-size:12px}
+.config-backup-filters input[type=date],.config-backup-filters input[type=search]{box-sizing:border-box;height:32px;min-width:0;padding:6px 8px;border:1px solid var(--card-border);border-radius:0;background:var(--bg);color:var(--text);color-scheme:dark}
+.config-backup-filters select{height:32px}
+.config-backup-query{flex:1 1 200px}
+.config-backup-query input{width:100%;min-width:0}
+.config-backup-count{margin-left:auto;padding-bottom:6px;font-size:12px;color:var(--muted)}
+@media (max-width:640px){.config-backups td{display:block;border-top:0;padding:2px 0}.config-backups tr{display:block;border-top:1px solid var(--border);padding:6px 0}.config-backups thead tr{border-top:0}.config-backups thead th:not(:first-child){display:none}.config-backup-actions{justify-content:flex-start}.config-backup-count{margin-left:0}}
 /* Вкладка "Конфиг", YAML: навигатор разделов с поиском слева от редактора,
    полноэкранный режим с окном поиска и замены (createConfigNav() в
    stats_app_config.js). Высота редактора - те же 62vh, что и раньше. */
@@ -452,6 +464,11 @@ button.geo-chip:hover{border-color:var(--accent)}
 /* Строки конструктора: на узком экране имя, подпись и кнопки переносятся. */
 .cx-row{flex-wrap:wrap}
 .cx-row .xk-val{flex:1 1 160px;min-width:0;overflow-wrap:anywhere}
+.cx-service-name{display:flex;align-items:center;gap:8px}
+.cx-service-icon{flex:0 0 24px;width:24px;height:24px;background:var(--muted);mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.9 6h-3a16 16 0 0 0-1.3-3.6A8 8 0 0 1 18.9 8ZM12 4c.8 1 1.5 2.3 1.9 4h-3.8C10.5 6.3 11.2 5 12 4ZM4.3 14a8 8 0 0 1 0-4h3.4a17 17 0 0 0 0 4H4.3Zm.8 2h3a16 16 0 0 0 1.3 3.6A8 8 0 0 1 5.1 16Zm3-8h-3a8 8 0 0 1 4.3-3.6A16 16 0 0 0 8.1 8Zm3.9 12c-.8-1-1.5-2.3-1.9-4h3.8c-.4 1.7-1.1 3-1.9 4Zm2.2-6H9.8a15 15 0 0 1 0-4h4.4a15 15 0 0 1 0 4Zm.4 5.6a16 16 0 0 0 1.3-3.6h3a8 8 0 0 1-4.3 3.6Zm1.7-5.6a17 17 0 0 0 0-4h3.4a8 8 0 0 1 0 4h-3.4Z'/%3E%3C/svg%3E") center/contain no-repeat}
+.cx-service-icon.has-image{background:none;mask:none}
+.cx-service-icon img{display:block;width:100%;height:100%;object-fit:contain}
+.cx-service-icon img[hidden]{display:none}
 .cx-row .geo-code{margin-left:0;flex:0 1 auto}
 .cx-row button{white-space:nowrap}
 /* Окно «Добавить сервис из базы» (openAdd() в stats_app_constructor.js) */
@@ -483,11 +500,22 @@ button.geo-chip:hover{border-color:var(--accent)}
 .cx-editor{display:flex;flex-direction:column;gap:6px;margin:8px 0;padding:8px;background:var(--bg);border:1px solid var(--border)}
 .cx-editor input[type=text],.cx-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
 .cx-editor .xk-add input,.cx-editor .xk-add select{width:auto}
+.cx-proxy-editor{flex-direction:column;align-items:stretch;gap:6px;padding:10px;border-color:var(--accent)}
+.cx-proxy-editor input[type=number],.cx-proxy-editor select{width:100%;box-sizing:border-box;font:inherit;font-size:13px}
+.cx-proxy-editor .hint{margin:0}
+.cx-proxy-editor .xk-add{margin-top:4px}
+.cx-proxy-yaml{width:100%;box-sizing:border-box;resize:vertical;margin:0}
+.cx-proxy-tabs{align-self:flex-start;margin:2px 0 4px}
 .cx-ua{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .cx-ua select,.cx-ua input{font:inherit;font-size:13px}
 .cx-ua-note{flex:1 1 100%;margin:0}
 .cx-ua-note details{margin-top:4px}
 .cx-hwid{display:inline-flex;gap:4px;align-items:center;font-size:13px;white-space:nowrap;cursor:pointer}
+.cx-hwid input,.xk-add .cx-hwid input{flex:0 0 auto;width:auto;margin:0}
+.cx-sub-add-row{align-items:center}
+.cx-sub-add-notes{display:flex;flex-direction:column;gap:4px}
+.cx-sub-add-notes .cx-ua-note{margin:0}
+.cx-sub-add-acts{align-items:center}
 .msg-ok-text{color:#16a34a}
 .cx-num{display:inline-flex;gap:6px;align-items:center;margin:0;font-size:12.5px;color:var(--muted)}
 .cx-num input{width:72px;padding:4px 6px;font:inherit;font-size:13px}

@@ -15,6 +15,22 @@ var catalogPromise = null;   // каталог наборов правил гр�
 var catalogDate = '';        // дата сборки каталога (шапка файла)
 var iconCatalogPromise = null; // каталог иконок загружается только после выбора набора
 
+function constructorApplyResult(r) {
+  var text = r.unchanged
+    ? (r.state_sync === 'ok' ? 'Конфиг не изменился, настройки конструктора сохранены.' : 'Конфиг не изменился.')
+    : ('Применено' + (r.restarted === false ? ' (ядро не перезапускалось - перезапустите XKeen вручную)' : ', ядро перезапущено') +
+       (r.backup ? '. Бэкап прежнего конфига: ' + r.backup : '') + '.');
+  var kind = 'ok';
+  if (r.state_sync === 'reimport_required') {
+    kind = 'warn';
+    text += ' При следующем открытии конструктора появится результат повторного переноса из фактического config.yaml со строками REVIEW.';
+  } else if (r.state_sync === 'failed') {
+    kind = 'err';
+    text += ' Конфиг применён, но устаревшее состояние конструктора не заблокировано. Не применяйте конструктор: удалите config-state по SSH либо восстановите права записи и повторите перенос.';
+  }
+  return { text: text, kind: kind };
+}
+
 function loadCatalog() {
   if (!catalogPromise) {
     catalogPromise = fetchJson('/api/constructor/catalog').then(function (d) { catalogDate = parseCatalogDate(d.text || ''); return parseCatalog(d.text || ''); })
@@ -116,7 +132,7 @@ export function renderConstructor(modeBar, opts) {
       'Перед применением конфиг собирается на роутере и проверяется mihomo -t, текущая версия уходит в бэкап.'));
     var msgBox = el('div');
     head.appendChild(msgBox);
-    if (opts.flash) { msgBox.appendChild(el('p', 'msg-ok', opts.flash)); }
+    if (opts.flash) { msgBox.appendChild(el('p', opts.flashKind === 'err' ? 'msg-err' : (opts.flashKind === 'warn' ? 'hint' : 'msg-ok'), opts.flash)); }
     if (data.manual_edits) {
       var w = el('div', 'geo-warn warn');
       w.appendChild(el('span', 'geo-warn-tag', 'ВНИМАНИЕ'));
@@ -450,7 +466,19 @@ export function renderConstructor(modeBar, opts) {
       var r = el('div', 'xk-row cx-row' + (s.deleted ? ' off cx-service-removed' : ''));
       var doms = model.domains(s.id).filter(function (d) { return !d.removed; }).length;
       var rules = model.sources(s.id).length + (s.user ? 0 : model.rules(s.id).filter(function (x) { return !x.removed; }).length);
-      r.appendChild(el('span', 'xk-val', s.name));
+      var name = el('span', 'xk-val cx-service-name');
+      var icon = el('span', 'cx-service-icon');
+      icon.setAttribute('aria-hidden', 'true');
+      var iconUrl = model.serviceIcon(s.id);
+      if (iconUrl) {
+        var img = el('img'); img.alt = '';
+        icon.className += ' has-image';
+        img.addEventListener('error', function () { img.hidden = true; icon.className = 'cx-service-icon'; });
+        img.src = iconUrl; icon.appendChild(img);
+      }
+      name.appendChild(icon);
+      name.appendChild(document.createTextNode(s.name));
+      r.appendChild(name);
       r.appendChild(el('span', 'geo-code', (s.user ? 'свой · ' : '') + 'доменов: ' + doms + ', наборов и правил: ' + rules +
         (model.blockQuic(s.id) ? ' · QUIC заблокирован' : '')));
       if (!s.deleted) {
@@ -911,10 +939,9 @@ export function renderConstructor(modeBar, opts) {
         if (!alive()) { return; }
         v.dirty = false;
         // перечитать состояние с роутера, сообщение - сверху новой страницы
-        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true, flash: r.unchanged
-          ? 'Конфиг не изменился, настройки конструктора сохранены.'
-          : ('Применено' + (r.restarted === false ? ' (ядро не перезапускалось - перезапустите XKeen вручную)' : ', ядро перезапущено') +
-             (r.backup ? '. Бэкап прежнего конфига: ' + r.backup : '') + '.') });
+        var applied = constructorApplyResult(r);
+        renderConstructor(modeBar, { renderDiff: opts.renderDiff, templateAction: opts.templateAction, again: true,
+          flash: applied.text, flashKind: applied.kind });
       })['catch'](function (e) {
         clear(chOut);
         var d = e.data || {};

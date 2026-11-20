@@ -19,6 +19,17 @@
 function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
 function squote(v) { gsub(/'/, "''", v); return "'" v "'" }
 function is_num(v) { return v ~ /^[0-9]+$/ }
+function is_range(v,   a) {
+  if (is_num(v)) return 1
+  if (v !~ /^[0-9]+-[0-9]+$/) return 0
+  split(v, a, "-"); return a[1] + 0 <= a[2] + 0
+}
+function bool_value(v) {
+  v = tolower(v)
+  if (v ~ /^(on|true|yes|1)$/) return "true"
+  if (v ~ /^(off|false|no|0)$/) return "false"
+  return ""
+}
 function err(name, why) { printf "ERROR|%s|%s\n", name, why >> REPORT; return "" }
 function rep(line) { printf "%s\n", line >> REPORT }
 # "a, b ,c" -> ['a', 'b', 'c']; пустые элементы отбрасываются.
@@ -70,7 +81,7 @@ function in_flow(s, name,   body, j, ch, q, tok) {
 }
 function addcsv(old, v) { v = trim(v); return (old == "" ? v : (v == "" ? old : old ", " v)) }
 # Перевод одного .conf в блок ноды. Ошибка - "" и строка ERROR в отчёте.
-function convert(path, name,   line, first, sect, k, v, key, nif, npeer, f, a, n, i, s, host, port, ip4, ip6, dns, out, awg, AW, nAW) {
+function convert(path, name,   line, first, sect, k, v, key, nif, npeer, f, a, n, i, s, host, port, ip4, ip6, dns, out, awg, AW, nAW, v3) {
   delete f; first = 1; sect = ""; nif = 0; npeer = 0
   while ((getline line < path) > 0) {
     if (first) { sub(/^\357\273\277/, "", line); first = 0 }
@@ -121,6 +132,27 @@ function convert(path, name,   line, first, sect, k, v, key, nif, npeer, f, a, n
     if (!(is_num(f[k]) || (k ~ /^h/ && f[k] ~ /^[0-9]+-[0-9]+$/))) return err(name, "неверное число: " IFKEY[k])
     awg = awg "      " k ": " f[k] "\n"
   }
+  # Новые поля однозначно выбирают движок AWG 3 (включая флаги со значением off).
+  # Старые конфиги AWG 1.x/2.x остаются без явного version.
+  v3 = ""
+  for (i = 1; i <= nV3; i++) {
+    k = V3ORDER[i]
+    if (!(k in f)) continue
+    v = f[k]
+    if (k == "randomtrailers" || k == "disablecookies") {
+      v = bool_value(v)
+      if (v == "") return err(name, "неверное значение: " IFKEY[k])
+    } else {
+      if (k == "headerprotectionkey" ? v == "" : !is_range(v)) return err(name, "неверное значение: " IFKEY[k])
+      v = squote(v)
+    }
+    v3 = v3 "      " V3KEY[k] ": " v "\n"
+  }
+  if (v3 != "") {
+    n = split("j1 j2 j3 itime", a, " ")
+    for (i = 1; i <= n; i++) if (a[i] in f) return err(name, IFKEY[a[i]] " не поддерживается в AmneziaWG 3")
+    awg = "      version: 3\n" awg v3
+  }
   ip4 = ""; ip6 = ""
   n = split(f["address"], a, ",")
   for (i = 1; i <= n; i++) {
@@ -148,6 +180,11 @@ BEGIN {
   # сообщений об ошибке. Остальные ключи - SKIPPED_KEY.
   n = split("privatekey=PrivateKey address=Address dns=DNS mtu=MTU jc=Jc jmin=Jmin jmax=Jmax s1=S1 s2=S2 s3=S3 s4=S4 h1=H1 h2=H2 h3=H3 h4=H4 i1=I1 i2=I2 i3=I3 i4=I4 i5=I5 j1=J1 j2=J2 j3=J3 itime=Itime", t, " ")
   for (i = 1; i <= n; i++) { split(t[i], kv, "="); IFKEY[kv[1]] = kv[2] }
+  nV3 = split("HeaderProtectionKey=header-protection-key ContentPaddingAddition=content-padding-addition RekeyAfterTime=rekey-after-time RekeyTimeout=rekey-timeout RejectAfterTime=reject-after-time KeepaliveTimeout=keepalive-timeout MaxHandshakeAttempts=max-handshake-attempts RandomTrailers=random-trailers DisableCookies=disable-cookies", t, " ")
+  for (i = 1; i <= nV3; i++) {
+    split(t[i], kv, "="); k = tolower(kv[1])
+    IFKEY[k] = kv[1]; V3KEY[k] = kv[2]; V3ORDER[i] = k
+  }
   n = split("publickey presharedkey endpoint allowedips persistentkeepalive", t, " ")
   for (i = 1; i <= n; i++) PEERKEY[t[i]] = 1
   if (REPORT == "") REPORT = "/dev/stderr"
