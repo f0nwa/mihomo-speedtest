@@ -266,19 +266,27 @@ function json_node_stability(path,
 # render_json() - собирает и печатает один JSON-объект целиком (см. шапку
 # файла). Использует уже заполненные основным телом скрипта глобальные
 # epoch[1..n]/iso[1..n]/channel[1..n]/threshold[1..n]/total[1..n]/
-# alive[1..n]/tested[1..n]/good[1..n]/winners[1..n].
+# alive[1..n]/tested[1..n]/good[1..n]/winners[1..n]/status[1..n].
 function render_json(   i) {
   print "{"
   printf "\"generated\":%s,\n", json_str(generated)
   printf "\"runs\":{\"count\":%d,\"series\":[", n
   for (i = 1; i <= n; i++) {
-    printf "%s{\"epoch\":%d,\"iso\":%s,\"channel_bytes\":%d,\"threshold_bytes\":%d,\"total\":%d,\"alive\":%d,\"tested\":%d,\"good\":%d,\"winners\":%d}", \
-      (i > 1 ? "," : ""), epoch[i], json_str(iso[i]), channel[i], threshold[i], total[i], alive[i], tested[i], good[i], winners[i]
+    printf "%s{\"epoch\":%d,\"iso\":%s,\"channel_bytes\":%s,\"threshold_bytes\":%s,\"total\":%d,\"alive\":%d,\"tested\":%d,\"good\":%d,\"winners\":%d,\"status\":%s}", \
+      (i > 1 ? "," : ""), epoch[i], json_str(iso[i]), \
+      json_num_or_null(channel[i], has_channel[i]), \
+      json_num_or_null(threshold[i], has_threshold[i]), \
+      total[i], alive[i], tested[i], good[i], winners[i], \
+      json_str(status[i])
   }
   print "]},"
   if (n > 0) {
-    printf "\"last_run\":{\"iso\":%s,\"channel_bytes\":%d,\"threshold_bytes\":%d,\"alive\":%d,\"total\":%d,\"winners\":%d},\n", \
-      json_str(iso[n]), channel[n], threshold[n], alive[n], total[n], winners[n]
+    printf "\"last_run\":{\"iso\":%s,\"channel_bytes\":%s,\"threshold_bytes\":%s,\"alive\":%d,\"total\":%d,\"tested\":%d,\"winners\":%d,\"status\":%s},\n", \
+      json_str(iso[n]), \
+      json_num_or_null(channel[n], has_channel[n]), \
+      json_num_or_null(threshold[n], has_threshold[n]), \
+      alive[n], total[n], tested[n], winners[n], \
+      json_str(status[n])
   } else {
     print "\"last_run\":null,"
   }
@@ -301,15 +309,18 @@ BEGIN {
 
 {
   n++
-  epoch[n] = $1
+  epoch[n] = $1 + 0
   iso[n] = $2
-  channel[n] = $3 + 0
-  threshold[n] = $4 + 0
+  has_channel[n] = ($3 != "" && $3 != "-" && $3 ~ /^[0-9]+$/ && ($3 + 0) >= 0)
+  channel[n] = has_channel[n] ? ($3 + 0) : 0
+  has_threshold[n] = ($4 != "" && $4 != "-" && $4 ~ /^[0-9]+$/ && ($4 + 0) >= 0)
+  threshold[n] = has_threshold[n] ? ($4 + 0) : 0
   total[n] = $5 + 0
   alive[n] = $6 + 0
   tested[n] = $7 + 0
   good[n] = $8 + 0
   winners[n] = $9 + 0
+  status[n] = ($10 != "" ? $10 : "ok")
 }
 
 END {

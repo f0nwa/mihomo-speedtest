@@ -590,6 +590,14 @@ mkdir -p "$RHDIR/opt/zash"
   [ -f "$STATS_JSON" ] || exit 85
   grep -q '"node_history"' "$STATS_JSON" || exit 86
   if [ -e "$STATS_HTML" ]; then exit 87; fi
+
+  # Последняя строка должна содержать 10 полей со статусом ok по умолчанию
+  tail -1 "$HISTORY_RUNS" | grep -q '\tok$' || exit 88
+
+  # Запись неуспешного прогона без живых нод (tested=0, status=no_alive)
+  : > "$WORK/win.txt"
+  record_history "" "" 25 0 0 0 0 no_alive
+  tail -1 "$HISTORY_RUNS" | grep -q '\t\t25\t0\t0\t0\t0\tno_alive$' || exit 89
 )
 rh_rc=$?
 case $rh_rc in
@@ -601,6 +609,8 @@ case $rh_rc in
   85) fail "record_history: stats.json was not generated" ;;
   86) fail "record_history: stats.json has no node_history" ;;
   87) fail "render_stats: устаревший stats.html не удалён" ;;
+  88) fail "record_history: default status must be ok in 10th column" ;;
+  89) fail "record_history: failed attempt with no_alive status not recorded correctly" ;;
   *) fail "record_history subshell failed unexpectedly (rc=$rh_rc)" ;;
 esac
 

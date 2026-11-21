@@ -152,4 +152,37 @@ printf 'node-wg\t2026-09-01\tx\tx\tx\tx\tx\tx\tx\tAS\t0\t0\t0\n' > "$WORK/stabil
 OUT_S=$(awk -v format=json -v stability="$WORK/stability_s.tsv" -v generated="g" -f "$SCRIPT" "$WORK/runs.tsv")
 case $OUT_S in *'"status":"skipped"'*) ;; *) echo "FAIL: окно ...S должно давать status skipped" >&2; exit 1 ;; esac
 
+# --- прогоны со статусами и пустыми полями канала (неуспешные попытки) ---
+: > "$WORK/runs_status.tsv"
+# 1) обычный прогон со старым форматом (9 полей) -> status "ok"
+printf '1000\t2026-09-12 09:00:00\t5242880\t1310720\t30\t20\t15\t10\t8\n' >> "$WORK/runs_status.tsv"
+# 2) нет живых нод: channel и threshold пустые ("-"), tested=0, winners=0, status=no_alive
+printf '2000\t2026-09-12 12:00:00\t-\t-\t30\t0\t0\t0\t0\tno_alive\n' >> "$WORK/runs_status.tsv"
+# 3) нет кандидатов: channel и threshold пустые (""), tested=0, winners=0, status=no_candidates
+printf '3000\t2026-09-12 15:00:00\t\t\t30\t5\t0\t0\t0\tno_candidates\n' >> "$WORK/runs_status.tsv"
+# 4) были замеры, но победителей нет: status=no_winners
+printf '4000\t2026-09-12 18:00:00\t6291456\t1572864\t30\t10\t10\t0\t0\tno_winners\n' >> "$WORK/runs_status.tsv"
+
+OUT_STATUS=$(awk -v format=json -v generated="2026-09-12 18:00:05" -f "$SCRIPT" "$WORK/runs_status.tsv")
+printf '%s' "$OUT_STATUS" > "$WORK/out_status.json"
+python3 - "$WORK/out_status.json" <<'PYSTATUS' || { echo "FAIL: runs status check" >&2; exit 1; }
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+assert d["runs"]["count"] == 4, d["runs"]["count"]
+series = d["runs"]["series"]
+# 1) 9 полей -> ok
+assert series[0]["status"] == "ok" and series[0]["channel_bytes"] == 5242880, series[0]
+# 2) no_alive -> null для канала и порога
+assert series[1]["status"] == "no_alive" and series[1]["channel_bytes"] is None and series[1]["threshold_bytes"] is None, series[1]
+assert series[1]["tested"] == 0 and series[1]["alive"] == 0, series[1]
+# 3) no_candidates -> null для канала и порога
+assert series[2]["status"] == "no_candidates" and series[2]["channel_bytes"] is None and series[2]["threshold_bytes"] is None, series[2]
+assert series[2]["tested"] == 0 and series[2]["alive"] == 5, series[2]
+# 4) no_winners -> канал есть, winners=0
+assert series[3]["status"] == "no_winners" and series[3]["channel_bytes"] == 6291456 and series[3]["winners"] == 0, series[3]
+# last_run проверяется
+lr = d["last_run"]
+assert lr["status"] == "no_winners" and lr["channel_bytes"] == 6291456 and lr["tested"] == 10 and lr["winners"] == 0, lr
+PYSTATUS
+
 echo "test_render_stats_json.sh: OK"
