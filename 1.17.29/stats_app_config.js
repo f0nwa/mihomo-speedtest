@@ -380,8 +380,154 @@ var REPAIR_FIX_LABELS = {
 };
 
 function fmtBackupName(name) {
-  var m = /^config\.yaml\.(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)/.exec(name || '');
-  return m ? (m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + m[6]) : (name || '');
+  var m = /^config\.yaml\.(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)(?:-(\d+))?\.bak$/.exec(name || '');
+  if (!m) { return name || ''; }
+  return m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + m[6] +
+    (m[7] ? ' · копия ' + m[7] : '') + ' · ' + name;
+}
+
+function backupDate(name) {
+  var m = /^config\.yaml\.(\d{4})-(\d\d)-(\d\d)_(\d\d)(\d\d)(\d\d)(?:-(\d+))?\.bak$/.exec(name || '');
+  if (!m) { return ''; }
+  var y = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  var days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) { days[1] = 29; }
+  if (y < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1] ||
+      Number(m[4]) > 23 || Number(m[5]) > 59 || Number(m[6]) > 59 ||
+      (m[7] !== undefined && Number(m[7]) < 1)) { return ''; }
+  return m[1] + '-' + m[2] + '-' + m[3];
+}
+
+function filterBackups(rows, filters) {
+  var f = filters || {};
+  var from = f.from || '', to = f.to || '', kind = f.kind || 'all';
+  var query = String(f.query || '').toLowerCase();
+  if (from && to && from > to) { return []; }
+  return rows.filter(function (b) {
+    if (kind !== 'all' && b.kind !== kind) { return false; }
+    if (String(b.name || '').toLowerCase().indexOf(query) < 0) { return false; }
+    if (!from && !to) { return true; }
+    var day = backupDate(b.name);
+    if (!day || (from && day < from) || (to && day > to)) { return false; }
+    return true;
+  });
+}
+
+function createBackupBrowser(opts) {
+  var body = opts.body;
+  var filterBox = el('div', 'config-backup-filters');
+  var listBox = el('div');
+  body.appendChild(filterBox); body.appendChild(listBox);
+  var list = [], keep = 20, newestFirst = true, sortControl = null;
+
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+  function dateField(label, aria) {
+    var wrap = el('label', 'config-backup-date');
+    wrap.appendChild(el('span', null, label));
+    var input = el('input'); input.type = 'date'; input.setAttribute('aria-label', aria);
+    input.addEventListener('input', render);
+    wrap.appendChild(input); filterBox.appendChild(wrap);
+    return input;
+  }
+  var from = dateField('С', 'С');
+  var to = dateField('По', 'По');
+  var kindWrap = el('label', 'config-backup-kind');
+  kindWrap.appendChild(el('span', null, 'Источник'));
+  var kind = el('select'); kind.setAttribute('aria-label', 'Источник');
+  [['all', 'Все'], ['edit', 'Редактор/конструктор'], ['setup', 'setup.sh']].forEach(function (item) {
+    var option = el('option', null, item[1]); option.value = item[0]; kind.appendChild(option);
+  });
+  kind.value = 'all'; kind.addEventListener('change', render);
+  kindWrap.appendChild(kind); filterBox.appendChild(kindWrap);
+  var queryWrap = el('label', 'config-backup-query');
+  queryWrap.appendChild(el('span', null, 'Имя файла'));
+  var query = el('input'); query.type = 'search'; query.setAttribute('aria-label', 'Имя файла');
+  query.addEventListener('input', render);
+  queryWrap.appendChild(query); filterBox.appendChild(queryWrap);
+  var reset = el('button', 'theme-btn', 'Сбросить'); reset.type = 'button';
+  reset.addEventListener('click', function () {
+    from.value = ''; to.value = ''; kind.value = 'all'; query.value = ''; render();
+  });
+  filterBox.appendChild(reset);
+  var count = el('span', 'config-backup-count'); count.setAttribute('aria-live', 'polite');
+  filterBox.appendChild(count);
+
+  function filters() { return { from: from.value, to: to.value, kind: kind.value, query: query.value }; }
+  function render() {
+    clear(listBox);
+    sortControl = null;
+    if (!list.length) {
+      filterBox.hidden = true;
+      listBox.appendChild(el('p', 'hint', 'Бэкапов пока нет.'));
+      return;
+    }
+    filterBox.hidden = false;
+    listBox.appendChild(el('p', 'hint', '«Редактор» - бэкапы этой вкладки (хранятся последние ' + keep +
+      '), «setup.sh» - бэкапы, сделанные при установке.'));
+    var f = filters();
+    var filtered = filterBackups(list, f);
+    count.textContent = 'Показано ' + filtered.length + ' из ' + list.length;
+    if (f.from && f.to && f.from > f.to) {
+      listBox.appendChild(el('p', 'msg-err', 'Дата «С» позже даты «По».'));
+      return;
+    }
+    if (!filtered.length) {
+      listBox.appendChild(el('p', 'hint', 'Нет подходящих бэкапов.'));
+      return;
+    }
+    // API отдаёт распознанные даты от новых к старым, неизвестные - в конце.
+    // При обратной сортировке неизвестные даты всё равно остаются в конце.
+    var known = [], unknown = [];
+    filtered.forEach(function (b) { (backupDate(b.name) ? known : unknown).push(b); });
+    if (!newestFirst) { known.reverse(); }
+    filtered = known.concat(unknown);
+    var table = el('table', 'config-backups');
+    var head = el('thead'), header = el('tr'), dateHead = el('th');
+    dateHead.setAttribute('scope', 'col');
+    dateHead.setAttribute('aria-sort', newestFirst ? 'descending' : 'ascending');
+    var sort = el('button', 'config-backup-sort', newestFirst ? 'Дата ↓' : 'Дата ↑');
+    sort.type = 'button'; sort.setAttribute('aria-label', 'Сортировать по дате');
+    sort.title = newestFirst ? 'Сначала новые. Нажмите, чтобы показать старые первыми' :
+      'Сначала старые. Нажмите, чтобы показать новые первыми';
+    sort.addEventListener('click', function () {
+      newestFirst = !newestFirst; render();
+      if (sortControl) { sortControl.focus(); }
+    });
+    sortControl = sort;
+    dateHead.appendChild(sort); header.appendChild(dateHead);
+    ['Источник', 'Размер', 'Действия'].forEach(function (label) {
+      var th = el('th', null, label); th.setAttribute('scope', 'col'); header.appendChild(th);
+    });
+    head.appendChild(header); table.appendChild(head);
+    var tbody = el('tbody');
+    filtered.forEach(function (b) {
+      var tr = el('tr');
+      tr.appendChild(el('td', null, fmtBackupName(b.name)));
+      tr.appendChild(el('td', 'hint', b.kind === 'edit' ? 'редактор' : 'setup.sh'));
+      tr.appendChild(el('td', 'hint', b.size < 1024 ? (b.size + ' Б') : ((Math.round(b.size / 102.4) / 10) + ' КБ')));
+      var td = el('td', 'config-backup-actions');
+      function act(text, fn) {
+        var button = el('button', 'theme-btn', text); button.type = 'button';
+        button.addEventListener('click', function () { fn(b); }); td.appendChild(button);
+      }
+      act('Сравнить', opts.compare);
+      act('В редактор', opts.edit);
+      act('Откатить', opts.restore);
+      tr.appendChild(td); tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    listBox.appendChild(table);
+  }
+  function load() {
+    return opts.load().then(function (d) {
+      list = d.backups || []; keep = d.keep || 20; render();
+    })['catch'](function (e) {
+      list = []; filterBox.hidden = true; clear(listBox);
+      listBox.appendChild(el('p', 'msg-err', 'Не удалось загрузить список бэкапов: ' + e.message));
+      if (opts.error) { opts.error(e.message); }
+    });
+  }
+  return { load: load, render: render };
 }
 
 // GET /api/config* с проверкой, что пришёл именно JSON редактора.
@@ -1194,11 +1340,23 @@ function renderYaml(bar) {
     }
     function applyText(resp, what) {
       var t = what;
-      if (resp.unchanged) { return 'Конфиг не изменился, перезапуск не нужен.'; }
-      if (resp.restarted === false) { t += ' XKeen не найден - перезапустите ядро вручную.'; }
-      else { t += ' Ядро перезапущено.'; }
-      if (resp.backup) { t += ' Предыдущая версия сохранена в бэкап ' + fmtBackupName(resp.backup) + '.'; }
+      if (resp.unchanged) { t = 'Конфиг не изменился, перезапуск не нужен.'; }
+      else {
+        if (resp.restarted === false) { t += ' XKeen не найден - перезапустите ядро вручную.'; }
+        else { t += ' Ядро перезапущено.'; }
+        if (resp.backup) { t += ' Предыдущая версия сохранена в бэкап ' + fmtBackupName(resp.backup) + '.'; }
+      }
+      if (resp.state_sync === 'reimport_required') {
+        t += ' Состояние конструктора не сохранено: при следующем открытии появится результат повторного переноса из фактического config.yaml со строками REVIEW.';
+      } else if (resp.state_sync === 'failed') {
+        t += ' Конфиг применён, но устаревшее состояние конструктора не заблокировано. Не применяйте конструктор: удалите config-state по SSH либо восстановите права записи и повторите перенос из фактического конфига.';
+      }
       return t;
+    }
+    function applyKind(resp) {
+      if (resp.state_sync === 'failed') { return 'err'; }
+      if (resp.state_sync === 'reimport_required') { return 'warn'; }
+      return 'ok';
     }
     // keepEditor - не трогать текст в редакторе (после автоотката правки
     // пользователя не должны пропасть), только обновить base/сохранённое.
@@ -1235,62 +1393,39 @@ function renderYaml(bar) {
       busy(true);
       startApplyLog();
       var p = body === null ? fetchJson(url, { method: 'POST' }) : postText(url, body);
-      return p.then(function (resp) { reload(applyText(resp, typeof what === 'function' ? what(resp) : what)); })
+      return p.then(function (resp) { reload(applyText(resp, typeof what === 'function' ? what(resp) : what), applyKind(resp)); })
         ['catch'](handleApplyError)
         .then(function () { busy(false); return stopApplyLog(); });
     }
 
-    function loadBackups() {
-      fetchJson('/api/config/backups').then(function (d) {
-        while (backupsBody.firstChild) { backupsBody.removeChild(backupsBody.firstChild); }
-        var list = d.backups || [];
-        if (!list.length) { backupsBody.appendChild(el('p', 'hint', 'Бэкапов пока нет.')); return; }
-        backupsBody.appendChild(el('p', 'hint', '«Редактор» - бэкапы этой вкладки (хранятся последние ' + d.keep +
-          '), «setup.sh» - бэкапы, сделанные при установке.'));
-        var table = el('table', 'config-backups');
-        list.forEach(function (b) {
-          var tr = el('tr');
-          tr.appendChild(el('td', null, fmtBackupName(b.name)));
-          tr.appendChild(el('td', 'hint', b.kind === 'edit' ? 'редактор' : 'setup.sh'));
-          tr.appendChild(el('td', 'hint', b.size < 1024 ? (b.size + ' Б') : ((Math.round(b.size / 102.4) / 10) + ' КБ')));
-          var td = el('td', 'config-backup-actions');
-          var q = '?kind=' + encodeURIComponent(b.kind) + '&name=' + encodeURIComponent(b.name);
-          function act(text, fn) {
-            var x = el('button', 'theme-btn', text); x.type = 'button';
-            x.addEventListener('click', fn); td.appendChild(x);
-          }
-          function withBackup(fn) {
-            fetchConfigJson('/api/config/backup' + q, 'text').then(fn)
-              ['catch'](function (e) { msg('Не удалось прочитать бэкап: ' + e.message, 'err'); });
-          }
-          act('Сравнить', function () {
-            withBackup(function (bd) {
-              openDiff(bd.text || '', 'бэкап ' + fmtBackupName(b.name));
-            });
-          });
-          act('В редактор', function () {
-            withBackup(function (bd) {
-              closeDiff();
-              migrationSchema = null; view.editor.setValue(bd.text || ''); setDirty();
-              msg('Бэкап ' + fmtBackupName(b.name) + ' загружен в редактор. Проверьте и нажмите «Сохранить и применить».', 'ok');
-            });
-          });
-          act('Откатить', function () {
-            if (!window.confirm('Откатить config.yaml к бэкапу ' + fmtBackupName(b.name) + ' и перезапустить ядро?' +
-              (view.dirty ? '\nНесохранённые правки в редакторе будут потеряны.' : ''))) { return; }
-            msg('Откат и перезапуск ядра...', '');
-            applyRequest('/api/config/restore' + q + '&base=' + encodeURIComponent(view.base), null,
-              'Конфиг откачен к бэкапу ' + fmtBackupName(b.name) + '.');
-          });
-          tr.appendChild(td);
-          table.appendChild(tr);
-        });
-        backupsBody.appendChild(table);
-      })['catch'](function (e) {
-        while (backupsBody.firstChild) { backupsBody.removeChild(backupsBody.firstChild); }
-        backupsBody.appendChild(el('p', 'msg-err', 'Не удалось загрузить список бэкапов: ' + e.message));
-      });
+    function withBackup(b, fn) {
+      var q = '?kind=' + encodeURIComponent(b.kind) + '&name=' + encodeURIComponent(b.name);
+      return fetchConfigJson('/api/config/backup' + q, 'text').then(fn)
+        ['catch'](function (e) { msg('Не удалось прочитать бэкап: ' + e.message, 'err'); });
     }
+    var backupBrowser = createBackupBrowser({
+      body: backupsBody,
+      load: function () { return fetchJson('/api/config/backups'); },
+      compare: function (b) {
+        withBackup(b, function (bd) { openDiff(bd.text || '', 'бэкап ' + fmtBackupName(b.name)); });
+      },
+      edit: function (b) {
+        withBackup(b, function (bd) {
+          closeDiff();
+          migrationSchema = null; view.editor.setValue(bd.text || ''); setDirty();
+          msg('Бэкап ' + fmtBackupName(b.name) + ' загружен в редактор. Проверьте и нажмите «Сохранить и применить».', 'ok');
+        });
+      },
+      restore: function (b) {
+        if (!window.confirm('Откатить config.yaml к бэкапу ' + fmtBackupName(b.name) + ' и перезапустить ядро?' +
+          (view.dirty ? '\nНесохранённые правки в редакторе будут потеряны.' : ''))) { return; }
+        var q = '?kind=' + encodeURIComponent(b.kind) + '&name=' + encodeURIComponent(b.name);
+        msg('Откат и перезапуск ядра...', '');
+        applyRequest('/api/config/restore' + q + '&base=' + encodeURIComponent(view.base), null,
+          'Конфиг откачен к бэкапу ' + fmtBackupName(b.name) + '.');
+      }
+    });
+    function loadBackups() { return backupBrowser.load(); }
 
     createEditor(editorHost, view.saved, setDirty).then(function (ed) {
       view.editor = ed;

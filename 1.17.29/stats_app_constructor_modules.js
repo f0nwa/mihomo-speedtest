@@ -887,7 +887,7 @@ export function createModuleCards(ctx) {
 
   // ----- прокси (ноды, добавленные вручную, не из подписок) -----
   var proxBlk = ctx.layout.add(2, 'Прокси'), proxCard = proxBlk.body;
-  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, WireGuard/AmneziaWG). ' +
+  proxCard.appendChild(el('p', 'hint', 'Ноды, добавленные вручную, а не из подписок (Hysteria2, VLESS, Trojan, Shadowsocks, VMess, TrustTunnel, WireGuard/AmneziaWG). ' +
     'Они сами попадают в группы «Авто по пингу», Fallback и Manual. Пароли и ключи в списке не показываются. ' +
     'Поле справа от имени - провайдер ноды в статистике (пусто - по имени до первого «_»); сохраняется сразу, без «Применить». ' +
     'Нескольким нодам сразу - отметьте их галочками и задайте провайдера в строке над списком.'));
@@ -900,7 +900,7 @@ export function createModuleCards(ctx) {
   // имя было занято и изменилось ("hy2 → hy2 nl.example").
   function addPasted(text) {
     var t = String(text || '');
-    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://) или YAML'); }
+    if (!t.trim()) { throw new Error('Вставьте ссылку на ноду (hy2://, vless://, trojan://, ss://, vmess://, tt://) или YAML'); }
     if (/^\s*-\s/m.test(t) || /^\s*name:/m.test(t)) {
       var orig = proxiesFromYaml(t).map(function (p) { return p.name; });
       var got = mods.addProxyYaml(t);
@@ -934,7 +934,7 @@ export function createModuleCards(ctx) {
   var provDraft = '';
   fetchJson('/api/node-providers').then(function (r) {
     provManual = (r && r.manual) || {};
-    renderProxies();
+    if (!editingProxy) { renderProxies(); }
   }, function () {});
   function provGuess(name) {
     var i = name.indexOf('_');
@@ -953,6 +953,166 @@ export function createModuleCards(ctx) {
     }, function (e) { ctx.msg('Провайдер не сохранён: ' + errText(e), 'err'); });
   }
 
+  var editingProxy = null;
+
+  function proxyEditor(p) {
+    var r = el('div', 'xk-row cx-row cx-proxy-editor');
+    var opts = mods.proxyOptions(p.name);
+    var mtu, mtuRemove, keepOn, keep, transport, fingerprint;
+    r.appendChild(el('div', 'geo-group-title', 'Изменение ноды ' + p.name));
+    r.appendChild(el('p', 'hint', 'Обычная форма меняет только перечисленные поля и сохраняет остальной YAML. Расширенный редактор принимает одну запись с прежними name и type. «Готово» меняет черновик, применение конфига остаётся общим.'));
+    var activeTab = 'simple';
+    var tabs = el('div', 'xk-mode cx-proxy-tabs');
+    var simpleTab = button('Обычные поля'), yamlTab = button('Расширенный YAML');
+    simpleTab.setAttribute('aria-pressed', 'true'); yamlTab.setAttribute('aria-pressed', 'false');
+    tabs.appendChild(simpleTab); tabs.appendChild(yamlTab); r.appendChild(tabs);
+    var simpleStart = r.children.length;
+
+    if (p.type === 'wireguard') {
+      r.appendChild(el('label', null, 'MTU'));
+      mtu = el('input'); mtu.type = 'number'; mtu.value = opts.mtu.value;
+      mtu.disabled = !opts.mtu.supported;
+      mtu.setAttribute('aria-label', 'MTU ноды ' + p.name);
+      r.appendChild(mtu);
+      var mtuDelete = el('label', 'cx-hwid');
+      mtuRemove = el('input'); mtuRemove.type = 'checkbox';
+      mtuRemove.disabled = !opts.mtu.present || !opts.mtu.supported;
+      mtuRemove.setAttribute('aria-label', 'Удалить поле MTU');
+      mtuRemove.addEventListener('change', function () { mtu.disabled = mtuRemove.checked || !opts.mtu.supported; });
+      mtuDelete.appendChild(mtuRemove);
+      mtuDelete.appendChild(document.createTextNode(' Удалить поле, использовать значение Mihomo по умолчанию'));
+      r.appendChild(mtuDelete);
+      var mtuSaved = button('Как в сохранённом конфиге', 'small muted');
+      mtuSaved.setAttribute('aria-label', 'Вернуть сохранённый MTU');
+      mtuSaved.addEventListener('click', function () {
+        mtu.value = opts.mtu.value; mtuRemove.checked = false; mtu.disabled = !opts.mtu.supported;
+      });
+      r.appendChild(mtuSaved);
+      r.appendChild(el('p', 'hint', opts.mtu.supported
+        ? 'Целое число ' + (opts.ipv6 ? '1280' : '576') + '-65535' + (opts.ipv6 ? ': у ноды есть локальный IPv6.' : '.') + ' Пустое поле не означает удаление.'
+        : 'Поле MTU имеет сложную структуру. Обычная форма его не меняет.'));
+
+      var keepLabel = el('label', 'cx-hwid');
+      keepOn = el('input'); keepOn.type = 'checkbox';
+      keepOn.checked = opts.keepalive.present && opts.keepalive.value !== '0';
+      keepOn.disabled = !opts.keepalive.supported;
+      keepOn.setAttribute('aria-label', 'Включить Persistent Keepalive');
+      keepLabel.appendChild(keepOn);
+      keepLabel.appendChild(document.createTextNode(' Persistent Keepalive'));
+      r.appendChild(keepLabel);
+      keep = el('input'); keep.type = 'number';
+      keep.value = keepOn.checked ? opts.keepalive.value : '';
+      keep.disabled = !keepOn.checked || !opts.keepalive.supported;
+      keep.setAttribute('aria-label', 'Keepalive ноды ' + p.name);
+      keepOn.addEventListener('change', function () { keep.disabled = !keepOn.checked || !opts.keepalive.supported; });
+      r.appendChild(keep);
+      var keepSaved = button('Как в сохранённом конфиге', 'small muted');
+      keepSaved.setAttribute('aria-label', 'Вернуть сохранённый Keepalive');
+      keepSaved.addEventListener('click', function () {
+        keepOn.checked = opts.keepalive.present && opts.keepalive.value !== '0';
+        keep.value = keepOn.checked ? opts.keepalive.value : '';
+        keep.disabled = !keepOn.checked || !opts.keepalive.supported;
+      });
+      r.appendChild(keepSaved);
+      r.appendChild(el('p', 'hint', opts.keepalive.supported
+        ? 'Интервал 1-65535 секунд. Выключение удаляет поле; сохранённый 0 без изменений остаётся как есть.'
+        : 'Поле persistent-keepalive имеет сложную структуру. Обычная форма его не меняет.'));
+    } else if (p.type === 'trusttunnel') {
+      r.appendChild(el('label', null, 'Транспорт'));
+      transport = el('select');
+      transport.disabled = !opts.quic.supported;
+      transport.setAttribute('aria-label', 'Транспорт TrustTunnel');
+      [['h2', 'HTTP/2'], ['h3', 'QUIC (HTTP/3)']].forEach(function (item) {
+        var option = el('option', null, item[1]); option.value = item[0]; transport.appendChild(option);
+      });
+      transport.value = opts.quic.value ? 'h3' : 'h2';
+      r.appendChild(transport);
+
+      r.appendChild(el('label', null, 'Client Fingerprint'));
+      fingerprint = el('select');
+      fingerprint.setAttribute('aria-label', 'Client Fingerprint');
+      function option(value, text) { var item = el('option', null, text); item.value = value; fingerprint.appendChild(item); }
+      option('__saved__', 'Как в сохранённом конфиге');
+      option('__absent__', 'Не задан');
+      var presets = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'];
+      presets.forEach(function (value) { option(value, value); });
+      if (opts.fingerprint.present && opts.fingerprint.supported && presets.indexOf(opts.fingerprint.value) < 0) {
+        option('__custom__', 'Пользовательский: ' + opts.fingerprint.value);
+      }
+      if (!opts.fingerprint.present) { fingerprint.value = '__absent__'; }
+      else if (opts.fingerprint.supported && presets.indexOf(opts.fingerprint.value) >= 0) { fingerprint.value = opts.fingerprint.value; }
+      else if (opts.fingerprint.supported) { fingerprint.value = '__custom__'; }
+      else { fingerprint.value = '__saved__'; }
+      function fingerprintState() {
+        fingerprint.disabled = transport.value === 'h3' || !opts.fingerprint.supported;
+      }
+      transport.addEventListener('change', fingerprintState);
+      fingerprintState();
+      r.appendChild(fingerprint);
+      r.appendChild(el('p', 'hint', 'В Mihomo 1.19.32 fingerprint используется для HTTP/2 и не применяется к QUIC. При переходе на QUIC сохранённый профиль остаётся в YAML. ALPN форма не меняет: для HTTP/2 нужен h2, для QUIC - h3.'));
+    }
+
+    var simpleNodes = Array.prototype.slice.call(r.children, simpleStart);
+    var yamlHint = el('p', 'hint', 'Одна блочная запись, name первым ключом. Разрешены вложенные блоки, однострочные flow-коллекции и скаляры |/>. Anchors, aliases, теги, директивы и повторы ключей не поддерживаются.');
+    yamlHint.hidden = true; r.appendChild(yamlHint);
+    var yaml = el('textarea', 'xk-text cx-proxy-yaml');
+    yaml.rows = 18; yaml.spellcheck = false; yaml.hidden = true;
+    yaml.value = mods.getProxyYaml(p.name);
+    yaml.setAttribute('aria-label', 'YAML ноды ' + p.name);
+    r.appendChild(yaml);
+    function showTab(advanced) {
+      activeTab = advanced ? 'yaml' : 'simple';
+      simpleNodes.forEach(function (node) { node.hidden = advanced; });
+      yamlHint.hidden = !advanced; yaml.hidden = !advanced;
+      simpleTab.setAttribute('aria-pressed', advanced ? 'false' : 'true');
+      yamlTab.setAttribute('aria-pressed', advanced ? 'true' : 'false');
+    }
+    simpleTab.addEventListener('click', function () { showTab(false); });
+    yamlTab.addEventListener('click', function () { showTab(true); });
+
+    var actions = el('div', 'xk-add');
+    var done = button('Готово', 'submit'), cancel = button('Отмена', 'submit secondary');
+    done.addEventListener('click', function () {
+      if (activeTab === 'yaml') {
+        ctx.edit(function () { mods.replaceProxyYaml(p.name, yaml.value, { advanced: true }); editingProxy = null; });
+        return;
+      }
+      var patch = {};
+      try {
+        if (p.type === 'wireguard') {
+          if (opts.mtu.supported) {
+            if (mtuRemove.checked) {
+              if (opts.mtu.present) { patch.mtu = null; }
+            } else if (mtu.value.trim() !== opts.mtu.value) {
+              if (!mtu.value.trim()) { throw new Error('MTU: введите целое число или отметьте удаление поля'); }
+              patch.mtu = Number(mtu.value);
+            }
+          }
+          if (opts.keepalive.supported) {
+            if (keepOn.checked) {
+              if (!keep.value.trim()) { throw new Error('Persistent Keepalive: введите интервал 1-65535 секунд'); }
+              if (!opts.keepalive.present || keep.value.trim() !== opts.keepalive.value) { patch['persistent-keepalive'] = Number(keep.value); }
+            } else if (opts.keepalive.present && opts.keepalive.value !== '0') {
+              patch['persistent-keepalive'] = null;
+            }
+          }
+        } else if (p.type === 'trusttunnel') {
+          var wantQuic = transport.value === 'h3';
+          if (opts.quic.supported && wantQuic !== opts.quic.value) { patch.quic = wantQuic; }
+          if (fingerprint.value === '__absent__') {
+            if (opts.fingerprint.present) { patch['client-fingerprint'] = null; }
+          } else if (fingerprint.value !== '__saved__' && fingerprint.value !== '__custom__' && fingerprint.value !== opts.fingerprint.value) {
+            patch['client-fingerprint'] = fingerprint.value;
+          }
+        }
+      } catch (e) { ctx.msg(e.message, 'err'); return; }
+      ctx.edit(function () { mods.updateProxyOptions(p.name, patch); editingProxy = null; });
+    });
+    cancel.addEventListener('click', function () { editingProxy = null; render(); });
+    actions.appendChild(done); actions.appendChild(cancel); r.appendChild(actions);
+    return r;
+  }
+
   function renderProxies() {
     clear(proxHost);
     var rows = el('div', 'xk-rows');
@@ -963,6 +1123,7 @@ export function createModuleCards(ctx) {
     });
     if (active.length) { proxHost.appendChild(buildProviderBar(active)); }
     list.forEach(function (p) {
+      if (editingProxy === p.name && !p.removed) { rows.appendChild(proxyEditor(p)); return; }
       var r = el('div', 'xk-row cx-row' + (p.removed ? ' cx-proxy-removed' : ''));
       var pick = el('input'); pick.type = 'checkbox'; pick.disabled = p.removed;
       pick.checked = !!provSel[p.name];
@@ -1008,6 +1169,12 @@ export function createModuleCards(ctx) {
       r.appendChild(prov);
       r.appendChild(el('span', 'geo-code', (p.type || '?') + (p.server ? ' · ' + p.server + (p.port ? ':' + p.port : '') : '')));
       if (p.removed) { r.appendChild(el('span', 'cx-proxy-removed-note', 'Убрана')); }
+      if (!p.removed && (p.type === 'wireguard' || p.type === 'trusttunnel')) {
+        var edit = button('Изменить', 'small muted');
+        edit.setAttribute('aria-label', 'Изменить ноду ' + p.name);
+        edit.addEventListener('click', function () { editingProxy = p.name; renderProxies(); });
+        r.appendChild(edit);
+      }
       var rm = button(p.removed ? 'Вернуть' : 'Убрать', 'small muted');
       rm.setAttribute('aria-label', (p.removed ? 'Вернуть ' : 'Убрать ') + p.name);
       rm.addEventListener('click', function () { ctx.edit(function () { if (p.removed) { mods.restoreProxy(p.name); } else { mods.removeProxy(p.name); } }); });
@@ -1037,7 +1204,7 @@ export function createModuleCards(ctx) {
 
     var area = el('textarea', 'xk-text');
     area.rows = 3;
-    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess:// (по одной в строке) или YAML ноды';
+    area.placeholder = 'Вставьте ссылку hy2:// vless:// trojan:// ss:// vmess://, tt:// (по одной в строке) или YAML ноды';
     area.setAttribute('aria-label', 'Ссылки или YAML нод');
     area.value = proxDraft;
     area.addEventListener('input', function () { proxDraft = area.value; });

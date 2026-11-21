@@ -64,7 +64,7 @@ MIN_FLOOR=524288       # абсолютный минимум порога, ба�
 FIXED_MIN_SPEED=0     # байт/с; >0 = простой режим: порог фиксированный (без доли от канала),
                       # в пул идут только ноды не медленнее него, медленные - лишь до MIN_WINNERS
 TOPN=15               # сколько нод держать в быстром пуле суммарно, включая WG
-ENOUGH=20             # набрали столько выше порога - дальше не меряем
+ENOUGH=20             # набрали столько выше порога - дальше не меряем; 0 = без ограничения
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод во всём быстром пуле, включая WG - см. select_winners()
 STABLE_MIN_UPTIME=80  # %, нода с накопленной статистикой и uptime ниже этого в fast.yaml не идёт (0 = не учитывать)
@@ -559,9 +559,10 @@ record_history() {
   # Дописывает сводку прогона в speedtest_runs.tsv и историю нод-победителей
   # в speedtest_history.tsv, применяет ротацию по HISTORY_KEEP_RUNS/HISTORY_KEEP_DAYS,
   # затем перегенерирует stats.json. Вызывается из main() после успешной
-  # публикации fast.yaml - сам по себе не критичен для работы замерщика:
-  # любая ошибка здесь - WARN в лог, а не остановка.
+  # публикации fast.yaml или при ранних выходах (нет живых/кандидатов/победителей) -
+  # сам по себе не критичен для работы замерщика: любая ошибка здесь - WARN в лог, а не остановка.
   channel=$1; threshold=$2; total=$3; alive=$4; tested=$5; good=$6; winners=$7
+  status=${8:-ok}
 
   if [ "$HISTORY_KEEP_RUNS" = 0 ] && [ "$HISTORY_KEEP_DAYS" = 0 ]; then
     say "WARN: HISTORY_KEEP_RUNS и HISTORY_KEEP_DAYS оба 0, включаю дефолт HISTORY_KEEP_RUNS=200"
@@ -573,8 +574,8 @@ record_history() {
 
   {
     [ -f "$HISTORY_RUNS" ] && cat "$HISTORY_RUNS"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$ts" "$iso" "$channel" "$threshold" "$total" "$alive" "$tested" "$good" "$winners"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$ts" "$iso" "$channel" "$threshold" "$total" "$alive" "$tested" "$good" "$winners" "$status"
   } > "$WORK/runs.new"
   trim_runs "$WORK/runs.new" "$WORK/runs.trimmed" "$HISTORY_KEEP_RUNS" "$HISTORY_KEEP_DAYS" "$ts"
   if ! publish_file "$WORK/runs.trimmed" "$HISTORY_RUNS"; then
@@ -1107,6 +1108,9 @@ main() {
 case $MAX_TESTED in
   ''|*[!0-9]*) say "WARN: MAX_TESTED должен быть целым неотрицательным числом"; return 1 ;;
 esac
+case $ENOUGH in
+  ''|*[!0-9]*) say "WARN: ENOUGH должен быть целым неотрицательным числом"; return 1 ;;
+esac
 if [ -z "$BLOCK" ]; then
   say "WARN: BLOCK не задан; запустите install.sh для создания speedtest2.env"
   return 1
@@ -1190,6 +1194,7 @@ say "Нод в пуле: $TOTAL, живых: $ALIVE"
 : > "$WORK/res.txt"
 if [ "$ALIVE" -lt 1 ]; then
   update_node_stability
+  record_history "" "" "$TOTAL" 0 0 0 0 "no_alive"
   say "WARN: Живых нод нет, fast.yaml не трогаю"; exit 0
 fi
 
@@ -1199,6 +1204,7 @@ CANDIDATES=$(wc -l < "$WORK/candidates.txt")
 say "Кандидатов на скорость: $CANDIDATES из $ALIVE живых; MAX_TESTED=$MAX_TESTED"
 if [ "$CANDIDATES" -lt 1 ]; then
   update_node_stability
+  record_history "" "" "$TOTAL" "$ALIVE" 0 0 0 "no_candidates"
   say "WARN: Нет кандидатов в пределах лимитов, сохраняю прежний fast.yaml"
   exit 0
 fi
@@ -1241,7 +1247,7 @@ while read -r D IDX; do
   SP=$(accepted_speed "$HTTP_STATUS" "$SP_RAW")
   echo "$SP $IDX" >> "$WORK/res.txt"
   NM=$(awk -v k="$IDX" -F'	' '$1 == k {print $2}' "$WORK/map.txt")
-  echo "$((SP/1048576)).$(( (SP%1048576)*10/1048576 ))	МБ/с	$NM" >> "$WORK/full.txt"
+  echo "$(format_mbit "$SP")	Мбит/с	$NM" >> "$WORK/full.txt"
   [ "$FORCE" = 1 ] && say "  $(format_mbit "$SP") Мбит/с  $NM"
   PROGRESS_STATUS=slow
   [ "$SP" -ge "$EFFECTIVE_MIN" ] && PROGRESS_STATUS=ok
@@ -1249,7 +1255,7 @@ while read -r D IDX; do
   write_progress 1
   if [ "$SP" -ge "$EFFECTIVE_MIN" ] && remember_name "$NM" "$WORK/good_names.txt"; then
     GOOD=$((GOOD+1))
-    [ "$GOOD" -ge "$ENOUGH" ] && break
+    [ "$ENOUGH" -gt 0 ] && [ "$GOOD" -ge "$ENOUGH" ] && break
   fi
 done < "$WORK/candidates.txt"
 write_progress 0
@@ -1296,6 +1302,7 @@ if [ "$WIN" -lt 1 ]; then
   best_idx=${best_line#* }
   best_nm=$(awk -v k="$best_idx" -F'\t' '$1 == k {print $2}' "$WORK/map.txt")
   say "Лучший результат: $(format_mbit "$best_sp") Мбит/с  $best_nm"
+  record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" 0 "no_winners"
   exit 0
 fi
 
@@ -1315,12 +1322,15 @@ done < "$WORK/win.txt"
 } > "$WORK/check.yaml"
 if ! "$BIN" -t -d "$WORK" -f "$WORK/check.yaml" > "$WORK/check.log" 2>&1; then
   say "WARN: Собранный fast.yaml не проходит валидацию, оставляю прежний"
-  tail -3 "$WORK/check.log" >> "$RUN_LOG"; exit 0
+  tail -3 "$WORK/check.log" >> "$RUN_LOG"
+  record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" 0 "validation_failed"
+  exit 0
 fi
 
 # 8. подменить и перечитать провайдер в боевом ядре
 if ! publish_fast "$WORK/fast.new" "$OUT"; then
   say "WARN: fast.yaml не записан, прежний файл сохранён"
+  record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" 0 "publish_failed"
   exit 0
 fi
 sort -rn -k1 "$WORK/full.txt" > "$WORK/last.new" 2>/dev/null
@@ -1339,7 +1349,7 @@ else
   say "WARN: fast.yaml не изменился, провайдер не перечитан"
 fi
 
-record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" "$WIN"
+record_history "$CHANNEL" "$EFFECTIVE_MIN" "$TOTAL" "$ALIVE" "$(wc -l < "$WORK/res.txt" | tr -d ' ')" "$GOOD" "$WIN" "ok"
 }
 
 parse_args() {

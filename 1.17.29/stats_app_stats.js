@@ -131,7 +131,23 @@ function renderRunBar(container, onRunning, lastRun, runsCount) {
     return m;
   }
   if (runsCount !== undefined) {
-    row.appendChild(metaItem('Последний прогон: ', lastRun ? lastRun.iso : 'ещё не было'));
+    var lastRunText = 'ещё не было';
+    if (lastRun && lastRun.iso) {
+      lastRunText = lastRun.iso;
+      if (lastRun.status && lastRun.status !== 'ok') {
+        var statusDesc = {
+          no_alive: 'нет доступных нод',
+          no_candidates: 'нет кандидатов',
+          no_winners: 'нет быстрых нод',
+          core_failed: 'ошибка ядра',
+          validation_failed: 'ошибка валидации',
+          publish_failed: 'ошибка записи'
+        };
+        var desc = statusDesc[lastRun.status] || lastRun.status;
+        lastRunText += ' (' + desc + ')';
+      }
+    }
+    row.appendChild(metaItem('Последний прогон: ', lastRunText));
     row.appendChild(metaItem('Прогонов в истории: ', String(runsCount)));
   }
   var btn = el('button', 'submit', '\u25B6 Запустить сейчас');
@@ -780,8 +796,8 @@ function buildKpiRow(runsCount, lastRun) {
   }
   row.appendChild(tile('ПРОГОНОВ В ИСТОРИИ', String(runsCount)));
   row.appendChild(tile('ЖИВЫХ НОД', lastRun ? (lastRun.alive + '/' + lastRun.total) : '-'));
-  row.appendChild(tile('КАНАЛ', lastRun ? (fmtMbit(lastRun.channel_bytes) + ' Мбит/с') : '-'));
-  row.appendChild(tile('ПОРОГ', lastRun ? (fmtMbit(lastRun.threshold_bytes) + ' Мбит/с') : '-'));
+  row.appendChild(tile('КАНАЛ', lastRun && lastRun.channel_bytes !== null && lastRun.channel_bytes !== undefined ? (fmtMbit(lastRun.channel_bytes) + ' Мбит/с') : '-'));
+  row.appendChild(tile('ПОРОГ', lastRun && lastRun.threshold_bytes !== null && lastRun.threshold_bytes !== undefined ? (fmtMbit(lastRun.threshold_bytes) + ' Мбит/с') : '-'));
   row.appendChild(tile('ПОБЕДИТЕЛЕЙ', lastRun ? String(lastRun.winners) : '-'));
   row.appendChild(tile('ОБНОВЛЕНИЕ', '-', 'kpiUpdateTile'));
   return row;
@@ -812,7 +828,7 @@ export function renderStats() {
     renderRunBar(app, function () { startProgressPolling(app, mainRow); }, data.last_run || null, runsCount);
 
     app.appendChild(buildKpiRow(runsCount, data.last_run));
-    app.appendChild(el('p', 'hint node-pool-hint', 'Карточки выше - последний прогон по всему пулу. Фильтры ниже меняют сводку, список нод и ленту доступности.'));
+    app.appendChild(el('p', 'hint node-pool-hint', 'Карточки выше - последний прогон по всему пулу (учитываются все попытки). Фильтры ниже меняют сводку, список нод и ленту доступности.'));
     refreshUpdatesBadge();
 
     // Таблица доступности - первой, лента по прогонам - за ней: на
