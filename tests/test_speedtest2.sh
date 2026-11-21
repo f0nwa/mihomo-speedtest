@@ -995,4 +995,79 @@ case $cz_rc in
   *) fail "cleanup_old_zash_stats subshell failed unexpectedly (rc=$cz_rc)" ;;
 esac
 
+# --- ENOUGH=0 и валидация ENOUGH ---
+ENOUGH_WORK=$TEST_ROOT/enough-work
+mkdir -p "$ENOUGH_WORK"
+(
+  WORK=$ENOUGH_WORK
+  RUN_LOG=$WORK/run.log
+  : > "$RUN_LOG"
+  FORCE=0
+  MAX_TESTED=40
+  BLOCK=RU
+
+  # нечисловой ENOUGH должен отклоняться
+  ENOUGH=abc
+  main && exit 91
+  grep -q 'WARN: ENOUGH должен быть целым неотрицательным числом' "$RUN_LOG" || exit 92
+
+  # отрицательный ENOUGH должен отклоняться
+  ENOUGH=-1
+  main && exit 93
+
+  # эмуляция цикла с ENOUGH=2 (остановка после 2 нод)
+  ENOUGH=2
+  EFFECTIVE_MIN=1000000
+  GOOD=0
+  TESTED_COUNT=0
+  : > "$WORK/good_names.txt"
+  for cand in n1 n2 n3 n4; do
+    SP=2000000
+    NM=$cand
+    TESTED_COUNT=$((TESTED_COUNT+1))
+    if [ "$SP" -ge "$EFFECTIVE_MIN" ] && remember_name "$NM" "$WORK/good_names.txt"; then
+      GOOD=$((GOOD+1))
+      [ "$ENOUGH" -gt 0 ] && [ "$GOOD" -ge "$ENOUGH" ] && break
+    fi
+  done
+  [ "$TESTED_COUNT" -eq 2 ] || exit 94
+  [ "$GOOD" -eq 2 ] || exit 95
+
+  # эмуляция цикла с ENOUGH=0 (0 = без ограничения, проверяются все 4 ноды)
+  ENOUGH=0
+  GOOD=0
+  TESTED_COUNT=0
+  : > "$WORK/good_names.txt"
+  for cand in n1 n2 n3 n4; do
+    SP=2000000
+    NM=$cand
+    TESTED_COUNT=$((TESTED_COUNT+1))
+    if [ "$SP" -ge "$EFFECTIVE_MIN" ] && remember_name "$NM" "$WORK/good_names.txt"; then
+      GOOD=$((GOOD+1))
+      [ "$ENOUGH" -gt 0 ] && [ "$GOOD" -ge "$ENOUGH" ] && break
+    fi
+  done
+  [ "$TESTED_COUNT" -eq 4 ] || exit 96
+  [ "$GOOD" -eq 4 ] || exit 97
+
+  # проверка формата записи скорости в full.txt (Мбит/с)
+  : > "$WORK/full.txt"
+  SP=1000000
+  NM="test-node"
+  echo "$(format_mbit "$SP")	Мбит/с	$NM" >> "$WORK/full.txt"
+  grep -q "8.0	Мбит/с	test-node" "$WORK/full.txt" || exit 98
+
+  exit 0
+)
+en_rc=$?
+case $en_rc in
+  0) ;;
+  91|92) fail "ENOUGH: нечисловой ENOUGH не отклонён" ;;
+  93) fail "ENOUGH: отрицательный ENOUGH не отклонён" ;;
+  94|95) fail "ENOUGH=2: ранняя остановка не сработала на 2 нодах" ;;
+  96|97) fail "ENOUGH=0: ранняя остановка прервала цикл раньше времени" ;;
+  98) fail "формат full.txt не содержит 8.0 Мбит/с" ;;
+  *) fail "ENOUGH subshell failed unexpectedly (rc=$en_rc)" ;;
+esac
+
 echo "test_speedtest2: OK"

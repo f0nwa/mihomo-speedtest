@@ -153,6 +153,12 @@ grep -qF "STABILITY_DROP_AFTER='50'" "$W/speedtest2.env" || fail "STABILITY_DROP
 [ ! -e "$W/stats_www/stats.html" ] || fail "устаревший stats.html не должен появляться после сохранения настроек"
 [ -s "$W/stats_www/stats.json" ] || fail "stats.json (JSON-режим render_stats.awk, шаг 4) was not (re)generated after valid POST"
 
+# Проверяем сохранение enough=0 (без ограничения)
+OK_TUNING_ENOUGH0=$(printf '%s' "$OK_TUNING" | sed 's/enough=18/enough=0/')
+OUT_OK_ENOUGH0=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=ru-block&$OK_TUNING_ENOUGH0")
+assert_contains '{"ok":true}' "$OUT_OK_ENOUGH0" "enough=0 (unlimited) accepted"
+grep -qF "ENOUGH='0'" "$W/speedtest2.env" || fail "ENOUGH=0 not saved"
+
 # Настройки speedtest не меняют жизненный цикл веб-сервиса.
 [ "$(wc -l < "$FAKE_INITD_LOG")" -eq 0 ] || fail "settings must not call reconfigure"
 
@@ -205,6 +211,8 @@ assert_contains "TOPN" "$OUT_BAD9" "topn out of range"
 
 OUT_BAD10=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=0&stability_drop_after=50")
 assert_contains "окна стабильности" "$OUT_BAD10" "stability_window out of range"
+OUT_BAD_ENOUGH=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=101&min_winners=2&stability_window=100&stability_drop_after=50")
+assert_contains "от 0 до 100" "$OUT_BAD_ENOUGH" "enough > 100 rejected"
 OUT_BAD11=$(run_cgi POST "node_cap=3&keep_runs=50&keep_days=10&geo_filter=x&extype=custom&size_mb=20&dl_timeout=30&min_speed_mb=2&min_ratio=0.3&min_floor_mb=1&topn=15&enough=18&min_winners=2&stability_window=100&stability_drop_after=50&stable_min_uptime=101")
 assert_contains "Минимальный Uptime" "$OUT_BAD11" "stable_min_uptime out of range"
 

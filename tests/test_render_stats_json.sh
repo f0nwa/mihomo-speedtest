@@ -85,7 +85,7 @@ assert "q\"uo\\te<b>" in names, names
 printf '1000\t2026-09-12 09:00:00\t5242880\t1310720\t30\t20\t15\t10\t8\n' > "$WORK/runs.tsv"
 printf '4000\t2026-09-12 12:00:00\t6291456\t1572864\t31\t22\t16\t12\t9\n' >> "$WORK/runs.tsv"
 printf '1000\t3145728\tnode-fast\n1000\t2097152\tnode-slow\n4000\t3407872\tnode-fast\n' > "$WORK/nodes.tsv"
-printf '12.3\tМБ/с\tnode-fast\n11.9\tМБ/с\tnode-two\n' > "$WORK/last.txt"
+printf '12.3\tМбит/с\tnode-fast\n11.9\tМбит/с\tnode-two\n' > "$WORK/last.txt"
 printf 'node-fast\t2026-09-01\tx\tx\tx\tx\t301\t2\tx\tAA\t3407872\t6553600\t2\n' > "$WORK/stability.tsv"
 printf 'node-slow\t2026-09-02\tx\tx\tx\tx\tx\tx\tx\tAD\t0\t0\t0\n' >> "$WORK/stability.tsv"
 
@@ -113,8 +113,8 @@ check(d["runs"]["series"][0]["channel_bytes"] == 5242880, "runs.series[0].channe
 check(d["runs"]["series"][1]["winners"] == 9, "runs.series[1].winners")
 check(d["last_run"]["winners"] == 9, "last_run.winners (последний прогон)")
 check(d["last_measurement"] == [
-    {"speed_mb": 12.3, "unit": "МБ/с", "name": "node-fast"},
-    {"speed_mb": 11.9, "unit": "МБ/с", "name": "node-two"},
+    {"speed_mb": 12.3, "unit": "Мбит/с", "name": "node-fast"},
+    {"speed_mb": 11.9, "unit": "Мбит/с", "name": "node-two"},
 ], "last_measurement")
 
 nh = d["node_history"]

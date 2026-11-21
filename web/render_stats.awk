@@ -20,7 +20,7 @@
 #
 # RUNS_TSV (позиционный аргумент, может быть пустым файлом):
 #   epoch<TAB>iso<TAB>channel_bytes<TAB>threshold_bytes<TAB>total<TAB>alive<TAB>tested<TAB>good<TAB>winners
-# last: путь к speedtest_last.txt (строки "speed_MB<TAB>unit<TAB>name"),
+# last: путь к speedtest_last.txt (строки "speed_Mbit<TAB>unit<TAB>name"),
 #   необязателен - если не задан или не существует, last_measurement пуст.
 # nodes: путь к speedtest_history.tsv (строки "epoch<TAB>speed_bytes<TAB>имя"
 #   по каждой ноде-победителю каждого прогона), необязателен. В node_history
@@ -91,8 +91,8 @@ function json_num_or_null(v, has) {
   return has ? (v + 0) : "null"
 }
 
-# json_last(path) - "Последний замер" (speedtest_last.txt: speed_MB<TAB>unit<TAB>имя,
-# см. шапку файла) как JSON-массив объектов. Поле speed уже в МБ/с текстом
+# json_last(path) - "Последний замер" (speedtest_last.txt: speed_Mbit<TAB>unit<TAB>имя,
+# см. шапку файла) как JSON-массив объектов. Поле speed уже в Мбит/с текстом
 # в самом файле (так его пишет speedtest2.sh, full.txt) - единственное
 # поле во всём JSON-выводе не в байтах.
 function json_last(path,   line, f, first, out) {

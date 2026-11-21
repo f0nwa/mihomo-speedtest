@@ -303,8 +303,8 @@ validate_settings_fields() {
   if ! is_uint "$topn" || [ "$topn" -lt 1 ] || [ "$topn" -gt 50 ]; then
     _add_err topn "«Сколько нод держать в быстром пуле» (TOPN) должно быть целым от 1 до 50."
   fi
-  if ! is_uint "$enough" || [ "$enough" -lt 1 ] || [ "$enough" -gt 100 ]; then
-    _add_err enough "«Остановиться, когда найдено быстрых нод» должно быть целым от 1 до 100."
+  if ! is_uint "$enough" || [ "$enough" -gt 100 ]; then
+    _add_err enough "«Остановиться, когда найдено быстрых нод» должно быть целым от 0 до 100 (0 = без ограничения)."
   fi
   if ! is_uint "$min_winners" || [ "$min_winners" -gt 50 ]; then
     _add_err min_winners "«Минимум нод в быстром пуле» должен быть целым от 0 до 50."

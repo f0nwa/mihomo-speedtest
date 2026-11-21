@@ -64,7 +64,7 @@ MIN_FLOOR=524288       # абсолютный минимум порога, ба�
 FIXED_MIN_SPEED=0     # байт/с; >0 = простой режим: порог фиксированный (без доли от канала),
                       # в пул идут только ноды не медленнее него, медленные - лишь до MIN_WINNERS
 TOPN=15               # сколько нод держать в быстром пуле суммарно, включая WG
-ENOUGH=20             # набрали столько выше порога - дальше не меряем
+ENOUGH=20             # набрали столько выше порога - дальше не меряем; 0 = без ограничения
 MAX_TESTED=40         # максимум кандидатов на загрузку; 0 = без ограничения
 MIN_WINNERS=3         # минимум нод во всём быстром пуле, включая WG - см. select_winners()
 STABLE_MIN_UPTIME=80  # %, нода с накопленной статистикой и uptime ниже этого в fast.yaml не идёт (0 = не учитывать)
@@ -1107,6 +1107,9 @@ main() {
 case $MAX_TESTED in
   ''|*[!0-9]*) say "WARN: MAX_TESTED должен быть целым неотрицательным числом"; return 1 ;;
 esac
+case $ENOUGH in
+  ''|*[!0-9]*) say "WARN: ENOUGH должен быть целым неотрицательным числом"; return 1 ;;
+esac
 if [ -z "$BLOCK" ]; then
   say "WARN: BLOCK не задан; запустите install.sh для создания speedtest2.env"
   return 1
@@ -1241,7 +1244,7 @@ while read -r D IDX; do
   SP=$(accepted_speed "$HTTP_STATUS" "$SP_RAW")
   echo "$SP $IDX" >> "$WORK/res.txt"
   NM=$(awk -v k="$IDX" -F'	' '$1 == k {print $2}' "$WORK/map.txt")
-  echo "$((SP/1048576)).$(( (SP%1048576)*10/1048576 ))	МБ/с	$NM" >> "$WORK/full.txt"
+  echo "$(format_mbit "$SP")	Мбит/с	$NM" >> "$WORK/full.txt"
   [ "$FORCE" = 1 ] && say "  $(format_mbit "$SP") Мбит/с  $NM"
   PROGRESS_STATUS=slow
   [ "$SP" -ge "$EFFECTIVE_MIN" ] && PROGRESS_STATUS=ok
@@ -1249,7 +1252,7 @@ while read -r D IDX; do
   write_progress 1
   if [ "$SP" -ge "$EFFECTIVE_MIN" ] && remember_name "$NM" "$WORK/good_names.txt"; then
     GOOD=$((GOOD+1))
-    [ "$GOOD" -ge "$ENOUGH" ] && break
+    [ "$ENOUGH" -gt 0 ] && [ "$GOOD" -ge "$ENOUGH" ] && break
   fi
 done < "$WORK/candidates.txt"
 write_progress 0
