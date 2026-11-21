@@ -34,4 +34,19 @@ done
 [ "$(ENVFILE="$task_tmp/env" compute_min_speed 1000)" = 500 ] || { echo "FAIL: compute_min_speed не взял MIN_RATIO из env" >&2; exit 1; }
 EXTYPE=trojan write_env "$task_tmp/env"
 grep -qxF "EXTYPE='trojan'" "$task_tmp/env" && [ "$(grep -c '^EXTYPE=' "$task_tmp/env")" = 1 ] || { echo "FAIL: EXTYPE из окружения" >&2; exit 1; }
+# Переустановка сохраняет BLOCK и MIN_SPEED из файла, если они не заданы в окружении
+printf "BLOCK='SavedGeo|Filter'\nMIN_SPEED='2097152'\n" >> "$task_tmp/env"
+BLOCK= MIN_SPEED= write_env "$task_tmp/env"
+grep -qxF "BLOCK='SavedGeo|Filter'" "$task_tmp/env" || { echo "FAIL: write_env потерял сохранённый BLOCK" >&2; exit 1; }
+grep -qxF "MIN_SPEED='2097152'" "$task_tmp/env" || { echo "FAIL: write_env потерял сохранённый MIN_SPEED" >&2; exit 1; }
+# resolve_block берёт BLOCK из сохранённых настроек при переустановке
+BLOCK= BLOCK_COUNT=1 BLOCK_1='ConfigValue' ENVFILE="$task_tmp/env" resolve_block
+[ "$BLOCK" = 'SavedGeo|Filter' ] || { echo "FAIL: resolve_block не взял сохранённый BLOCK" >&2; exit 1; }
+[ "$BLOCK_SOURCE" = "из сохранённых настроек" ] || { echo "FAIL: неверный BLOCK_SOURCE: $BLOCK_SOURCE" >&2; exit 1; }
+# Окружение имеет приоритет над сохранёнными настройками
+BLOCK='OverrideBlock' ENVFILE="$task_tmp/env" resolve_block
+[ "$BLOCK" = 'OverrideBlock' ] || { echo "FAIL: BLOCK из окружения должен перекрывать сохранённый" >&2; exit 1; }
+[ "$BLOCK_SOURCE" = "переменная окружения" ] || { echo "FAIL: BLOCK_SOURCE должен быть переменная окружения" >&2; exit 1; }
+# env_number MIN_SPEED возвращает число из сохранённых настроек
+[ "$(ENVFILE="$task_tmp/env" env_number MIN_SPEED)" = '2097152' ] || { echo "FAIL: env_number не прочитал MIN_SPEED" >&2; exit 1; }
 echo 'test_candidate_limits: OK'

@@ -69,6 +69,14 @@ assert_eq "$BLOCK" preset
 assert_eq "$BLOCK_SOURCE" "переменная окружения"
 unset BLOCK BLOCK_SOURCE
 
+SAVED_ENV=$TEST_ROOT/saved.env
+printf "BLOCK='Saved|Country'\n" > "$SAVED_ENV"
+ENVFILE=$SAVED_ENV BLOCK_COUNT=1 BLOCK_1='ConfigValue' resolve_block || fail "saved BLOCK should resolve without prompt"
+assert_eq "$BLOCK" 'Saved|Country'
+assert_eq "$BLOCK_SOURCE" "из сохранённых настроек"
+rm -f "$SAVED_ENV"
+unset ENVFILE BLOCK BLOCK_SOURCE BLOCK_COUNT BLOCK_1
+
 BLOCK_COUNT=1
 BLOCK_1='Russia|RU'
 resolve_block || fail "single parsed value should resolve"

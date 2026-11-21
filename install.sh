@@ -1312,6 +1312,17 @@ resolve_block_raw() {
     return 0
   fi
 
+  envfile=${ENVFILE:-$DIR/speedtest2.env}
+  saved_block=$(sed -n "s/^BLOCK=['\"]\([^'\"]*\)['\"].*/\1/p" "$envfile" 2>/dev/null | tail -1)
+  if [ -z "$saved_block" ]; then
+    saved_block=$(sed -n "s/^BLOCK=\([^#]*\)/\1/p" "$envfile" 2>/dev/null | tail -1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  fi
+  if [ -n "$saved_block" ]; then
+    BLOCK=$saved_block
+    BLOCK_SOURCE="из сохранённых настроек"
+    return 0
+  fi
+
   count=${BLOCK_COUNT:-0}
 
   if [ "$count" -eq 1 ]; then
@@ -1648,8 +1659,16 @@ write_env() {
     else
       sed -n '/^EXTYPE=/p' "$dst" 2>/dev/null | tail -1
     fi
-    printf "BLOCK='%s'\n" "$BLOCK"
-    printf "MIN_SPEED='%s'\n" "$MIN_SPEED"
+    if [ -n "${BLOCK:-}" ]; then
+      printf "BLOCK='%s'\n" "$BLOCK"
+    else
+      sed -n '/^BLOCK=/p' "$dst" 2>/dev/null | tail -1
+    fi
+    if [ -n "${MIN_SPEED:-}" ]; then
+      printf "MIN_SPEED='%s'\n" "$MIN_SPEED"
+    else
+      sed -n '/^MIN_SPEED=/p' "$dst" 2>/dev/null | tail -1
+    fi
     # При повторной установке сохраняем пользовательские лимиты отбора.
     for limit_key in MAX_TESTED TOPN ENOUGH MIN_WINNERS; do
       saved_limit=$(sed -n "/^$limit_key=/p" "$dst" 2>/dev/null | tail -1)
@@ -2584,7 +2603,21 @@ main() {
   st_n=$((st_n + 1)); ui_step "$st_n" "$st_total" "Замер канала"
   # Итог здесь - строка с каналом и порогом (см. measure_channel_spin).
   measure_channel_spin
-  if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
+  saved_min_speed=$(env_number MIN_SPEED || :)
+  if [ -n "${MIN_SPEED:-}" ]; then
+    if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
+      ui_ok "Канал $(format_mbit "$CHANNEL") Мбит/с, порог из окружения: $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
+    else
+      ui_ok "Запасной порог из окружения: $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
+    fi
+  elif [ -n "$saved_min_speed" ] && [ "$saved_min_speed" -gt 0 ] 2>/dev/null; then
+    MIN_SPEED=$saved_min_speed
+    if [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
+      ui_ok "Канал $(format_mbit "$CHANNEL") Мбит/с, запасной порог сохранён: $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
+    else
+      ui_ok "Запасной порог сохранён: $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
+    fi
+  elif [ "$CHANNEL" -gt 0 ] 2>/dev/null; then
     MIN_SPEED=$(compute_min_speed "$CHANNEL")
     ui_ok "Канал $(format_mbit "$CHANNEL") Мбит/с, порог $(format_mbit "$MIN_SPEED") Мбит/с" "$UI_SEC"
   else
